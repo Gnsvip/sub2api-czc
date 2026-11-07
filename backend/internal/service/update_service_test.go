@@ -19,6 +19,24 @@ type updateServiceCacheStub struct {
 	data string
 }
 
+func TestCompareCustomReleaseVersions(t *testing.T) {
+	for _, tc := range []struct {
+		current, latest string
+		want            int
+	}{
+		{"0.2.19.26", "0.2.19.27", -1},
+		{"0.2.19.27", "0.2.19.26", 1},
+		{"0.2.19.27", "0.2.19.27", 0},
+		{"0.2.19", "0.2.19.1", -1},
+		{"0.2.19.0", "0.2.19", 0},
+		{"v0.2.19.27", "0.2.20", -1},
+	} {
+		t.Run(tc.current+"_to_"+tc.latest, func(t *testing.T) {
+			require.Equal(t, tc.want, compareVersions(tc.current, tc.latest))
+		})
+	}
+}
+
 func TestCustomReleaseUsesApplicationVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

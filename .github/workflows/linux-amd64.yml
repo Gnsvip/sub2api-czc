@@ -35,7 +35,10 @@ jobs:
         env:
           CI: 'true'
         run: |
-          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          # Standalone billing/soft-delete tests commit fixtures. Run the list
+          # suite in a fresh harness database so its exact counts stay isolated.
+          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -43,6 +46,7 @@ jobs:
           path: |
             ${{ runner.temp }}/backend-tests.jsonl
             ${{ runner.temp }}/integration-tests.jsonl
+            ${{ runner.temp }}/subscription-tests.jsonl
           retention-days: 7
 
   frontend:

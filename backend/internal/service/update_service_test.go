@@ -19,6 +19,32 @@ type updateServiceCacheStub struct {
 	data string
 }
 
+func TestCustomReleaseUsesApplicationVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		wantError bool
+	}{
+		{"czc-v2026.11.08.1 (0.2.19.27)", false},
+		{"czc-v2026.11.08.1", true},
+		{"czc-v2026.11.08.1 (invalid)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &UpdateService{
+				currentVersion: "0.2.19.26",
+				githubClient:   &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "czc-v2026.11.08.1", Name: tc.name}},
+			}
+			info, err := s.fetchLatestRelease(context.Background())
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "0.2.19.27", info.LatestVersion)
+			require.True(t, info.HasUpdate)
+		})
+	}
+}
+
 func (s *updateServiceCacheStub) GetUpdateInfo(context.Context) (string, error) {
 	if s.data == "" {
 		return "", errors.New("cache miss")

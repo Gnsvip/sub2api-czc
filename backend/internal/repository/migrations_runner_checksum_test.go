@@ -7,6 +7,14 @@ import (
 )
 
 func TestIsMigrationChecksumCompatible(t *testing.T) {
+	t.Run("GN2API MiniMax migration accepts only the reviewed pair", func(t *testing.T) {
+		const original = "f4c73d2dbce114ca7ade1aac51998c3465490f4f3c9b3e868e53590f3fa8601b"
+		const target = "ee42a26fc134b059bc238e8ef2ce8c8349961d285723802cc9c1f1780e462cd0"
+		require.True(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", original, target))
+		require.False(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", "unknown", target))
+		require.False(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", original, "unknown"))
+		require.False(t, isMigrationChecksumCompatible("238_other.sql", original, target))
+	})
 	t.Run("054历史checksum可兼容", func(t *testing.T) {
 		ok := isMigrationChecksumCompatible(
 			"054_drop_legacy_cache_columns.sql",

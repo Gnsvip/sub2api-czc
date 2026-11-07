@@ -30,7 +30,7 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+	githubRepo     = "Gnsvip/sub2api-czc"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -297,6 +297,24 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 	}
 
 	latestVersion := strings.TrimPrefix(release.TagName, "v")
+	// CZC tags identify the release date; the application version is the final
+	// parenthesized numeric version in the release title.
+	if strings.HasPrefix(release.TagName, "czc-") {
+		start := strings.LastIndex(release.Name, "(")
+		if start < 0 || !strings.HasSuffix(release.Name, ")") {
+			return nil, fmt.Errorf("custom release title is missing its application version")
+		}
+		latestVersion = strings.TrimSpace(release.Name[start+1 : len(release.Name)-1])
+		parts := strings.Split(latestVersion, ".")
+		if len(parts) < 3 || len(parts) > 4 {
+			return nil, fmt.Errorf("invalid custom release application version")
+		}
+		for _, part := range parts {
+			if part == "" || strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+				return nil, fmt.Errorf("invalid custom release application version")
+			}
+		}
+	}
 
 	assets := make([]Asset, len(release.Assets))
 	for i, a := range release.Assets {
@@ -530,12 +548,12 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
-// compareVersions compares two semantic versions
+// compareVersions includes the optional fourth component used by custom releases.
 func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
-	for i := 0; i < 3; i++ {
+	for i := range currentParts {
 		if currentParts[i] < latestParts[i] {
 			return -1
 		}
@@ -546,14 +564,14 @@ func compareVersions(current, latest string) int {
 	return 0
 }
 
-func parseVersion(v string) [3]int {
+func parseVersion(v string) [4]int {
 	v = strings.TrimPrefix(v, "v")
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}
 	parts := strings.Split(v, ".")
-	result := [3]int{0, 0, 0}
-	for i := 0; i < len(parts) && i < 3; i++ {
+	result := [4]int{}
+	for i := 0; i < len(parts) && i < len(result); i++ {
 		if parsed, err := strconv.Atoi(parts[i]); err == nil {
 			result[i] = parsed
 		}

@@ -7,7 +7,8 @@ different workflow for a specific task.
 ## Remotes
 
 - `upstream` is the original repository: `https://github.com/Wei-Shaw/sub2api.git`.
-- `origin` is the customized fork: `git@github.com:zuchengchen/sub2api.git`.
+- `origin` is this customized fork: `https://github.com/Gnsvip/sub2api-czc.git`.
+- `reference` is read-only: `https://github.com/zuchengchen/sub2api.git`.
 - Never push to `upstream`.
 
 ## Long-Lived Branches
@@ -152,7 +153,7 @@ Before finishing, the agent must report:
 - Whether the work still needs promotion from a feature branch to `dev-czc` or
   from `dev-czc` to `main-czc`.
 - If the user asked to deploy: the `czc-*` tag, VERSION, GitHub Release URL
-  on `zuchengchen/sub2api` (not Wei-Shaw), whether
+  on `Gnsvip/sub2api-czc` (not Wei-Shaw), whether
   `/opt/sub2api/sub2api --version` matches, and whether the running app's
   `current_release_url` is that same origin release. If any of those are
   missing, the deploy is not finished.
@@ -196,7 +197,7 @@ Before finishing, the agent must report:
   ```
 
   `resolve-release-url.sh` prints
-  `https://github.com/zuchengchen/sub2api/releases/tag/<exact-czc-tag>`
+  `https://github.com/Gnsvip/sub2api-czc/releases/tag/<exact-czc-tag>`
   when the checkout is an exact `czc-*` tag, otherwise empty. Production
   deploys MUST be built from that tag so `ReleaseURL` is non-empty. The
   admin「查看发布」link uses `current_release_url` from this ldflag. Do not
@@ -207,3 +208,11 @@ Before finishing, the agent must report:
   deploy a build whose version string still equals the previous release.
 - After install, confirm the update-check payload's `current_release_url` is
   the origin `czc-*` GitHub Release, not `github.com/Wei-Shaw/sub2api`.
+
+## This deployment fork
+
+- Base: `czc-v2026.11.07.1`, commit `eb0eba8c02dc36a78fdb94ab4a1092db82ab372d`.
+- Compile and test in GitHub Actions. Do not start local WSL, Docker, cold Go builds, or full database restores.
+- Release Linux amd64 only, with the embedded frontend and an explicit archive allowlist. Four-component versions use the workflow packaging step.
+- Keep production branding files and Nginx mappings unchanged. Notify the owner before production deployment.
+- Reuse existing tests. Remove temporary CI migration helpers with a trap.

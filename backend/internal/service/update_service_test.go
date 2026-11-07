@@ -19,6 +19,50 @@ type updateServiceCacheStub struct {
 	data string
 }
 
+func TestCompareCustomReleaseVersions(t *testing.T) {
+	for _, tc := range []struct {
+		current, latest string
+		want            int
+	}{
+		{"0.2.19.26", "0.2.19.27", -1},
+		{"0.2.19.27", "0.2.19.26", 1},
+		{"0.2.19.27", "0.2.19.27", 0},
+		{"0.2.19", "0.2.19.1", -1},
+		{"0.2.19.0", "0.2.19", 0},
+		{"v0.2.19.27", "0.2.20", -1},
+	} {
+		t.Run(tc.current+"_to_"+tc.latest, func(t *testing.T) {
+			require.Equal(t, tc.want, compareVersions(tc.current, tc.latest))
+		})
+	}
+}
+
+func TestCustomReleaseUsesApplicationVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		wantError bool
+	}{
+		{"czc-v2026.11.08.1 (0.2.19.27)", false},
+		{"czc-v2026.11.08.1", true},
+		{"czc-v2026.11.08.1 (invalid)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &UpdateService{
+				currentVersion: "0.2.19.26",
+				githubClient:   &updateServiceGitHubClientStub{release: &GitHubRelease{TagName: "czc-v2026.11.08.1", Name: tc.name}},
+			}
+			info, err := s.fetchLatestRelease(context.Background())
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "0.2.19.27", info.LatestVersion)
+			require.True(t, info.HasUpdate)
+		})
+	}
+}
+
 func (s *updateServiceCacheStub) GetUpdateInfo(context.Context) (string, error) {
 	if s.data == "" {
 		return "", errors.New("cache miss")

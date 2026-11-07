@@ -1,0 +1,101 @@
+name: Package verified release tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      validated_run_id:
+        description: Successful Verified Linux amd64 run for the same application source
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOMEMLIMIT: 3GiB
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Require a release tag and previously validated application source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATED_RUN_ID: ${{ inputs.validated_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, urllib.request
+          assert os.environ['GITHUB_REF_TYPE'] == 'tag', 'Release tag required'
+          tag = os.environ['GITHUB_REF_NAME']
+          assert re.fullmatch(r'czc-v\d{4}\.\d{2}\.\d{2}\.\d+', tag)
+          run_id = os.environ['VALIDATED_RUN_ID']
+          assert run_id.isdigit()
+          repo = os.environ['GITHUB_REPOSITORY']
+          request = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}', headers={'Authorization': 'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              run = json.load(response)
+          assert run['conclusion'] == 'success' and run['status'] == 'completed'
+          assert run['path'] == '.github/workflows/linux-amd64.yml'
+          assert run['repository']['full_name'] == repo
+          verified = run['head_sha']
+          subprocess.run(['git', 'merge-base', '--is-ancestor', verified, 'HEAD'], check=True)
+          changed = subprocess.check_output(['git','diff','--name-only',verified,'HEAD'], text=True).splitlines()
+          allowed = {'backend/cmd/server/VERSION', f'.github/releases/{tag}.md', '.github/workflows/release-linux-amd64.yml'}
+          assert set(changed) <= allowed, 'Application source changed after validation: '+repr(set(changed)-allowed)
+          assert subprocess.check_output(['git','rev-list','-n','1',tag],text=True).strip() == os.environ['GITHUB_SHA']
+          print(f'Validated application source: {verified}; run: {run_id}; tag: {tag}')
+          PY
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run build
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Build embedded Linux amd64 binary from the exact tag
+        working-directory: backend
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p ../release-output
+          version=$(sh scripts/resolve-version.sh)
+          release_url=$(sh scripts/resolve-release-url.sh)
+          test "$release_url" = "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+          go build -tags embed -trimpath -ldflags="-s -w -X main.Version=$version -X main.Commit=$GITHUB_SHA -X main.ReleaseURL=$release_url -X main.BuildType=release" -o ../release-output/sub2api ./cmd/server
+          ../release-output/sub2api --version
+      - name: Package the explicit allowlist
+        run: |
+          version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
+          cp LICENSE release-output/LICENSE
+          cp deploy/config.example.yaml release-output/config.example.yaml
+          cp deploy/sub2api.service release-output/sub2api.service
+          cd release-output
+          tar -czf "sub2api_${version}_linux_amd64.tar.gz" sub2api LICENSE config.example.yaml sub2api.service
+          tar -tzf "sub2api_${version}_linux_amd64.tar.gz" > manifest.txt
+          printf 'sub2api\nLICENSE\nconfig.example.yaml\nsub2api.service\n' | diff - manifest.txt
+          sha256sum "sub2api_${version}_linux_amd64.tar.gz" > checksums.txt
+          sha256sum -c checksums.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-amd64
+          path: |
+            release-output/*.tar.gz
+            release-output/checksums.txt
+            release-output/manifest.txt
+          retention-days: 14

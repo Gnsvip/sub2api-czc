@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 BACKEND_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$BACKEND_DIR/.." && pwd)"
-ORIGIN_RELEASE_BASE="https://github.com/zuchengchen/sub2api/releases/tag"
+ORIGIN_RELEASE_BASE="https://github.com/Gnsvip/sub2api-czc/releases/tag"
 
 # Only tagged czc-* checkouts represent an immutable customized release page.
 # Source / untagged builds print nothing so the admin UI does not claim an

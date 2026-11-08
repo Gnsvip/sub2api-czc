@@ -123,6 +123,9 @@ func openAITiboAccountSkipReason(account *Account, now time.Time) string {
 	if account == nil || account.ID <= 0 || !isOpenAITiboAccount(account) {
 		return "not_tibo_account"
 	}
+	if !account.IsOpenAIAstraProbeEnabled() {
+		return "probe_disabled"
+	}
 	if account.Status != StatusActive {
 		return "not_active"
 	}

@@ -131,9 +131,13 @@
           :model="route.model"
           :verdict="route.verdict"
           :samples="route.recent_samples"
+          :probe-enabled="route.model === 'gpt-6-astra' ? astraProbeEnabled : undefined"
+          :probe-saving="astraProbeSaving"
+          @toggle-probe="toggleAstraProbe"
           compact
         />
       </div>
+      <p v-if="astraProbeError" role="alert" class="mb-1 text-[10px] text-red-500">{{ astraProbeError }}</p>
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
         <UsageProgressBar
           v-if="usageInfo?.five_hour"
@@ -219,9 +223,13 @@
           :model="route.model"
           :verdict="route.verdict"
           :samples="route.recent_samples"
+          :probe-enabled="route.model === 'gpt-6-astra' ? astraProbeEnabled : undefined"
+          :probe-saving="astraProbeSaving"
+          @toggle-probe="toggleAstraProbe"
           compact
         />
       </div>
+      <p v-if="astraProbeError" role="alert" class="mb-1 text-[10px] text-red-500">{{ astraProbeError }}</p>
       <OllamaCloudUsageCell
         v-if="account.ollama_cloud_usage?.eligible"
         :account="account"
@@ -859,8 +867,35 @@ const hasOpenAIUsageFallback = computed(() => {
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
-const codexTiboRoutes = computed(() =>
-  (props.account.codex_turn_tickets ?? []).flatMap((ticket) =>
+const astraProbeEnabled = ref(props.account.extra?.openai_astra_probe_enabled !== false)
+const astraProbeSaving = ref(false)
+const astraProbeError = ref<string | null>(null)
+watch(() => [props.account.id, props.account.extra?.openai_astra_probe_enabled], () => {
+  astraProbeEnabled.value = props.account.extra?.openai_astra_probe_enabled !== false
+  astraProbeError.value = null
+})
+
+async function toggleAstraProbe() {
+  if (astraProbeSaving.value) return
+  const accountId = props.account.id
+  astraProbeSaving.value = true
+  astraProbeError.value = null
+  try {
+    const updated = await adminAPI.accounts.setAstraProbeEnabled(accountId, !astraProbeEnabled.value)
+    if (unmounted.value || props.account.id !== accountId) return
+    astraProbeEnabled.value = updated.extra?.openai_astra_probe_enabled !== false
+    emit('account-updated', updated)
+  } catch {
+    if (!unmounted.value && props.account.id === accountId) {
+      astraProbeError.value = t('admin.accounts.openai.astraProbeSaveFailed')
+    }
+  } finally {
+    astraProbeSaving.value = false
+  }
+}
+
+const codexTiboRoutes = computed(() => {
+  const routes = (props.account.codex_turn_tickets ?? []).flatMap((ticket) =>
     (ticket.tibo_routes ?? []).map((route) => ({
       model: ticket.model,
       route: route.route,
@@ -868,7 +903,12 @@ const codexTiboRoutes = computed(() =>
       recent_samples: route.recent_samples
     }))
   )
-)
+  // Keep the switch available before the first sample and while probing is off.
+  if (props.account.platform === 'openai' && ['oauth', 'setup-token', 'apikey'].includes(props.account.type) && !routes.some(route => route.model === 'gpt-6-astra')) {
+    routes.unshift({ model: 'gpt-6-astra', route: 'http', verdict: 'unknown', recent_samples: [] })
+  }
+  return routes
+})
 
 const openAISevenDayEstimatedTotalCost = computed(() => {
   const sevenDay = usageInfo.value?.seven_day

@@ -72,3 +72,31 @@ func TestAdminService_SetOpenAICreditsEnabled_RejectsUnsupportedAccounts(t *test
 		})
 	}
 }
+
+func TestAdminService_SetOpenAIAstraProbeEnabled(t *testing.T) {
+	for _, kind := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
+		t.Run(kind, func(t *testing.T) {
+			reset := time.Now().Add(time.Hour)
+			account := &Account{ID: 45, Platform: PlatformOpenAI, Type: kind, Status: StatusActive,
+				Schedulable: false, RateLimitResetAt: &reset, Extra: map[string]any{OpenAIAstraPolicyExtraKey: "preserve history"}}
+			repo := newOpenAICreditsRepo(account)
+			svc := &adminServiceImpl{accountRepo: repo}
+			require.True(t, account.IsOpenAIAstraProbeEnabled(), "existing accounts remain enabled")
+			for _, enabled := range []bool{false, true} {
+				updated, err := svc.SetOpenAIAstraProbeEnabled(context.Background(), account.ID, enabled)
+				require.NoError(t, err)
+				require.Equal(t, enabled, updated.IsOpenAIAstraProbeEnabled())
+				require.Equal(t, "preserve history", updated.Extra[OpenAIAstraPolicyExtraKey])
+				require.False(t, updated.Schedulable)
+				require.Equal(t, &reset, updated.RateLimitResetAt)
+				require.Zero(t, repo.clearRateLimitCalls)
+			}
+			require.Equal(t, []map[string]any{{OpenAIAstraProbeEnabledExtraKey: false}, {OpenAIAstraProbeEnabledExtraKey: true}}, repo.extraUpdates)
+		})
+	}
+	repo := newOpenAICreditsRepo(&Account{ID: 46, Platform: PlatformAnthropic, Type: AccountTypeOAuth})
+	svc := &adminServiceImpl{accountRepo: repo}
+	_, err := svc.SetOpenAIAstraProbeEnabled(context.Background(), 46, false)
+	require.Error(t, err)
+	require.Empty(t, repo.extraUpdates)
+}

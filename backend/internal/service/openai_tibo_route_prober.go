@@ -42,6 +42,9 @@ func (s *OpenAIGatewayService) startOpenAITiboProbeLocked(state *openAITiboAccou
 }
 
 func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, blocking bool, cfg openAITiboSettings, now time.Time) <-chan struct{} {
+	if account != nil && !account.IsOpenAIAstraProbeEnabled() {
+		return nil
+	}
 	r := state.route(route)
 	if r.inflight {
 		return r.done
@@ -103,7 +106,13 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 		}
 	}
 	defer func() { <-sem }()
-	if account == nil {
+	if account != nil && openAITiboAccountSkipReason(account, time.Now()) != "" {
+		s.abortOpenAITiboProbe(state, route, nil)
+		return
+	}
+	// Re-read queued request snapshots too: an administrator may have switched
+	// probing off while this probe waited for a concurrency slot.
+	if account == nil || s.accountRepo != nil {
 		latest, err := s.latestOpenAITiboAccount(ctx, state.accountID)
 		if err != nil {
 			// Read failure or deleted row: retry shortly; enrollment drops
@@ -111,18 +120,20 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 			s.abortOpenAITiboProbe(state, route, nil)
 			return
 		}
-		if hold := s.openAITiboHoldFor(s.withOpenAIQuotaAutoPauseContext(ctx), latest, time.Now()); hold.parked || !hold.until.IsZero() {
-			// Ineligible, rate-limited or disabled accounts are not sampled; keep
-			// the last definitive sparkline until they are eligible again.
-			s.abortOpenAITiboProbe(state, route, &hold)
+		if account == nil {
+			if hold := s.openAITiboHoldFor(s.withOpenAIQuotaAutoPauseContext(ctx), latest, time.Now()); hold.parked || !hold.until.IsZero() {
+				// Ineligible, rate-limited or disabled accounts are not sampled; keep
+				// the last definitive sparkline until they are eligible again.
+				s.abortOpenAITiboProbe(state, route, &hold)
+				return
+			}
+			account = latest
+		} else if !latest.IsOpenAIAstraProbeEnabled() {
+			// Request probes retain their original credential/routing snapshot;
+			// only the independently managed switch must be authoritative here.
+			s.abortOpenAITiboProbe(state, route, nil)
 			return
 		}
-		account = latest
-	} else if skip := openAITiboAccountSkipReason(account, time.Now()); skip != "" {
-		// Request-path snapshot: it may be stale, so it only aborts this
-		// probe; the next enrollment applies the authoritative hold.
-		s.abortOpenAITiboProbe(state, route, nil)
-		return
 	}
 	startedAt := time.Now()
 	sample := s.probeOpenAITiboHTTP(ctx, account)

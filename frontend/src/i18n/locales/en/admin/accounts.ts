@@ -800,6 +800,10 @@ export default {
           unavailable: 'Unavailable'
         },
         codexTiboRecentSamples: 'Last 24 Tibo probes',
+        astraProbeToggle: 'Automatic Astra probes',
+        astraProbeToggleDesc: 'Controls automatic Astra probes for this account only. Disabling stops new probes; requests already sent may finish. History is retained.',
+        astraProbeDisabled: 'Disabled',
+        astraProbeSaveFailed: 'Failed to save the Astra probe setting. Please retry.',
         codexTiboSampleEmpty: 'No probe yet',
         codexTiboRouteConfirmed: 'Confirmed: {verdict}',
         codexTiboRouteCheckedAt: 'Last checked: {time}',

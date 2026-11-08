@@ -34,6 +34,15 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run build
       - run: pnpm --dir frontend run lint:check
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/frontend-tests.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: google-frontend-tests
+          path: ${{ runner.temp }}/frontend-tests.json
+          retention-days: 7
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -52,6 +61,15 @@ jobs:
       - name: Compile restored services and tests
         working-directory: backend
         run: go test -tags=unit ./... -run '^$'
+      - name: Backend regression tests
+        working-directory: backend
+        run: go test -tags=unit ./... -count=1 -json > "$RUNNER_TEMP/backend-tests.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: google-backend-tests
+          path: ${{ runner.temp }}/backend-tests.jsonl
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         if: always()
         with:

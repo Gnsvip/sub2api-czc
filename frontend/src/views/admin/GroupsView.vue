@@ -1248,6 +1248,121 @@
           </div>
         </div>
 
+        <!-- 支持的模型系列（仅 antigravity 平台） -->
+        <div v-if="createForm.platform === 'antigravity'" class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.supportedScopes.title") }}
+            </label>
+            <!-- Help Tooltip -->
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                :stroke-width="2"
+                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                >
+                  <p class="text-xs leading-relaxed text-gray-300">
+                    {{ t("admin.groups.supportedScopes.tooltip") }}
+                  </p>
+                  <div
+                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="createForm.supported_model_scopes.includes('claude')"
+                @change="toggleCreateScope('claude')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.claude")
+              }}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="
+                  createForm.supported_model_scopes.includes('gemini_text')
+                "
+                @change="toggleCreateScope('gemini_text')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.geminiText")
+              }}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="
+                  createForm.supported_model_scopes.includes('gemini_image')
+                "
+                @change="toggleCreateScope('gemini_image')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.geminiImage")
+              }}</span>
+            </label>
+          </div>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.supportedScopes.hint") }}
+          </p>
+        </div>
+
+        <!-- MCP XML 协议注入（仅 antigravity 平台） -->
+        <div v-if="createForm.platform === 'antigravity'" class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.mcpXml.title") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                :stroke-width="2"
+                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                >
+                  <p class="text-xs leading-relaxed text-gray-300">
+                    {{ t("admin.groups.mcpXml.tooltip") }}
+                  </p>
+                  <div
+                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <Toggle v-model="createForm.mcp_xml_inject" />
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              {{
+                createForm.mcp_xml_inject
+                  ? t("admin.groups.mcpXml.enabled")
+                  : t("admin.groups.mcpXml.disabled")
+              }}
+            </span>
+          </div>
+        </div>
+
         <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2722,6 +2837,121 @@
           </div>
         </div>
 
+        <!-- 支持的模型系列（仅 antigravity 平台） -->
+        <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.supportedScopes.title") }}
+            </label>
+            <!-- Help Tooltip -->
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                :stroke-width="2"
+                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                >
+                  <p class="text-xs leading-relaxed text-gray-300">
+                    {{ t("admin.groups.supportedScopes.tooltip") }}
+                  </p>
+                  <div
+                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="editForm.supported_model_scopes.includes('claude')"
+                @change="toggleEditScope('claude')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.claude")
+              }}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="
+                  editForm.supported_model_scopes.includes('gemini_text')
+                "
+                @change="toggleEditScope('gemini_text')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.geminiText")
+              }}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="
+                  editForm.supported_model_scopes.includes('gemini_image')
+                "
+                @change="toggleEditScope('gemini_image')"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+              />
+              <span class="text-sm text-gray-700 dark:text-gray-300">{{
+                t("admin.groups.supportedScopes.geminiImage")
+              }}</span>
+            </label>
+          </div>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.supportedScopes.hint") }}
+          </p>
+        </div>
+
+        <!-- MCP XML 协议注入（仅 antigravity 平台） -->
+        <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
+          <div class="mb-1.5 flex items-center gap-1">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.mcpXml.title") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                :stroke-width="2"
+                class="cursor-help text-gray-400 transition-colors hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                >
+                  <p class="text-xs leading-relaxed text-gray-300">
+                    {{ t("admin.groups.mcpXml.tooltip") }}
+                  </p>
+                  <div
+                    class="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 bg-gray-900 dark:bg-gray-800"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <Toggle v-model="editForm.mcp_xml_inject" />
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              {{
+                editForm.mcp_xml_inject
+                  ? t("admin.groups.mcpXml.enabled")
+                  : t("admin.groups.mcpXml.disabled")
+              }}
+            </span>
+          </div>
+        </div>
+
         <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3938,6 +4168,7 @@
 </template>
 
 <script setup lang="ts">
+import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
@@ -4288,6 +4519,24 @@ const exclusiveOptions = computed(() => [
   { value: "false", label: t("admin.groups.nonExclusive") },
 ]);
 
+const toggleCreateScope = (scope: string) => {
+  const idx = createForm.supported_model_scopes.indexOf(scope);
+  if (idx === -1) {
+    createForm.supported_model_scopes.push(scope);
+  } else {
+    createForm.supported_model_scopes.splice(idx, 1);
+  }
+};
+
+const toggleEditScope = (scope: string) => {
+  const idx = editForm.supported_model_scopes.indexOf(scope);
+  if (idx === -1) {
+    editForm.supported_model_scopes.push(scope);
+  } else {
+    editForm.supported_model_scopes.splice(idx, 1);
+  }
+};
+
 const platformOptions = computed(() =>
   GROUP_PLATFORM_OPTIONS.filter(
     (option) => !authStore.isSimpleMode || option.value !== "composite",
@@ -4326,6 +4575,7 @@ const compositeRouteEndpointOptions = computed(() => [
     label: t("admin.groups.compositeRoutes.endpoints.embeddings"),
   },
   { value: "images", label: t("admin.groups.compositeRoutes.endpoints.images") },
+  { value: "gemini", label: t("admin.groups.compositeRoutes.endpoints.gemini") },
 ]);
 
 const compositeRouteMatchOptions = computed(() => [
@@ -4626,6 +4876,8 @@ const createForm = reactive({
   profit_min_margin_percent: 0,
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
+  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
+  mcp_xml_inject: false,
   claude_code_only: false,
   fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -4968,6 +5220,8 @@ const editForm = reactive({
   profit_min_margin_percent: 0,
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
+  supported_model_scopes: ["claude", "gemini_text", "gemini_image"] as string[],
+  mcp_xml_inject: false,
   claude_code_only: false,
   fallback_group_id: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -5418,6 +5672,8 @@ const closeCreateModal = () => {
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
   createForm.profit_safety_buffer_percent = 0;
+  createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
+  createForm.mcp_xml_inject = false;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   resetMessagesDispatchFormState(createForm);
@@ -5551,6 +5807,8 @@ const handleCreateGroup = async () => {
         createModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(createModelAllowlistState),
+      supported_model_scopes: normalizeSupportedModelScopesForPlatform(createForm.platform, createForm.supported_model_scopes),
+      mcp_xml_inject: createForm.platform === "antigravity" && createForm.mcp_xml_inject,
       // 创建时固定账号 manifest 固定发送关闭状态（后端创建路径禁止开启）
       codex_models_manifest_config: createCodexManifestDefaults(),
       messages_dispatch_model_config:
@@ -5702,6 +5960,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.profit_safety_buffer_percent = decimalToPercent(
     group.profit_safety_buffer ?? 0,
   );
+  editForm.supported_model_scopes = group.supported_model_scopes ?? ["claude", "gemini_text", "gemini_image"];
+  editForm.mcp_xml_inject = group.mcp_xml_inject ?? false;
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
@@ -5877,6 +6137,8 @@ const handleUpdateGroup = async () => {
         editModelRoutingRules.value,
       ),
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
+      supported_model_scopes: normalizeSupportedModelScopesForPlatform(editForm.platform, editForm.supported_model_scopes),
+      mcp_xml_inject: editForm.platform === "antigravity" && editForm.mcp_xml_inject,
       // 非 openai 平台提交关闭状态，与后端归一化一致
       codex_models_manifest_config:
         editForm.platform === "openai"

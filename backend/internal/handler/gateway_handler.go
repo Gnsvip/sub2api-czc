@@ -2665,3 +2665,14 @@ func NewGatewayHandler(
 ) *GatewayHandler {
 	return NewGatewayHandlerWithGoogleServices(gatewayService, openAIGatewayService, nil, nil, userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool, errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
 }
+
+func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service.APIKey {
+	if apiKey == nil || group == nil {
+		return apiKey
+	}
+	cloned := *apiKey
+	groupID := group.ID
+	cloned.GroupID = &groupID
+	cloned.Group = group
+	return &cloned
+}

@@ -128,7 +128,7 @@ func NewAccountHandlerWithGoogleServices(
 type CreateAccountRequest struct {
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
-	Platform                string         `json:"platform" binding:"required"`
+	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai grok kimi zhipu deepseek minimax opencode_go command_code cline gemini antigravity"`
 	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
 	Credentials             map[string]any `json:"credentials" binding:"required"`
 	Extra                   map[string]any `json:"extra"`
@@ -196,7 +196,7 @@ type BulkUpdateAccountFilters struct {
 
 // CheckMixedChannelRequest represents check mixed channel risk request
 type CheckMixedChannelRequest struct {
-	Platform  string  `json:"platform" binding:"required"`
+	Platform  string  `json:"platform" binding:"required,oneof=anthropic openai grok kimi zhipu deepseek minimax opencode_go command_code cline gemini antigravity"`
 	GroupIDs  []int64 `json:"group_ids"`
 	AccountID *int64  `json:"account_id"`
 }
@@ -3041,7 +3041,7 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	var req struct {
-		Platform     string            `json:"platform" binding:"required"`
+		Platform     string            `json:"platform" binding:"required,oneof=anthropic openai grok kimi zhipu deepseek minimax opencode_go command_code cline gemini antigravity"`
 		Type         string            `json:"type" binding:"required"`
 		BaseURL      string            `json:"base_url"`
 		APIKey       string            `json:"api_key" binding:"required"`

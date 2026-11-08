@@ -37,7 +37,7 @@ jobs:
         run: |
           # Standalone billing/soft-delete tests commit fixtures. Run the list
           # suite in a fresh harness database so its exact counts stay isolated.
-          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()

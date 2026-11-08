@@ -481,5 +481,7 @@ func (s *AntigravityOAuthService) BuildAccountCredentials(tokenInfo *Antigravity
 
 // Stop 停止服务
 func (s *AntigravityOAuthService) Stop() {
-	s.sessionStore.Stop()
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Stop()
+	}
 }

@@ -5,8 +5,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
@@ -205,4 +209,61 @@ func TestForwardListModels_ResponseOverReadLimitFails(t *testing.T) {
 
 	_, err := svc.ForwardListModels(context.Background(), account)
 	require.ErrorContains(t, err, "exceeds 16 bytes")
+}
+
+type vertexModelsTokenCacheStub struct {
+	token string
+	calls int
+}
+
+func (c *vertexModelsTokenCacheStub) GetAccessToken(context.Context, string) (string, error) {
+	c.calls++
+	if c.token == "" {
+		return "", errors.New("missing token")
+	}
+	return c.token, nil
+}
+
+func (c *vertexModelsTokenCacheStub) SetAccessToken(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (c *vertexModelsTokenCacheStub) DeleteAccessToken(context.Context, string) error {
+	return nil
+}
+
+func (c *vertexModelsTokenCacheStub) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (c *vertexModelsTokenCacheStub) ReleaseRefreshLock(context.Context, string) error {
+	return nil
+}
+
+func vertexModelSyncTestAccount(credentials map[string]any) *Account {
+	merged := map[string]any{
+		"service_account_json": map[string]any{
+			"type":         "service_account",
+			"project_id":   "proj",
+			"private_key":  "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n",
+			"client_email": "svc@proj.iam.gserviceaccount.com",
+		},
+	}
+	for key, value := range credentials {
+		merged[key] = value
+	}
+	return &Account{
+		ID:          173,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeServiceAccount,
+		Credentials: merged,
+	}
+}
+
+func vertexModelsJSONResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
 }

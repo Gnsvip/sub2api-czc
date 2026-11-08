@@ -158,9 +158,9 @@ func TestGeminiForwardNative_VertexCachedContentNotFoundReturnsStandardForbidden
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, httpStub, repo := newGeminiCachedContentTestService(tc.status, tc.body)
-			svc.tokenProvider = NewGeminiTokenProvider(nil, &fakeGeminiTokenCache{token: "ya29.test-token"}, nil)
+			svc.tokenProvider = NewGeminiTokenProvider(nil, &vertexModelsTokenCacheStub{token: "ya29.test-token"}, nil)
 			c, rec := newGeminiNativeTestContext(t)
-			account := vertexServiceAccount()
+			account := vertexModelSyncTestAccount(nil)
 			account.ID = 811
 
 			result, err := svc.ForwardNative(context.Background(), c, account,

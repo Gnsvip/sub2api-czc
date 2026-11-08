@@ -916,7 +916,9 @@ func (s *GeminiOAuthService) BuildAccountCredentials(tokenInfo *GeminiTokenInfo)
 }
 
 func (s *GeminiOAuthService) Stop() {
-	s.sessionStore.Stop()
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Stop()
+	}
 }
 
 func (s *GeminiOAuthService) fetchProjectID(ctx context.Context, accessToken, proxyURL string) (string, string, error) {

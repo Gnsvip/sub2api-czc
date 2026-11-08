@@ -21,11 +21,11 @@ func TestOpenCodeGoPlatformMigration(t *testing.T) {
 	require.Contains(t, sql, "position('opencode_go' IN monitor_constraint_def) = 0")
 	require.Contains(t, sql, "position('opencode_go' IN template_constraint_def) = 0")
 	require.Contains(t, sql,
-		"CHECK (platform IN ('anthropic', 'openai', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
+		"CHECK (platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
 	require.Contains(t, sql,
-		"CHECK (target_platform IN ('anthropic', 'openai', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
+		"CHECK (target_platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
 	require.Contains(t, sql,
-		"CHECK (provider IN ('openai', 'anthropic', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
+		"CHECK (provider IN ('openai', 'anthropic', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
 	require.NotContains(t, sql, "gemini")
 	require.NotContains(t, sql, "antigravity")
 }

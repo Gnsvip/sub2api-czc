@@ -1,4 +1,21 @@
 export default {
+  astraAutoGroup: {
+    title: 'Astra 自动换组',
+    description: '根据后台 Astra 检测结果，将 OpenAI OAuth 账号在所选两组之间移动。默认关闭，与每个账号的 Astra 检测开关独立。',
+    enabled: '启用自动换组',
+    healthy: '检测正常时的分组',
+    degraded: '检测降级时的分组',
+    choose: '请选择已有 OpenAI 分组',
+    unavailable: '原分组已不可用，请重新选择',
+    scope: '仅处理已在所选两组之一的账号，保留其他分组归属；超时或请求错误不会触发换组。关闭换组仍可继续检测，关闭账号的 Astra 检测则不再自动换组。修改配置后等待新一轮检测生效。',
+    invalid: '开启前请选择两个不同且有效的 OpenAI 分组。',
+    save: '保存换组设置',
+    saved: '换组设置已保存',
+    retry: '重新加载',
+    loadFailed: '换组设置加载失败，请重试',
+    saveFailed: '换组设置保存失败，请重试',
+  },
+
     settings: {
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',

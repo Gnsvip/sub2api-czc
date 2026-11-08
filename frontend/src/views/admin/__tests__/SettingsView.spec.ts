@@ -7,8 +7,11 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+import AstraAutoGroupSettings from "@/components/admin/settings/AstraAutoGroupSettings.vue";
 
 const {
+  getAstraAutoGroupSettings,
+  updateAstraAutoGroupSettings,
   getSettings,
   updateSettings,
   getWebSearchEmulationConfig,
@@ -37,6 +40,8 @@ const {
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
+  getAstraAutoGroupSettings: vi.fn().mockResolvedValue({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 }),
+  updateAstraAutoGroupSettings: vi.fn().mockImplementation(async (value) => value),
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
@@ -84,6 +89,8 @@ const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 vi.mock("@/api", () => ({
   adminAPI: {
     settings: {
+      getAstraAutoGroupSettings,
+      updateAstraAutoGroupSettings,
       getSettings,
       updateSettings,
       getWebSearchEmulationConfig,
@@ -707,6 +714,8 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     updateOllamaCloudUsageSettings.mockImplementation(async (payload) => payload);
     getGroups.mockResolvedValue([]);
+    getAstraAutoGroupSettings.mockReset().mockResolvedValue({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 });
+    updateAstraAutoGroupSettings.mockReset().mockImplementation(async (value) => value);
     listProxies.mockResolvedValue({
       items: [],
     });
@@ -1771,6 +1780,8 @@ describe("admin SettingsView wechat connect controls", () => {
       rules: [],
     });
     getGroups.mockResolvedValue([]);
+    getAstraAutoGroupSettings.mockReset().mockResolvedValue({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 });
+    updateAstraAutoGroupSettings.mockReset().mockImplementation(async (value) => value);
     listProxies.mockResolvedValue({
       items: [],
     });
@@ -1986,6 +1997,8 @@ describe("admin SettingsView platform quota matrix", () => {
     getRectifierSettings.mockResolvedValue({});
     getBetaPolicySettings.mockResolvedValue({});
     getGroups.mockResolvedValue([]);
+    getAstraAutoGroupSettings.mockReset().mockResolvedValue({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 });
+    updateAstraAutoGroupSettings.mockReset().mockImplementation(async (value) => value);
     listProxies.mockResolvedValue({ items: [] });
     getProviders.mockResolvedValue({ data: [] });
   });
@@ -2094,5 +2107,85 @@ describe("admin SettingsView platform quota matrix", () => {
     const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
+  });
+});
+
+
+describe("Astra automatic group settings", () => {
+  beforeEach(() => {
+    getAstraAutoGroupSettings.mockReset().mockResolvedValue({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 });
+    updateAstraAutoGroupSettings.mockReset().mockImplementation(async (value) => value);
+    getGroups.mockReset().mockResolvedValue([
+      { id: 11, name: "My Pro", platform: "openai", status: "active" },
+      { id: 12, name: "My Backup", platform: "openai", status: "active" },
+      { id: 13, name: "Inactive", platform: "openai", status: "disabled" },
+      { id: 14, name: "Claude", platform: "anthropic", status: "active" },
+    ]);
+  });
+
+  it("validates distinct active groups, saves IDs and reloads the saved choice", async () => {
+    const wrapper = mount(AstraAutoGroupSettings);
+    await flushPromises();
+    expect(getGroups).toHaveBeenCalledWith("openai");
+    expect(wrapper.text()).toContain("My Pro");
+    expect(wrapper.text()).not.toContain("Inactive");
+    expect(wrapper.text()).not.toContain("Claude");
+    await wrapper.get('[data-testid="astra-auto-group-enabled"]').setValue(true);
+    const save = wrapper.get('[data-testid="astra-auto-group-save"]');
+    expect(save.attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="astra-auto-group-healthy"]').setValue("11");
+    await wrapper.get('[data-testid="astra-auto-group-degraded"]').setValue("11");
+    expect(save.attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="astra-auto-group-degraded"]').setValue("12");
+    const selected = { enabled: true, healthy_group_id: 11, degraded_group_id: 12 };
+    let finish!: (value: typeof selected) => void;
+    updateAstraAutoGroupSettings.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await save.trigger("click");
+    await save.trigger("click");
+    expect(updateAstraAutoGroupSettings).toHaveBeenCalledTimes(1);
+    expect(updateAstraAutoGroupSettings).toHaveBeenCalledWith(selected);
+    expect(wrapper.get("fieldset").attributes("disabled")).toBeDefined();
+    finish(selected);
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    wrapper.unmount();
+    getAstraAutoGroupSettings.mockResolvedValueOnce(selected);
+    const reloaded = mount(AstraAutoGroupSettings);
+    await flushPromises();
+    expect((reloaded.get('[data-testid="astra-auto-group-enabled"]').element as HTMLInputElement).checked).toBe(true);
+    expect((reloaded.get('[data-testid="astra-auto-group-healthy"]').element as HTMLSelectElement).value).toBe("11");
+    reloaded.unmount();
+  });
+
+  it("can disable after a target disappears and does not claim success on a failed save", async () => {
+    getAstraAutoGroupSettings.mockResolvedValueOnce({ enabled: true, healthy_group_id: 11, degraded_group_id: 99 });
+    const wrapper = mount(AstraAutoGroupSettings);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="astra-auto-group-save"]').attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="astra-auto-group-enabled"]').setValue(false);
+    updateAstraAutoGroupSettings.mockRejectedValueOnce(new Error("save unavailable"));
+    await wrapper.get('[data-testid="astra-auto-group-save"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="astra-auto-group-save"]').trigger("click");
+    await flushPromises();
+    expect(updateAstraAutoGroupSettings).toHaveBeenLastCalledWith({ enabled: false, healthy_group_id: 11, degraded_group_id: 99 });
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("blocks saving when loading fails and supports retry", async () => {
+    getAstraAutoGroupSettings.mockRejectedValueOnce(new Error("load unavailable"));
+    const wrapper = mount(AstraAutoGroupSettings);
+    await flushPromises();
+    expect(wrapper.get("fieldset").attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="astra-auto-group-save"]').trigger("click");
+    expect(updateAstraAutoGroupSettings).not.toHaveBeenCalled();
+    await wrapper.findAll("button").find(b => b.text().includes("astraAutoGroup.retry"))!.trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.get("fieldset").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
   });
 });

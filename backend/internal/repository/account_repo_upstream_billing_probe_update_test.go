@@ -109,6 +109,27 @@ func probeBoolPtr(value bool) *bool {
 	return &value
 }
 
+func TestLockAndMergeAccountProbeExtraPreservesAstraSwitch(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
+		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+		WillReturnRows(sqlmock.NewRows(accountProbeExtraMockColumns()).
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{"openai_astra_probe_enabled":false}`)))
+	account := &service.Account{ID: 27, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{service.OpenAIAstraProbeEnabledExtraKey: true, "unrelated": "keep"}}
+	extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, false, extra[service.OpenAIAstraProbeEnabledExtraKey], "stale forms cannot re-enable probes")
+	require.Equal(t, "keep", extra["unrelated"])
+	require.Equal(t, false, filterSchedulerExtra(extra)[service.OpenAIAstraProbeEnabledExtraKey])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 // The probe switch drives the rate-sync switch and never the other way round:
 // syncing depends on probing, so a row where sync is on but the probe key is
 // missing must lose the sync flag instead of silently gaining periodic

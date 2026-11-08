@@ -739,14 +739,16 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
-	// Preserve the latest attempt under the row lock; a stale admin form must
-	// not erase the card reservation used to deduplicate automatic resets.
-	delete(extra, service.OpenAIAutoResetCreditStateExtraKey)
-	if state, ok := currentExtra[service.OpenAIAutoResetCreditStateExtraKey]; ok {
-		if extra == nil {
-			extra = make(map[string]any)
+	// Preserve independently managed state under the row lock. A stale edit
+	// must not erase reset reservations or undo the account's probe switch.
+	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey} {
+		delete(extra, key)
+		if state, ok := currentExtra[key]; ok {
+			if extra == nil {
+				extra = make(map[string]any)
+			}
+			extra[key] = state
 		}
-		extra[service.OpenAIAutoResetCreditStateExtraKey] = state
 	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,

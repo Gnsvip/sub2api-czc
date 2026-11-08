@@ -904,6 +904,10 @@ export default {
           unavailable: '不可用'
         },
         codexTiboRecentSamples: '最近 24 次 Tibo 探测',
+        astraProbeToggle: 'Astra 自动检测',
+        astraProbeToggleDesc: '仅控制此账号的 Astra 自动检测。关闭后不再发起新检测，已发出的检测可能完成；历史结果保留。',
+        astraProbeDisabled: '已关闭',
+        astraProbeSaveFailed: 'Astra 检测开关保存失败，请重试',
         codexTiboSampleEmpty: '尚无探测',
         codexTiboRouteConfirmed: '已确认：{verdict}',
         codexTiboRouteCheckedAt: '最近检查：{time}',

@@ -9,6 +9,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTiboAccountProbeSwitchStopsAndResumes(t *testing.T) {
+	tc := newTiboRouteCase(t, false, false, cookieWSHTTPResponse("True"))
+	repo := mustTestValue[*tiboAccountRepo](t, tc.svc.accountRepo)
+	state := tc.svc.openAITiboAccountState(tc.account.ID)
+	now := time.Now()
+	state.http = openAITiboRouteState{verdict: openAITiboHealthy, checkedAt: now, lastSampleAt: now, nextProbeAt: now.Add(-time.Second)}
+	repo.setAccount(func(a *Account) { a.Extra[OpenAIAstraProbeEnabledExtraKey] = false })
+	tc.svc.probeOpenAITiboRoutes(context.Background())
+	tc.svc.openaiTiboProbeWG.Wait()
+	require.Empty(t, tc.upstream.requests)
+	require.True(t, state.http.parked)
+	require.Equal(t, openAITiboHealthy, state.http.verdict)
+	latest, err := repo.GetByID(context.Background(), tc.account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "probe_disabled", openAITiboAccountSkipReason(latest, now))
+	require.Equal(t, openAITiboHealthy, tc.svc.openAITiboRequestVerdicts(context.Background(), latest))
+	tc.svc.openaiTiboProbeWG.Wait()
+	require.Empty(t, tc.upstream.requests)
+	require.NotEmpty(t, tc.svc.openAITiboRouteStatuses(latest, now), "history remains visible")
+	require.True(t, latest.AllowsOpenAIOAuthModelPolicy("gpt-6-astra"), "switch does not disable model access")
+	repo.setAccount(func(a *Account) { a.Extra[OpenAIAstraProbeEnabledExtraKey] = true })
+	tc.svc.openaiTiboEnrolledAt.Store(0)
+	tc.svc.probeOpenAITiboRoutes(context.Background())
+	tc.svc.openaiTiboProbeWG.Wait()
+	require.Len(t, tc.upstream.requests, 1)
+	requireTiboProbe(t, tc.upstream.bodies[0])
+}
+
+func TestTiboQueuedRequestProbeRechecksAccountSwitch(t *testing.T) {
+	tc := newTiboRouteCase(t, false, false)
+	repo := mustTestValue[*tiboAccountRepo](t, tc.svc.accountRepo)
+	sem := tc.svc.openAITiboProbeSem()
+	for i := 0; i < cap(sem); i++ {
+		sem <- struct{}{}
+	}
+	state := tc.svc.openAITiboAccountState(tc.account.ID)
+	state.mu.Lock()
+	done := tc.svc.startOpenAITiboProbeLocked(state, openAITiboRouteHTTP, tc.account, true, tc.svc.openAITiboRouteConfig(), time.Now())
+	state.mu.Unlock()
+	require.NotNil(t, done)
+	repo.setAccount(func(a *Account) { a.Extra[OpenAIAstraProbeEnabledExtraKey] = false })
+	<-sem
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued probe did not finish")
+	}
+	tc.svc.openaiTiboProbeWG.Wait()
+	for len(sem) > 0 {
+		<-sem
+	}
+	require.Positive(t, repo.gets.Load())
+	require.Empty(t, tc.upstream.requests, "a stale enabled snapshot must not send a probe after disable")
+	require.Empty(t, state.http.recent)
+	require.Empty(t, state.http.probes, "aborted probe refunds its budget")
+}
+
 // Regression (account 23156): a rate limit pushed the probe days out and
 // lifting it never pulled the probe back. Holds are now re-synced from the
 // database on every enrollment.

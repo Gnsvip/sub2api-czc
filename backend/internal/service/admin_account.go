@@ -1341,6 +1341,20 @@ func (s *adminServiceImpl) SetOpenAICreditsEnabled(ctx context.Context, id int64
 	return s.accountRepo.GetByID(ctx, id)
 }
 
+func (s *adminServiceImpl) SetOpenAIAstraProbeEnabled(ctx context.Context, id int64, enabled bool) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !isOpenAITiboAccount(account) {
+		return nil, infraerrors.BadRequest("ASTRA_PROBE_UNSUPPORTED", "Astra probing is only available for OpenAI accounts")
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, id, map[string]any{OpenAIAstraProbeEnabledExtraKey: enabled}); err != nil {
+		return nil, err
+	}
+	return s.accountRepo.GetByID(ctx, id)
+}
+
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err

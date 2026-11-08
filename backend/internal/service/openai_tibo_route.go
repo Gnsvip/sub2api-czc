@@ -344,7 +344,7 @@ func (r *openAITiboRouteState) applyHold(hold openAITiboHold) {
 // held until the latest active rate-limit/overload/unschedulable window;
 // zero when it can be probed now.
 func openAITiboAccountHold(ctx context.Context, account *Account, now time.Time) openAITiboHold {
-	if account == nil || !isOpenAITiboAccount(account) || account.Status != StatusActive ||
+	if account == nil || !account.IsOpenAIAstraProbeEnabled() || account.Status != StatusActive ||
 		(account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt)) {
 		return openAITiboHold{parked: true}
 	}

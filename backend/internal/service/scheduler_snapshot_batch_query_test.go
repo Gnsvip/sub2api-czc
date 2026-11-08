@@ -487,7 +487,7 @@ func TestSchedulerRebuildBatchKeepsHistoricalAndDifferentKeysIndependent(t *test
 	buckets := []SchedulerBucket{
 		{GroupID: groupID, Platform: PlatformAnthropic, Mode: SchedulerModeSingle},
 		{GroupID: groupID, Platform: PlatformAnthropic, Mode: SchedulerModeForced},
-		// 已下线的 "mixed" 模式按历史模式处理：单独查询，不复用 single/forced 的结果。
+		// mixed 单独查询两个平台，不复用 single/forced 的结果。
 		{GroupID: groupID, Platform: PlatformAnthropic, Mode: "mixed"},
 		{GroupID: groupID + 1, Platform: PlatformAnthropic, Mode: SchedulerModeSingle},
 		{GroupID: groupID, Platform: PlatformGrok, Mode: SchedulerModeForced},
@@ -499,8 +499,8 @@ func TestSchedulerRebuildBatchKeepsHistoricalAndDifferentKeysIndependent(t *test
 	svc := newBatchQueryTestService(cache, repo, config.RunModeStandard)
 
 	require.NoError(t, svc.rebuildBuckets(context.Background(), buckets, "test"))
-	require.Equal(t, 2, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformAnthropic}), "single/forced 共享一次查询，历史模式桶单独再查一次")
-	require.Zero(t, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformAnthropic, mixed: true}), "不再发起多平台混合查询")
+	require.Equal(t, 1, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformAnthropic}), "single/forced 共享一次查询")
+	require.Equal(t, 1, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformAnthropic, mixed: true}), "mixed 查询独立于 single/forced")
 	require.Equal(t, 1, repo.callCount(batchAccountQueryKey{groupID: groupID + 1, platform: PlatformAnthropic}))
 	require.Equal(t, 1, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformGrok}))
 	require.Equal(t, 2, repo.callCount(batchAccountQueryKey{platform: PlatformOpenAI}), "group0 and a negative historical group must not share")
@@ -530,9 +530,9 @@ func TestSchedulerRebuildBatchDoesNotCacheHistoricalQueries(t *testing.T) {
 		key    batchAccountQueryKey
 	}{
 		{
-			name:   "retired_mixed",
+			name:   "mixed",
 			bucket: SchedulerBucket{GroupID: 204, Platform: PlatformAnthropic, Mode: "mixed"},
-			key:    batchAccountQueryKey{groupID: 204, platform: PlatformAnthropic},
+			key:    batchAccountQueryKey{groupID: 204, platform: PlatformAnthropic, mixed: true},
 		},
 		{
 			name:   "historical",

@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -137,6 +139,34 @@ func (h *OpenAIGatewayHandler) anthropicContentModerationError(c *gin.Context, d
 	}
 	c.JSON(contentModerationStatus(decision), gin.H{"type": "error", "error": gin.H{
 		"type": "api_error", "code": contentModerationDecisionErrorCode(decision), "message": contentModerationDecisionMessage(decision),
+	}})
+}
+
+func googleContentModerationError(c *gin.Context, decision *service.ContentModerationDecision) {
+	if decision == nil {
+		return
+	}
+	applyContentModerationRetryAfter(c, decision)
+	if decision.Blocked {
+		googleError(c, contentModerationStatus(decision), contentModerationDecisionMessage(decision))
+		return
+	}
+	status := contentModerationStatus(decision)
+	googleStatus := googleapi.HTTPStatusToGoogleStatus(status)
+	if status == http.StatusServiceUnavailable {
+		googleStatus = "UNAVAILABLE"
+	}
+	requestID := ""
+	if c != nil && c.Request != nil {
+		requestID = contentModerationRequestID(c.Request.Context())
+	}
+	c.JSON(status, gin.H{"error": gin.H{
+		"code": status, "message": contentModerationDecisionMessage(decision), "status": googleStatus,
+		"details": []gin.H{{
+			"@type":  "type.googleapis.com/google.rpc.ErrorInfo",
+			"reason": contentModerationDecisionErrorCode(decision), "domain": "sub2api.risk_control",
+			"metadata": gin.H{"request_id": requestID},
+		}},
 	}})
 }
 

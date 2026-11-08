@@ -95,6 +95,7 @@ func FilterCodexModelIDsForGroup(modelIDs []string, group *Group) []string {
 func isCodexDedicatedMediaModel(modelID string) bool {
 	canonical := codexProviderQualifiedModelID(modelID)
 	return IsGPTImageGenerationModel(canonical) ||
+		isImageGenerationModel(canonical) ||
 		xai.IsGrokImagineModel(modelID)
 }
 
@@ -258,6 +259,8 @@ func loadCodexGroupCatalogAccounts(ctx context.Context, repo AccountRepository, 
 		[]string{
 			PlatformAnthropic,
 			PlatformOpenAI,
+			PlatformGemini,
+			PlatformAntigravity,
 			PlatformGrok,
 			PlatformKimi,
 			PlatformZhipu,

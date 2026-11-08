@@ -874,6 +874,8 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 					decoded["max_tokens"] = maxOutputTokens.Value()
 				}
 				markDecodedModified()
+			case PlatformGemini:
+				markPatchDelete("max_output_tokens")
 			default:
 				markPatchDelete("max_output_tokens")
 			}

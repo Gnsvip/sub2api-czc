@@ -217,9 +217,15 @@ type UpdateSettingsRequest struct {
 	ForceEmailOnThirdPartySignup              *bool                             `json:"force_email_on_third_party_signup"`
 
 	// Model fallback configuration
-	EnableModelFallback    bool   `json:"enable_model_fallback"`
-	FallbackModelAnthropic string `json:"fallback_model_anthropic"`
-	FallbackModelOpenAI    string `json:"fallback_model_openai"`
+	EnableModelFallback      bool   `json:"enable_model_fallback"`
+	FallbackModelAnthropic   string `json:"fallback_model_anthropic"`
+	FallbackModelOpenAI      string `json:"fallback_model_openai"`
+	FallbackModelGemini      string `json:"fallback_model_gemini"`
+	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
+
+	// Identity patch configuration (Claude -> Gemini)
+	EnableIdentityPatch bool   `json:"enable_identity_patch"`
+	IdentityPatchPrompt string `json:"identity_patch_prompt"`
 
 	// Ops monitoring (vNext)
 	OpsMonitoringEnabled         *bool   `json:"ops_monitoring_enabled"`
@@ -247,6 +253,7 @@ type UpdateSettingsRequest struct {
 	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
+	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion               *string `json:"openai_codex_client_version"`
 	OpenAICodexVersionAutoSyncEnabled      *bool   `json:"openai_codex_version_auto_sync_enabled"`
@@ -1431,6 +1438,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
+	if req.AntigravityUserAgentVersion != nil {
+		normalized := strings.TrimSpace(*req.AntigravityUserAgentVersion)
+		req.AntigravityUserAgentVersion = &normalized
+		if normalized != "" && !semverPattern.MatchString(normalized) {
+			response.Error(c, http.StatusBadRequest, "antigravity_user_agent_version must be empty or a valid semver (e.g. 1.23.2)")
+			return
+		}
+	}
 	if req.OpenAICodexUserAgent != nil {
 		normalized := strings.TrimSpace(*req.OpenAICodexUserAgent)
 		req.OpenAICodexUserAgent = &normalized
@@ -1654,6 +1669,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableModelFallback:                    req.EnableModelFallback,
 		FallbackModelAnthropic:                 req.FallbackModelAnthropic,
 		FallbackModelOpenAI:                    req.FallbackModelOpenAI,
+		FallbackModelGemini:                    req.FallbackModelGemini,
+		FallbackModelAntigravity:               req.FallbackModelAntigravity,
+		EnableIdentityPatch:                    req.EnableIdentityPatch,
+		IdentityPatchPrompt:                    req.IdentityPatchPrompt,
 		MinClaudeCodeVersion:                   req.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                   req.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:            req.AllowUngroupedKeyScheduling,
@@ -1747,6 +1766,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.EnableClientDatelineNormalization
 			}
 			return previousSettings.EnableClientDatelineNormalization
+		}(),
+		AntigravityUserAgentVersion: func() string {
+			if req.AntigravityUserAgentVersion != nil {
+				return *req.AntigravityUserAgentVersion
+			}
+			return previousSettings.AntigravityUserAgentVersion
 		}(),
 		OpenAICodexUserAgent: func() string {
 			if req.OpenAICodexUserAgent != nil {
@@ -2321,6 +2346,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableModelFallback:                                    updatedSettings.EnableModelFallback,
 		FallbackModelAnthropic:                                 updatedSettings.FallbackModelAnthropic,
 		FallbackModelOpenAI:                                    updatedSettings.FallbackModelOpenAI,
+		FallbackModelGemini:                                    updatedSettings.FallbackModelGemini,
+		FallbackModelAntigravity:                               updatedSettings.FallbackModelAntigravity,
+		EnableIdentityPatch:                                    updatedSettings.EnableIdentityPatch,
+		IdentityPatchPrompt:                                    updatedSettings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                                   updatedSettings.OpsMonitoringEnabled,
 		OpsRealtimeMonitoringEnabled:                           updatedSettings.OpsRealtimeMonitoringEnabled,
 		OpsQueryModeDefault:                                    updatedSettings.OpsQueryModeDefault,
@@ -2338,6 +2367,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
+		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                   updatedSettings.OpenAICodexUserAgent,
 		OpenAICodexClientVersion:                               updatedSettings.OpenAICodexClientVersion,
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,

@@ -59,6 +59,9 @@ func (r *CompositeRouteResolver) ListExactPublicModels(ctx context.Context, grou
 	}
 	models := make([]string, 0, len(routes))
 	for _, route := range routes {
+		if !isConcreteRequestPlatform(strings.TrimSpace(route.TargetPlatform)) {
+			continue
+		}
 		if route.Enabled && route.MatchType == CompositeRouteMatchExact &&
 			(endpoint == "" || normalizeCompositeRouteEndpoint(route.Endpoint) == CompositeRouteEndpointAny || normalizeCompositeRouteEndpoint(route.Endpoint) == endpoint) {
 			if model := strings.TrimSpace(route.PublicModel); model != "" {
@@ -192,8 +195,6 @@ func matchCompositeRoute(routes []CompositeModelRoute, model, endpoint string) (
 	}
 	candidates := make([]candidate, 0, len(routes))
 	for _, route := range routes {
-		// 存量路由可能仍指向已下线的平台（gemini/antigravity）；没有转发器可承接，
-		// 视为不存在，让请求继续走账号归属/内置探测兜底。
 		if !isConcreteRequestPlatform(strings.TrimSpace(route.TargetPlatform)) {
 			continue
 		}

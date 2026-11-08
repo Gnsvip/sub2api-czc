@@ -12,7 +12,9 @@ type PlatformGateway string
 
 const (
 	// PlatformGatewayAnthropic 由 GatewayService 处理（Claude Messages 协议）。
-	PlatformGatewayAnthropic PlatformGateway = "anthropic"
+	PlatformGatewayAnthropic   PlatformGateway = "anthropic"
+	PlatformGatewayGemini      PlatformGateway = "gemini"
+	PlatformGatewayAntigravity PlatformGateway = "antigravity"
 	// PlatformGatewayOpenAI 由 OpenAIGatewayService 处理（OpenAI、Grok 与多协议 API Key 供应商）。
 	PlatformGatewayOpenAI PlatformGateway = "openai"
 )
@@ -31,6 +33,8 @@ type PlatformSpec struct {
 
 // platformList 的顺序即平台的展示顺序。
 var platformList = []PlatformSpec{
+	{ID: PlatformGemini, DisplayName: "Gemini", Gateway: PlatformGatewayGemini, LiteLLMProvider: "gemini"},
+	{ID: PlatformAntigravity, DisplayName: "Antigravity", Gateway: PlatformGatewayAntigravity, LiteLLMProvider: "anthropic"},
 	{ID: PlatformAnthropic, DisplayName: "Anthropic", Gateway: PlatformGatewayAnthropic, LiteLLMProvider: "anthropic"},
 	{ID: PlatformOpenAI, DisplayName: "OpenAI", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "openai"},
 	{ID: PlatformGrok, DisplayName: "Grok", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "xai"},

@@ -22,7 +22,7 @@ const (
 	ContextKeyAPIKey ContextKey = "api_key"
 	// ContextKeySubscription 订阅上下文键
 	ContextKeySubscription ContextKey = "subscription"
-	// ContextKeyForcePlatform 强制平台
+	// ContextKeyForcePlatform 强制平台（用于 /antigravity 路由）
 	ContextKeyForcePlatform ContextKey = "force_platform"
 	// ContextKeyOpsFallbackAPIKey 运维错误日志专用回退键。
 	// 鉴权早退（分组停用/删除、Key 停用/过期/额度、用户停用、IP 限制等）时，
@@ -134,6 +134,17 @@ func OpenAIErrorWriter(c *gin.Context, status int, message string) {
 			"message": message,
 			"type":    "invalid_request_error",
 			"code":    "model_not_found",
+		},
+	})
+}
+
+// GoogleErrorWriter 按 Google API 规范输出错误
+func GoogleErrorWriter(c *gin.Context, status int, message string) {
+	c.JSON(status, gin.H{
+		"error": gin.H{
+			"code":    status,
+			"message": message,
+			"status":  googleapi.HTTPStatusToGoogleStatus(status),
 		},
 	})
 }

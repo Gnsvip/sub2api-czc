@@ -36,14 +36,16 @@ const MatchModeAll = "all"
 
 // 支持的平台常量
 const (
-	PlatformAnthropic  = domain.PlatformAnthropic
-	PlatformOpenAI     = domain.PlatformOpenAI
-	PlatformGrok       = domain.PlatformGrok
-	PlatformKimi       = domain.PlatformKimi
-	PlatformZhipu      = domain.PlatformZhipu
-	PlatformDeepseek   = domain.PlatformDeepseek
-	PlatformMiniMax    = domain.PlatformMiniMax
-	PlatformOpenCodeGo = domain.PlatformOpenCodeGo
+	PlatformAnthropic   = domain.PlatformAnthropic
+	PlatformOpenAI      = domain.PlatformOpenAI
+	PlatformGrok        = domain.PlatformGrok
+	PlatformKimi        = domain.PlatformKimi
+	PlatformZhipu       = domain.PlatformZhipu
+	PlatformDeepseek    = domain.PlatformDeepseek
+	PlatformMiniMax     = domain.PlatformMiniMax
+	PlatformOpenCodeGo  = domain.PlatformOpenCodeGo
+	PlatformGemini      = domain.PlatformGemini
+	PlatformAntigravity = domain.PlatformAntigravity
 )
 
 // AllPlatforms 返回所有支持的平台列表（平台清单，按展示顺序）。

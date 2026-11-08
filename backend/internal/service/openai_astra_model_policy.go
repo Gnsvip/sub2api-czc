@@ -11,6 +11,17 @@ import (
 // model that was probed. It is projected into scheduler snapshots as well.
 const OpenAIAstraPolicyExtraKey = "codex_tibo_verdict:http"
 
+// OpenAIAstraProbeEnabledExtraKey is managed by the per-account probe switch.
+const OpenAIAstraProbeEnabledExtraKey = "openai_astra_probe_enabled"
+
+func (a *Account) IsOpenAIAstraProbeEnabled() bool {
+	if !isOpenAITiboAccount(a) {
+		return false
+	}
+	enabled, configured := a.Extra[OpenAIAstraProbeEnabledExtraKey].(bool)
+	return !configured || enabled
+}
+
 type OpenAIOAuthModelPolicy struct {
 	Verdict   string     `json:"verdict"`
 	Scope     string     `json:"scope"`

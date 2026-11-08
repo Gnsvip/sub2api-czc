@@ -64,7 +64,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Native continuation, diagnostics and HTTP/2 race regression
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -3,14 +3,16 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
-const { getUsage } = vi.hoisted(() => ({
-  getUsage: vi.fn()
+const { getUsage, setAstraProbeEnabled } = vi.hoisted(() => ({
+  getUsage: vi.fn(),
+  setAstraProbeEnabled: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      getUsage
+      getUsage,
+      setAstraProbeEnabled
     }
   }
 }))
@@ -115,6 +117,7 @@ const cnUsageCellStubs = {
 describe('AccountUsageCell', () => {
   beforeEach(() => {
     getUsage.mockReset()
+    setAstraProbeEnabled.mockReset()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -162,7 +165,55 @@ describe('AccountUsageCell', () => {
       expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
     }
     await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
-    expect(wrapper.find('[data-testid="tibo-routes"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="astra-probe-toggle"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="tibo-dot"]')).toHaveLength(24)
+    wrapper.unmount()
+  })
+
+  it('saves the per-account Astra switch and preserves history, including on failure', async () => {
+    const account = makeAccount({
+      platform: 'openai', type: 'apikey',
+      codex_turn_tickets: [{ model: 'gpt-6-astra', tibo_routes: [{
+        route: 'http', verdict: 'healthy', probes_hour: 1, flips_hour: 0,
+        recent_samples: [{ verdict: 'healthy', at: '2026-11-08T12:00:00Z' }],
+      }] }],
+    })
+    const wrapper = mount(AccountUsageCell, { props: { account } })
+    const off = { ...account, extra: { openai_astra_probe_enabled: false } }
+    let finish!: (value: Account) => void
+    setAstraProbeEnabled.mockImplementationOnce(() => new Promise<Account>(resolve => { finish = resolve }))
+    const toggle = wrapper.get('[data-testid="astra-probe-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    await toggle.trigger('click')
+    expect(toggle.attributes('disabled')).toBeDefined()
+    expect(setAstraProbeEnabled).toHaveBeenCalledWith(account.id, false)
+    await toggle.trigger('click')
+    expect(setAstraProbeEnabled).toHaveBeenCalledTimes(1)
+    finish(off)
+    await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(wrapper.find('[data-testid="astra-probe-disabled"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="tibo-dot"]')[23].attributes('data-verdict')).toBe('healthy')
+    expect(wrapper.emitted('account-updated')?.[0]).toEqual([off])
+    setAstraProbeEnabled.mockRejectedValueOnce(new Error('save failed'))
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[role="alert"]').text()).toContain('astraProbeSaveFailed')
+    setAstraProbeEnabled.mockResolvedValueOnce({ ...account, extra: { openai_astra_probe_enabled: true } })
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the Astra switch accessible without samples and restores the saved value', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'apikey', extra: { openai_astra_probe_enabled: false } })
+    const wrapper = mount(AccountUsageCell, { props: { account } })
+    expect(wrapper.get('[data-testid="astra-probe-toggle"]').attributes('aria-checked')).toBe('false')
+    await wrapper.setProps({ account: { ...account, extra: { openai_astra_probe_enabled: true } } })
+    expect(wrapper.get('[data-testid="astra-probe-toggle"]').attributes('aria-checked')).toBe('true')
     wrapper.unmount()
   })
 

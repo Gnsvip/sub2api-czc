@@ -639,6 +639,11 @@ export async function setOpenAICreditsEnabled(id: number, enabled: boolean): Pro
   return data
 }
 
+export async function setAstraProbeEnabled(id: number, enabled: boolean): Promise<Account> {
+  const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/astra-probe`, { enabled })
+  return data
+}
+
 /**
  * Get available models for an account
  * @param id - Account ID
@@ -1193,6 +1198,7 @@ export const accountsAPI = {
   resetTempUnschedulable,
   setSchedulable,
   setOpenAICreditsEnabled,
+  setAstraProbeEnabled,
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,

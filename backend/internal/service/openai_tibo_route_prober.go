@@ -42,6 +42,9 @@ func (s *OpenAIGatewayService) startOpenAITiboProbeLocked(state *openAITiboAccou
 }
 
 func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, blocking bool, cfg openAITiboSettings, now time.Time) <-chan struct{} {
+	if account != nil && !account.IsOpenAIAstraProbeEnabled() {
+		return nil
+	}
 	r := state.route(route)
 	if r.inflight {
 		return r.done
@@ -103,11 +106,21 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 		}
 	}
 	defer func() { <-sem }()
-	if account == nil {
+	if account != nil && openAITiboAccountSkipReason(account, time.Now()) != "" {
+		s.abortOpenAITiboProbe(state, route, nil)
+		return
+	}
+	// Re-read queued request snapshots too: an administrator may have switched
+	// probing off while this probe waited for a concurrency slot.
+	if account == nil || s.accountRepo != nil {
 		latest, err := s.latestOpenAITiboAccount(ctx, state.accountID)
 		if err != nil {
 			// Read failure or deleted row: retry shortly; enrollment drops
 			// accounts that are gone.
+			s.abortOpenAITiboProbe(state, route, nil)
+			return
+		}
+		if account != nil && openAITiboAccountSkipReason(latest, time.Now()) != "" {
 			s.abortOpenAITiboProbe(state, route, nil)
 			return
 		}
@@ -118,11 +131,6 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 			return
 		}
 		account = latest
-	} else if skip := openAITiboAccountSkipReason(account, time.Now()); skip != "" {
-		// Request-path snapshot: it may be stale, so it only aborts this
-		// probe; the next enrollment applies the authoritative hold.
-		s.abortOpenAITiboProbe(state, route, nil)
-		return
 	}
 	startedAt := time.Now()
 	sample := s.probeOpenAITiboHTTP(ctx, account)

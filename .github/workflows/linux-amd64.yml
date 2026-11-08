@@ -91,6 +91,20 @@ jobs:
         working-directory: frontend
         run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/frontend-tests.json"
       - run: pnpm --dir frontend run build
+      - name: Install browser for guide checks
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Public and admin guide browser checks
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/guide-browser-results
+        run: pnpm exec playwright test e2e/guide.spec.ts e2e/guide-admin.spec.ts
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: guide-browser-results
+          path: ${{ runner.temp }}/guide-browser-results/
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         if: always()
         with:

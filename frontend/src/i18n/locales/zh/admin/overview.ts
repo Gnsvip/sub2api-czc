@@ -1288,6 +1288,11 @@ export default {
         free: '免费 Fast',
         freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
       },
+      invalidRequestFallback: {
+        title: '无效请求兜底分组',
+        hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
+        noFallback: '不兜底'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',

@@ -26,6 +26,6 @@ func TestOpenCodeGoPlatformMigration(t *testing.T) {
 		"CHECK (target_platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
 	require.Contains(t, sql,
 		"CHECK (provider IN ('openai', 'anthropic', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'))")
-	require.NotContains(t, sql, "gemini")
-	require.NotContains(t, sql, "antigravity")
+	require.Contains(t, sql, "gemini")
+	require.Contains(t, sql, "antigravity")
 }

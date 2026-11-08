@@ -1290,6 +1290,11 @@ export default {
         free: 'Free Fast',
         freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
       },
+      invalidRequestFallback: {
+        title: 'Invalid Request Fallback Group',
+        hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
+        noFallback: 'No Fallback'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',

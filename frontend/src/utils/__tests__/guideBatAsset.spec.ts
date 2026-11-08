@@ -1,19 +1,13 @@
-import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { validateGuideBat } from '@/utils/guideBatValidation'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const batPath = resolve(dir, '../../../public/downloads/select-fastest-codex-base-url.bat')
-const checksumPath = `${batPath}.sha256`
 const guideDir = resolve(dir, '../../../../docs/guide')
 const guideViewPath = resolve(dir, '../../views/public/GuideView.vue')
 const vipPath = resolve(dir, '../../../../backend/internal/service/vip.go')
-const batBytes = readFileSync(batPath)
-const bat = batBytes.toString('ascii')
-const checksum = readFileSync(checksumPath, 'utf8').trim()
 
 // The guide is one file per chapter; join them in filename order so the
 // assertions below still inspect the whole published document.
@@ -26,39 +20,17 @@ const guide = guideChapterFiles
 const guideViewSource = readFileSync(guideViewPath, 'utf8')
 const vipSource = readFileSync(vipPath, 'utf8')
 
-describe('guide BAT asset', () => {
-  it('passes the calibrated structural safety validation', () => {
-    expect(validateGuideBat(bat)).toEqual([])
-
-    const benign = `${bat}\n# model_provider = "comment only"\n# api_key = "comment only"\n# Set-TomlSetting is historical text\n$monkey = 'similar text'\n`
-    expect(validateGuideBat(benign)).toEqual([])
-
-    expect(validateGuideBat(bat.replace("    'https://key66.vip',\n", '')))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'domain-list' })]))
-    expect(validateGuideBat(`${bat}\nmodel_provider = "other"\n`))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'model-provider-write' })]))
-    expect(validateGuideBat(`${bat}\napi_key = "not-a-real-key"\n`))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'credential-reference' })]))
-    expect(validateGuideBat(bat.replace('[IO.File]::Replace', '[IO.File]::Move')))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 'atomic-replace' })]))
-  })
-
-  it('uses the exact approved hosts and only a scoped base_url update path', () => {
-    expect(bat).toContain("$hostIp = '15.204.82.11'")
-    expect(bat).toContain("$MeasuredAttempts = 3")
-    expect(bat).toContain("+ '/health'")
-    expect(bat).toContain('function Get-CodexConfigTarget')
-    expect(bat).toContain('function Set-UrlHostOnly')
-    expect(bat).not.toMatch(/^\s*model_provider\s*=/im)
-    expect(bat).not.toMatch(/Set-TomlSetting/i)
-    expect(bat).not.toMatch(/\bapi[_ -]?key\b/i)
-  })
-
-  it('has a byte-accurate sidecar and the same digest in the guide', () => {
-    const digest = createHash('sha256').update(batBytes).digest('hex')
-    expect(checksum).toBe(`${digest}  select-fastest-codex-base-url.bat`)
-    expect(guide.match(new RegExp(digest, 'g'))).toHaveLength(2)
-    expect([...bat].every((character) => character.charCodeAt(0) <= 0x7f)).toBe(true)
+describe('bundled AIFXO guide', () => {
+  it('uses the AIFXO endpoint and does not ship the retired domain-switching tool', () => {
+    expect(guide).toContain('https://api.aifxo.com/v1/models')
+    expect(guide).toContain('base_url = "https://api.aifxo.com/v1"')
+    expect(guide).toContain('https://api.aifxo.com/health')
+    expect(guide).toContain('QQ：1038539305')
+    expect(guide).not.toMatch(/mofa\.love\.gd|mofayaoshipu\.cc\.cd|key66\.cc\.cd|key66\.vip|mofa\.duoduohuiying\.cn|15\.204\.82\.11/)
+    expect(guide).not.toContain('select-fastest-codex-base-url.bat')
+    expect(existsSync(batPath)).toBe(false)
+    expect(existsSync(`${batPath}.sha256`)).toBe(false)
+    expect(guideViewSource).not.toContain('guide-download')
   })
 
   it('keeps the bundled guide version in sync between the document and the view', () => {
@@ -66,12 +38,12 @@ describe('guide BAT asset', () => {
     const viewVersion = guideViewSource.match(/^const bundledGuideVersion = '([^']+)'$/m)?.[1]
 
     // Both patterns must actually match; an absent version is a failure, not a passing match.
-    expect(documentVersion).toBe('1.8')
-    expect(viewVersion).toBe('1.8')
+    expect(documentVersion).toBe('1.9')
+    expect(viewVersion).toBe('1.9')
     expect(documentVersion).toBe(viewVersion)
     const documentDate = guide.match(/^- 更新日期：`([^`]+)`$/m)?.[1]
     const viewDate = guideViewSource.match(/^const bundledGuideUpdatedAt = '([^']+)'$/m)?.[1]
-    expect(documentDate).toBe('2026-10-31')
+    expect(documentDate).toBe('2026-11-08')
     expect(viewDate).toBe(documentDate)
   })
 

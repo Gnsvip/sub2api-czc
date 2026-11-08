@@ -13,10 +13,10 @@ const publicSettings = {
   aliyun_captcha_scene_id: '',
   aliyun_captcha_prefix: '',
   aliyun_captcha_region: 'cn',
-  site_name: 'Sub2API 教程测试站',
+  site_name: 'AIFXO',
   site_logo: '',
   site_subtitle: '',
-  api_base_url: '',
+  api_base_url: 'https://api.aifxo.com',
   contact_info: '',
   doc_url: '',
   home_content: '',
@@ -98,7 +98,7 @@ test('public guide workflow', async ({ context, page }, testInfo) => {
   await expect(page.locator('#goal-workflow')).toHaveText('使用 goal-workflow 小助手')
   await expect(page.locator('#svip')).toHaveText('SVIP 能得到什么、需要注意什么')
 
-  const sameHostPaths = ['/redeem-store', '/redeem', '/downloads/select-fastest-codex-base-url.bat']
+  const sameHostPaths = ['/redeem-store', '/redeem', '/keys']
   for (const path of sameHostPaths) {
     const link = page.locator(`a[href="${path}"]`).first()
     await expect(link).toBeAttached()
@@ -106,9 +106,11 @@ test('public guide workflow', async ({ context, page }, testInfo) => {
     expect(resolved.host).toBe(new URL(page.url()).host)
   }
 
-  const downloadResponse = await page.request.get('/downloads/select-fastest-codex-base-url.bat')
-  expect(downloadResponse.status()).toBe(200)
-  expect((await downloadResponse.body()).byteLength).toBeGreaterThan(1_000)
+  await expect(page.locator('#domains')).toHaveText('本站网址与 API 地址')
+  await expect(page.locator('#speed-script')).toHaveText('检查与 AIFXO 的连接')
+  await expect(page.locator('[data-test="guide-content"]')).toContainText('https://api.aifxo.com/v1')
+  await expect(page.locator('[data-test="guide-download"]')).toHaveCount(0)
+  await expect(page.locator('[data-test="guide-content"]')).not.toContainText('key66.cc.cd')
 
   const copyButton = page.locator('[data-test="copy-goal-example"]')
   await copyButton.click()

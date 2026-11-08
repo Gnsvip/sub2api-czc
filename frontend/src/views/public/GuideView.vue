@@ -11,16 +11,6 @@
         </RouterLink>
 
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <a
-            data-test="guide-download"
-            :href="downloadUrl"
-            download
-            class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-gray-300 px-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-dark-600 dark:text-dark-200 dark:hover:bg-dark-800 sm:px-3"
-            title="下载自动测速工具"
-          >
-            <Icon name="download" size="sm" />
-            <span class="hidden sm:inline">下载测速工具</span>
-          </a>
           <button
             type="button"
             class="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
@@ -72,10 +62,6 @@
             <span>更新日期 {{ updatedAt }}</span>
             <span>适合第一次使用本站的用户</span>
           </div>
-        </div>
-
-        <div class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          Windows 测速工具会修改电脑自己保存的“网址通讯录”（<code>hosts</code>）和 Codex 使用的网址（<code>base_url</code>）。看不懂这两个名称也没关系：运行前先关闭 Codex，并保留工具自动生成的备份。
         </div>
 
         <section class="border-b border-gray-200 py-5 dark:border-dark-800 lg:hidden" aria-label="移动端教程目录">
@@ -159,9 +145,8 @@ import {
 } from '@/utils/guideMarkdown'
 import { getBundledGuideChapters } from '@/utils/guideSections'
 
-const downloadUrl = '/downloads/select-fastest-codex-base-url.bat'
-const bundledGuideVersion = '1.8'
-const bundledGuideUpdatedAt = '2026-10-31'
+const bundledGuideVersion = '1.9'
+const bundledGuideUpdatedAt = '2026-11-08'
 const commandLabels: Record<string, string> = {
   'skill-install': '安装 goal-workflow',
   'skill-update': '更新 goal-workflow',

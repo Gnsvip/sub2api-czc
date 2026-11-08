@@ -363,14 +363,16 @@ func TestNormalizeMonitorPrimaryModel_QuotaDefault(t *testing.T) {
 
 func TestProviderProbeCapabilityMatrix(t *testing.T) {
 	for _, p := range []string{
-		MonitorProviderOpenAI, MonitorProviderAnthropic,
+		MonitorProviderOpenAI, MonitorProviderAnthropic, MonitorProviderGemini,
 		MonitorProviderGrok, MonitorProviderKimi, MonitorProviderZhipu, MonitorProviderDeepseek,
 	} {
 		require.True(t, providerSupportsProbe(p), p)
 		require.NoError(t, validateProvider(p), p)
 	}
-	// 已下线平台既不能探活也不能建监控。
-	for _, p := range []string{"gemini", "antigravity"} {
+	// Antigravity 支持配额监控，但没有模型探活 adapter。
+	require.NoError(t, validateProvider(MonitorProviderAntigravity))
+	require.False(t, providerSupportsProbe(MonitorProviderAntigravity))
+	for _, p := range []string{"unknown-provider"} {
 		require.False(t, providerSupportsProbe(p), p)
 		require.ErrorIs(t, validateProvider(p), ErrChannelMonitorInvalidProvider, p)
 	}

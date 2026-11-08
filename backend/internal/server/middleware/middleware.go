@@ -76,6 +76,11 @@ func NewErrorResponse(code, message string) ErrorResponse {
 
 // AbortWithError 中断请求并返回JSON错误
 func AbortWithError(c *gin.Context, statusCode int, code, message string) {
+	if c.GetBool(googleAPIKeyAuthContextKey) {
+		GoogleErrorWriter(c, statusCode, message)
+		c.Abort()
+		return
+	}
 	c.JSON(statusCode, NewErrorResponse(code, message))
 	c.Abort()
 }

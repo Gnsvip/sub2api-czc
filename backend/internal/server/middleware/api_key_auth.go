@@ -48,7 +48,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		queryKey := strings.TrimSpace(c.Query("key"))
 		queryApiKey := strings.TrimSpace(c.Query("api_key"))
-		if queryKey != "" || queryApiKey != "" {
+		if (queryKey != "" && !(c.GetBool(googleAPIKeyAuthContextKey) && allowGoogleQueryKey(c.Request.URL.Path))) || queryApiKey != "" {
 			recordInvalidAuthFailure(c, apiKeyService)
 			MarkIngressRejected(c, IngressRejectQueryAPIKeyDeprecated)
 			AbortWithError(c, 400, "api_key_in_query_deprecated", userfacing.APIKeyQueryDeprecated)
@@ -71,16 +71,20 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if apiKeyString == "" {
 			apiKeyString = c.GetHeader("x-api-key")
 		}
+
+		// 如果x-api-key header中没有，尝试从x-goog-api-key header中提取（Gemini CLI兼容）
+		if apiKeyString == "" {
+			apiKeyString = c.GetHeader("x-goog-api-key")
+		}
+
+		if c.GetBool(googleAPIKeyAuthContextKey) {
+			apiKeyString = extractAPIKeyForGoogle(c)
+		}
 		if len(apiKeyString) > service.MaxAPIKeyCredentialBytes {
 			recordInvalidAuthFailure(c, apiKeyService)
 			MarkIngressRejected(c, IngressRejectInvalidAPIKey)
 			AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", userfacing.InvalidAPIKey)
 			return
-		}
-
-		// 如果x-api-key header中没有，尝试从x-goog-api-key header中提取（Gemini CLI兼容）
-		if apiKeyString == "" {
-			apiKeyString = c.GetHeader("x-goog-api-key")
 		}
 
 		// 如果所有header都没有API key

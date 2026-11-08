@@ -2,13 +2,13 @@
 
 下面的命令请求模型列表，用于检查服务地址、Key 验证和当前列表访问条件。**返回模型列表不等于已经完成实际模型调用，也不保证列表中的每个模型此刻都能成功使用。**
 
-以 `key66.cc.cd` 为例，把 `<你的 API Key>` 替换为自己的 Key，尖括号也要一起删掉。不要把带真实 Key 的命令或配置发给别人。
+使用 AIFXO 的 API 地址 `https://api.aifxo.com`，把 `<你的 API Key>` 替换为自己的 Key，尖括号也要一起删掉。不要把带真实 Key 的命令或配置发给别人。
 
 ### macOS、Linux 或 WSL
 
 ```bash
 export SUB2API_API_KEY="<你的 API Key>"
-curl --silent --show-error --include https://key66.cc.cd/v1/models \
+curl --silent --show-error --include https://api.aifxo.com/v1/models \
   -H "Authorization: Bearer $SUB2API_API_KEY"
 ```
 
@@ -16,7 +16,7 @@ curl --silent --show-error --include https://key66.cc.cd/v1/models \
 
 ```powershell
 $env:SUB2API_API_KEY = "<你的 API Key>"
-curl.exe --silent --show-error --include https://key66.cc.cd/v1/models `
+curl.exe --silent --show-error --include https://api.aifxo.com/v1/models `
   -H "Authorization: Bearer $env:SUB2API_API_KEY"
 ```
 

@@ -28,8 +28,8 @@ model_provider = "sub2api"
 model = "<当前 API Key 可用的模型 ID>"
 
 [model_providers.sub2api]
-name = "Sub2API"
-base_url = "https://key66.cc.cd/v1"
+name = "AIFXO"
+base_url = "https://api.aifxo.com/v1"
 env_key = "SUB2API_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false

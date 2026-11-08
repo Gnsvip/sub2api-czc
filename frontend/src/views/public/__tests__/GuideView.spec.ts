@@ -205,7 +205,7 @@ describe('GuideView', () => {
     expect(deriveChapterSlug('另一章节')).not.toBe(chineseOnly)
   })
 
-  it('renders the approved guide, stable table of contents, commands, and download', async () => {
+  it('renders the AIFXO guide, stable table of contents and commands', async () => {
     const wrapper = mount(GuideView, {
       global: {
         stubs: {
@@ -221,9 +221,10 @@ describe('GuideView', () => {
     expect(wrapper.get('#recharge').text()).toBe('充值：先买兑换码，再兑换余额')
     expect(wrapper.get('#goal-workflow').text()).toBe('使用 goal-workflow 小助手')
     expect(wrapper.get('#svip').text()).toBe('SVIP 能得到什么、需要注意什么')
-    expect(wrapper.get('[data-test="guide-download"]').attributes('href')).toBe(
-      '/downloads/select-fastest-codex-base-url.bat'
-    )
+    expect(wrapper.get('#domains').text()).toBe('本站网址与 API 地址')
+    expect(wrapper.get('#speed-script').text()).toBe('检查与 AIFXO 的连接')
+    expect(wrapper.get('[data-test="guide-content"]').text()).toContain('https://api.aifxo.com/v1')
+    expect(wrapper.find('[data-test="guide-download"]').exists()).toBe(false)
 
     const commands = extractGuideCommands(guideMarkdown)
     expect(commands.map((command) => command.id)).toEqual([
@@ -298,10 +299,10 @@ describe('GuideView', () => {
     expect(guideMarkdown).toContain('[兑换余额](/redeem)')
     expect(guideMarkdown).toContain('$goal-workflow 清理内存')
     expect(guideMarkdown).toContain('总余额（含赠送）达到 **100**')
-    expect(guideMarkdown).toContain('只会更换目标 Codex 配置中 `base_url` 的网址域名')
+    expect(guideMarkdown).toContain('https://api.aifxo.com/v1')
     expect(guideMarkdown).toContain('可以把它理解为“软件专用密码”')
-    expect(guideMarkdown).toContain('可以把 hosts 理解成电脑自己的“网址通讯录”')
-    expect(guideMarkdown).toContain('SHA-256（可以理解为文件的“指纹”）')
+    expect(guideMarkdown).toContain('无需 API Key，不修改 hosts 或客户端配置')
+    expect(guideMarkdown).toContain('开启邮箱验证，不要求邀请码')
     expect(guideMarkdown).not.toMatch(/A.{0,20}B.{0,80}(?:支付|订单)/s)
     expect(guideMarkdown).not.toContain('并发支付竞态')
     expect(guideMarkdown).not.toContain('没有支付但是到账')

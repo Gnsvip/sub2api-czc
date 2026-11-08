@@ -1893,7 +1893,8 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			delete(newItem, "id")
 		} else if id, ok := m["id"].(string); ok {
 			strip := shouldStripOpenAIResponsesInputItemID(typ, id)
-			if opts.NativeItemIDs {
+			// Messages still require msg IDs when preserving native continuation.
+			if opts.NativeItemIDs && strings.TrimSpace(typ) != "message" {
 				strip = !hasNativeCodexInputItemID(id)
 			}
 			if strip {

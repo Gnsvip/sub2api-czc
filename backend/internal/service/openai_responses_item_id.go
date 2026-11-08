@@ -102,7 +102,8 @@ func sanitizeOpenAIResponsesInputItemIDsForAccount(body []byte, account *Account
 			if id.Type == gjson.String {
 				completeReasoning := trimmedItemType == "reasoning" && keepOpenAIReasoningReplayID(id.String(), item.Get("encrypted_content").Value(), item.Get("status").Value())
 				parsed.stripID = !completeReasoning && shouldStripOpenAIResponsesInputItemID(trimmedItemType, id.String())
-				if codexNative {
+				// Native replay IDs do not exempt messages from the upstream msg prefix.
+				if codexNative && trimmedItemType != "message" {
 					parsed.stripID = !hasNativeCodexInputItemID(id.String())
 				}
 			}

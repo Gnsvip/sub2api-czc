@@ -124,11 +124,14 @@ func ProvideGatewayHandler(
 	userMsgQueueService *service.UserMessageQueueService,
 	cfg *config.Config,
 	settingService *service.SettingService,
+	geminiCachedContentService *service.GeminiCachedContentService,
 ) *GatewayHandler {
 	SetSecurityPolicyService(securityPolicyService)
-	return NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
+	h := NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
 		userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool,
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
+	h.geminiCachedContentService = geminiCachedContentService
+	return h
 }
 
 func ProvideOpenAIGatewayHandler(

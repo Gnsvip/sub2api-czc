@@ -168,7 +168,6 @@ var ProviderSet = wire.NewSet(
 	NewGrokOAuthClient,
 	NewGeminiOAuthClient,
 	NewGeminiCachedContentRepository,
-	NewInternal500CounterCache,
 	NewGeminiCliCodeAssistClient,
 	NewGeminiDriveClient,
 

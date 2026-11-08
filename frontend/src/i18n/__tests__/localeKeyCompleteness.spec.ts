@@ -87,4 +87,24 @@ describe('locale key completeness', () => {
     expect(missingKeys(usedKeys, enKeys), 'English locale is missing referenced keys').toEqual([])
     expect(missingKeys(usedKeys, zhKeys), 'Chinese locale is missing referenced keys').toEqual([])
   })
+
+  it('defines readable Antigravity quota-window labels in both locales', () => {
+    const keys = [
+      'antigravityGemini5h',
+      'antigravityGeminiWeekly',
+      'antigravityArgon5h',
+      'antigravityArgonWeekly',
+      'antigravityOther5h',
+      'antigravityOtherWeekly',
+    ] as const
+
+    for (const key of keys) {
+      const enLabel = en.admin.accounts.usageWindow[key]
+      const zhLabel = zh.admin.accounts.usageWindow[key]
+      expect(enLabel).toBeTruthy()
+      expect(zhLabel).toBeTruthy()
+      expect(enLabel).not.toBe(`admin.accounts.usageWindow.${key}`)
+      expect(zhLabel).not.toBe(`admin.accounts.usageWindow.${key}`)
+    }
+  })
 })

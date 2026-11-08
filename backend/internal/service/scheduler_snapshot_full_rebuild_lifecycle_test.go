@@ -409,23 +409,23 @@ func TestSchedulerFullRebuildPreservesGroupZeroActiveHistoricalAndInvalidRegistr
 	groupZeroHistorical := SchedulerBucket{GroupID: 0, Platform: "legacy-zero", Mode: "unknown"}
 	activeHistorical := SchedulerBucket{GroupID: groupID, Platform: "legacy-active", Mode: "unknown"}
 	activeForced := SchedulerBucket{GroupID: groupID, Platform: PlatformOpenAI, Mode: SchedulerModeForced}
-	// 已下线的 "mixed" 模式残留在注册表中时按历史模式保留。
-	activeRetiredMixed := SchedulerBucket{GroupID: groupID, Platform: PlatformAnthropic, Mode: "mixed"}
+	// 已登记的 mixed 桶也是 canonical 桶，不重复重建。
+	activeMixed := SchedulerBucket{GroupID: groupID, Platform: PlatformAnthropic, Mode: "mixed"}
 	invalidHistorical := SchedulerBucket{GroupID: -7, Platform: "legacy-invalid", Mode: "unknown"}
-	cache := newFullRebuildLifecycleCache(groupZeroHistorical, activeHistorical, activeForced, activeRetiredMixed, invalidHistorical)
+	cache := newFullRebuildLifecycleCache(groupZeroHistorical, activeHistorical, activeForced, activeMixed, invalidHistorical)
 	groups := &fullRebuildFallbackGroupRepo{groups: []Group{{ID: groupID, Status: StatusActive}}}
 	accounts := &fullRebuildAccountRepo{}
 	svc := newFullRebuildLifecycleService(cache, nil, accounts, groups, config.RunModeStandard)
 
 	require.NoError(t, svc.rebuildFullSnapshot(context.Background(), "test"))
-	require.Equal(t, 2*schedulerCanonicalBucketCount()+4, cache.captureAttemptCount())
-	require.Equal(t, 2*schedulerCanonicalAccountQueryCount()+4, accounts.callCount())
+	require.Equal(t, 2*schedulerCanonicalBucketCount()+3, cache.captureAttemptCount())
+	require.Equal(t, 2*schedulerCanonicalAccountQueryCount()+3, accounts.callCount())
 	groups.mu.Lock()
 	require.Equal(t, 1, groups.listCalls)
 	groups.mu.Unlock()
 	require.Empty(t, cache.retiredBuckets())
 	require.Empty(t, cache.tokens())
-	for _, bucket := range []SchedulerBucket{groupZeroHistorical, activeHistorical, activeForced, activeRetiredMixed, invalidHistorical} {
+	for _, bucket := range []SchedulerBucket{groupZeroHistorical, activeHistorical, activeForced, activeMixed, invalidHistorical} {
 		_, published := cache.counts(bucket)
 		require.Equal(t, 1, published, bucket.String())
 	}

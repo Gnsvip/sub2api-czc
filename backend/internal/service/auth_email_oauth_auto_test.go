@@ -74,14 +74,19 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 	require.Len(t, quotaRepo.bulkInsertCalls, 1, "createEmailOAuthUser must snapshot platform quotas via BulkInsertInitial")
 
 	records := quotaRepo.bulkInsertCalls[0]
-	require.Len(t, records, 1, "only platforms with a configured limit get a row")
-	var grokRecord *UserPlatformQuotaRecord
+	require.Len(t, records, 2, "only platforms with a configured limit get a row")
+	var grokRecord, geminiRecord *UserPlatformQuotaRecord
 	for i := range records {
-		require.NotEqual(t, "gemini", records[i].Platform, "retired platform must not be snapshotted")
+		if records[i].Platform == PlatformGemini {
+			geminiRecord = &records[i]
+		}
 		if records[i].Platform == PlatformGrok {
 			grokRecord = &records[i]
 		}
 	}
+	require.NotNil(t, geminiRecord)
+	require.NotNil(t, geminiRecord.MonthlyLimitUSD)
+	require.InDelta(t, 5.0, *geminiRecord.MonthlyLimitUSD, 0.0001)
 	require.NotNil(t, grokRecord, "expected grok platform record")
 	require.NotNil(t, grokRecord.MonthlyLimitUSD)
 	require.InDelta(t, 100.0, *grokRecord.MonthlyLimitUSD, 0.0001)

@@ -144,7 +144,7 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 	}
 }
 
-func TestScopedAdminRegisteredModelDefaultsAntigravityMappingRemoved(t *testing.T) {
+func TestScopedAdminRegisteredModelDefaultsAntigravityMappingPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, allowed := range []bool{false, true} {
 		policy := adminaccess.Policy{}
@@ -161,14 +161,17 @@ func TestScopedAdminRegisteredModelDefaultsAntigravityMappingRemoved(t *testing.
 		accountHandler := adminhandler.NewAccountHandler(&scopedRouteAccounts{t: t}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		r := gin.New()
 		RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Account: accountHandler, Setting: adminhandler.NewSettingHandler(settings, nil, nil, nil, nil, nil, nil)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }), nil, nil)
-		// 本 fork 已移除 Antigravity 平台：默认映射接口不注册，受限密钥无论是否持有
-		// models.defaults.read 都只能拿到 404，不能落入账户受限处理器。
+		// 恢复的默认映射端点仍需 models.defaults.read 授权。
 		for _, path := range []string{"/api/v1/admin/accounts/antigravity/default-model-mapping"} {
 			req := httptest.NewRequest("GET", path, nil)
 			req.Header.Set("x-api-key", key)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			require.Equal(t, 404, w.Code, w.Body.String())
+			want := 403
+			if allowed {
+				want = 200
+			}
+			require.Equal(t, want, w.Code, w.Body.String())
 		}
 	}
 }

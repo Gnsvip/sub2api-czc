@@ -140,6 +140,8 @@ type SettingService struct {
 	codexRestrictionPolicySF           singleflight.Group
 
 	cyberSessionBlockRuntimeMu    sync.Mutex
+	antigravityUAVersionCache     atomic.Value // *cachedAntigravityUserAgentVersion
+	antigravityUAVersionSF        singleflight.Group
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 

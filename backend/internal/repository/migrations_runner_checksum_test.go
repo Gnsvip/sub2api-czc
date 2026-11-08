@@ -170,3 +170,21 @@ func TestIsMigrationChecksumCompatible(t *testing.T) {
 		require.False(t, ok)
 	})
 }
+
+func TestGoogleMigrationChecksumsRemainStrict(t *testing.T) {
+	t.Run("233_remove_gemini_antigravity.sql", func(t *testing.T) {
+		require.True(t, isMigrationChecksumCompatible("233_remove_gemini_antigravity.sql", "f6cbffd0a818f01f89639b5f1c26093dd3ad3c75c05ade8696af58ce2b385f58", "3caac0cd57e5037ceb5e5b86d599260ac62e6516603d954b8c72f9cb06b99915"))
+		require.False(t, isMigrationChecksumCompatible("233_remove_gemini_antigravity.sql", "unknown", "3caac0cd57e5037ceb5e5b86d599260ac62e6516603d954b8c72f9cb06b99915"))
+		require.False(t, isMigrationChecksumCompatible("233_remove_gemini_antigravity.sql", "f6cbffd0a818f01f89639b5f1c26093dd3ad3c75c05ade8696af58ce2b385f58", "unknown"))
+	})
+	t.Run("237_add_minimax_platform.sql", func(t *testing.T) {
+		require.True(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", "ee42a26fc134b059bc238e8ef2ce8c8349961d285723802cc9c1f1780e462cd0", "9f1f955208a6467d2750df331d99ac9dc268d5e28a732ffc01bea35802770a3f"))
+		require.False(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", "unknown", "9f1f955208a6467d2750df331d99ac9dc268d5e28a732ffc01bea35802770a3f"))
+		require.False(t, isMigrationChecksumCompatible("237_add_minimax_platform.sql", "ee42a26fc134b059bc238e8ef2ce8c8349961d285723802cc9c1f1780e462cd0", "unknown"))
+	})
+	t.Run("241_opencode_go_platform.sql", func(t *testing.T) {
+		require.True(t, isMigrationChecksumCompatible("241_opencode_go_platform.sql", "9f9ecbbd3809ce7659b450933f6ad655aeb321d4d9871d214efb77d7f8683191", "2b71b27cba6c45b49f49c7466564b7b082c4d66c3ccd1ce767656e898d6ebb70"))
+		require.False(t, isMigrationChecksumCompatible("241_opencode_go_platform.sql", "unknown", "2b71b27cba6c45b49f49c7466564b7b082c4d66c3ccd1ce767656e898d6ebb70"))
+		require.False(t, isMigrationChecksumCompatible("241_opencode_go_platform.sql", "9f9ecbbd3809ce7659b450933f6ad655aeb321d4d9871d214efb77d7f8683191", "unknown"))
+	})
+}

@@ -257,6 +257,20 @@
           }
         ]
       }
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini",
+      "gateway": "gemini",
+      "cn_provider": false,
+      "litellm_provider": "gemini"
+    },
+    {
+      "id": "antigravity",
+      "display_name": "Antigravity",
+      "gateway": "antigravity",
+      "cn_provider": false,
+      "litellm_provider": "anthropic"
     }
   ],
   "composite_precedence": [
@@ -269,6 +283,8 @@
     "minimax",
     "opencode_go",
     "command_code",
-    "cline"
+    "cline",
+    "gemini",
+    "antigravity"
   ]
 }

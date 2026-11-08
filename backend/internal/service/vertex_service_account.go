@@ -312,6 +312,46 @@ func (e *vertexTokenRequestError) Error() string {
 	return fmt.Sprintf("service account token request returned %d: %s", e.StatusCode, e.Message)
 }
 
+func buildVertexGeminiURL(projectID, location, model, action string, stream bool) (string, error) {
+	projectID = strings.TrimSpace(projectID)
+	location = strings.TrimSpace(location)
+	model = strings.TrimSpace(model)
+	action = strings.TrimSpace(action)
+	if projectID == "" {
+		return "", errors.New("vertex project_id is required")
+	}
+	if location == "" {
+		location = vertexDefaultLocation
+	}
+	if !vertexLocationPattern.MatchString(location) {
+		return "", fmt.Errorf("invalid vertex location: %s", location)
+	}
+	if model == "" {
+		return "", errors.New("vertex model is required")
+	}
+	switch action {
+	case "generateContent", "streamGenerateContent", "countTokens":
+	default:
+		return "", fmt.Errorf("unsupported vertex gemini action: %s", action)
+	}
+	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
+	if location == "global" {
+		host = "aiplatform.googleapis.com"
+	}
+	u := fmt.Sprintf(
+		"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
+		host,
+		url.PathEscape(projectID),
+		url.PathEscape(location),
+		url.PathEscape(model),
+		action,
+	)
+	if stream {
+		u += "?alt=sse"
+	}
+	return u, nil
+}
+
 func buildVertexAnthropicURL(projectID, location, model string, stream bool) (string, error) {
 	projectID = strings.TrimSpace(projectID)
 	location = strings.TrimSpace(location)
@@ -366,4 +406,68 @@ func buildVertexAnthropicRequestBody(body []byte) ([]byte, error) {
 	delete(payload, "model")
 	payload["anthropic_version"] = vertexAnthropicVersion
 	return json.Marshal(payload)
+}
+
+func buildVertexGeminiAccountURL(account *Account, model, action string, stream bool) (string, error) {
+	if account.IsVertexAPIKey() && account.VertexProjectID() == "" {
+		return buildVertexGeminiExpressURL(model, action, stream)
+	}
+	return buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(model), model, action, stream)
+}
+
+func setVertexGeminiAuth(ctx context.Context, req *http.Request, account *Account, tokenProvider *GeminiTokenProvider) error {
+	if account.IsVertexAPIKey() {
+		apiKey := strings.TrimSpace(account.GetCredential("api_key"))
+		if apiKey == "" {
+			return errors.New("vertex api_key not configured")
+		}
+		req.Header.Set("x-goog-api-key", apiKey)
+		return nil
+	}
+	if tokenProvider == nil {
+		return errors.New("gemini token provider not configured")
+	}
+	accessToken, err := tokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	return nil
+}
+
+func vertexServiceAccountNotFoundError(err error) (*vertexTokenRequestError, bool) {
+	var tokenErr *vertexTokenRequestError
+	if !errors.As(err, &tokenErr) {
+		return nil, false
+	}
+	if tokenErr.StatusCode != http.StatusBadRequest || tokenErr.Code != "invalid_grant" ||
+		!strings.Contains(strings.ToLower(tokenErr.Description), "account not found") {
+		return nil, false
+	}
+	return tokenErr, true
+}
+
+func buildVertexGeminiExpressURL(model, action string, stream bool) (string, error) {
+	model = strings.TrimSpace(model)
+	action = strings.TrimSpace(action)
+	if model == "" {
+		return "", errors.New("vertex model is required")
+	}
+	if err := validateVertexGeminiAction(action); err != nil {
+		return "", err
+	}
+	u := fmt.Sprintf("https://%s/v1/publishers/google/models/%s:%s", vertexGlobalHost, url.PathEscape(model), action)
+	if stream {
+		u += "?alt=sse"
+	}
+	return u, nil
+}
+
+func validateVertexGeminiAction(action string) error {
+	switch action {
+	case "generateContent", "streamGenerateContent", "countTokens":
+		return nil
+	default:
+		return fmt.Errorf("unsupported vertex gemini action: %s", action)
+	}
 }

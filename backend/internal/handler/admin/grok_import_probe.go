@@ -199,6 +199,8 @@ func ProvideAccountHandler(
 	adminService service.AdminService,
 	oauthService *service.OAuthService,
 	openaiOAuthService *service.OpenAIOAuthService,
+	geminiOAuthService *service.GeminiOAuthService,
+	antigravityOAuthService *service.AntigravityOAuthService,
 	grokOAuthService service.GrokOAuthTokenService,
 	rateLimitService *service.RateLimitService,
 	accountUsageService *service.AccountUsageService,
@@ -210,10 +212,12 @@ func ProvideAccountHandler(
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	grokQuotaService *service.GrokQuotaService,
 ) *AccountHandler {
-	handler := NewAccountHandler(
+	handler := NewAccountHandlerWithGoogleServices(
 		adminService,
 		oauthService,
 		openaiOAuthService,
+		geminiOAuthService,
+		antigravityOAuthService,
 		grokOAuthService,
 		rateLimitService,
 		accountUsageService,

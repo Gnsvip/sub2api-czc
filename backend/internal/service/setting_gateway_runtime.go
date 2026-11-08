@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"golang.org/x/sync/singleflight"
@@ -85,6 +86,16 @@ var accountSchedulingThresholdsSF singleflight.Group
 const accountSchedulingThresholdsCacheTTL = 60 * time.Second
 const accountSchedulingThresholdsErrorTTL = 5 * time.Second
 const accountSchedulingThresholdsDBTimeout = 5 * time.Second
+
+// cachedAntigravityUserAgentVersion 缓存 Antigravity UA 版本号（进程内缓存，60s TTL）
+type cachedAntigravityUserAgentVersion struct {
+	version   string
+	expiresAt int64 // unix nano
+}
+
+const antigravityUserAgentVersionCacheTTL = 60 * time.Second
+const antigravityUserAgentVersionErrorTTL = 5 * time.Second
+const antigravityUserAgentVersionDBTimeout = 5 * time.Second
 
 // DefaultOpenAICodexUserAgent 是 OpenAI Codex 默认 User-Agent，用于规避浏览器 UA 的质询。
 // 默认采用 codex-tui 身份，版本段随 codexCLIVersion 一起更新。
@@ -369,6 +380,55 @@ func (s *SettingService) InvalidateOpenAICodexTicketHarvestProxyCache() {
 	}
 	s.openAICodexTicketHarvestProxySF.Forget(SettingKeyOpenAICodexTicketHarvestProxyURL)
 	s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{expiresAt: 0})
+}
+
+// GetAntigravityUserAgentVersion 返回 Antigravity 上游请求使用的版本号。
+// 后台设置优先；为空、缺失或非法时回退到 ANTIGRAVITY_USER_AGENT_VERSION / 内置默认值。
+func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) string {
+	fallback := antigravity.GetDefaultUserAgentVersion()
+	if s == nil || s.settingRepo == nil {
+		return fallback
+	}
+	if cached, ok := s.antigravityUAVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.version
+		}
+	}
+
+	result, _, _ := s.antigravityUAVersionSF.Do("antigravity_user_agent_version", func() (any, error) {
+		if cached, ok := s.antigravityUAVersionCache.Load().(*cachedAntigravityUserAgentVersion); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.version, nil
+			}
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), antigravityUserAgentVersionDBTimeout)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyAntigravityUserAgentVersion)
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			slog.Warn("failed to get antigravity user agent version setting", "error", err)
+			s.antigravityUAVersionCache.Store(&cachedAntigravityUserAgentVersion{
+				version:   fallback,
+				expiresAt: time.Now().Add(antigravityUserAgentVersionErrorTTL).UnixNano(),
+			})
+			return fallback, nil
+		}
+		version := antigravity.NormalizeUserAgentVersion(value)
+		if version == "" {
+			version = fallback
+		}
+		s.antigravityUAVersionCache.Store(&cachedAntigravityUserAgentVersion{
+			version:   version,
+			expiresAt: time.Now().Add(antigravityUserAgentVersionCacheTTL).UnixNano(),
+		})
+		return version, nil
+	})
+	if version, ok := result.(string); ok && version != "" {
+		return version
+	}
+	return fallback
 }
 
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。

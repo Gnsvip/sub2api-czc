@@ -32,7 +32,7 @@ var definitions = []permissionDefinition{
 	{Permission{"groups.models.read", "读取所选分组模型白名单与候选 ID", "分组模型", "group"}, []string{"GET /groups", "GET /groups/all", "GET /groups/:id", "GET /groups/:id/model-allowlist-candidates"}},
 	{Permission{"groups.models.write", "编辑所选分组模型白名单（影响整个分组）", "分组模型", "group"}, []string{"PUT /groups/:id"}},
 	{Permission{"proxies.read", "读取代理 IP 候选（分页，不含认证凭证）", "代理", "global"}, []string{"GET /proxies", "GET /proxies/all", "GET /proxies/:id"}},
-	{Permission{"models.defaults.read", "读取默认白名单模型 ID（含默认映射）", "模型", "global"}, []string{"GET /groups/:id/model-allowlist-candidates"}},
+	{Permission{"models.defaults.read", "读取默认白名单模型 ID（含默认映射）", "模型", "global"}, []string{"GET /groups/:id/model-allowlist-candidates", "GET /accounts/antigravity/default-model-mapping"}},
 	{Permission{"dashboard.read", "读取全站经营报表", "报表", "global"}, []string{"GET /dashboard/snapshot-v2", "GET /dashboard/stats", "GET /dashboard/realtime", "GET /dashboard/trend", "GET /dashboard/models", "GET /dashboard/groups", "GET /dashboard/api-keys-trend", "GET /dashboard/users-trend", "GET /dashboard/users-ranking", "POST /dashboard/users-usage", "POST /dashboard/api-keys-usage", "GET /dashboard/user-breakdown"}},
 	{Permission{"users.read", "读取全站用户资料（含联系方式）", "用户", "global"}, []string{"GET /users", "GET /users/:id", "GET /users/:id/rpm-status", "GET /users/:id/attributes"}},
 	{Permission{"users.balance.read", "读取全站用户余额及流水", "财务", "global"}, []string{"GET /users/:id/balance-history"}},

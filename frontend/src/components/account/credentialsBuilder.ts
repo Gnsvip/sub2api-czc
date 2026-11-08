@@ -29,6 +29,21 @@ export function applyInterceptWarmup(
   }
 }
 
+export const ANTIGRAVITY_PROJECT_ID_CREDENTIAL_KEY = 'antigravity_project_id'
+
+export function applyAntigravityProjectID(
+  credentials: Record<string, unknown>,
+  projectId: string,
+  mode: 'create' | 'edit'
+): void {
+  const trimmed = projectId.trim()
+  if (trimmed) {
+    credentials[ANTIGRAVITY_PROJECT_ID_CREDENTIAL_KEY] = trimmed
+  } else if (mode === 'edit') {
+    delete credentials[ANTIGRAVITY_PROJECT_ID_CREDENTIAL_KEY]
+  }
+}
+
 // ========== 请求头覆写（API-key 平台 + grok 的 api_key/oauth 账号） ==========
 
 export const HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY = 'header_override_enabled'

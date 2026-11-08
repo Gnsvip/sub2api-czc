@@ -754,3 +754,22 @@ func buildChatStreamUpstreamErrorSSE(errType, message string) string {
 	}
 	return "data: " + string(payload) + "\n\n"
 }
+
+func extractCCReasoningEffortFromBody(body []byte, modelCandidates ...string) *string {
+	raw := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
+	if raw == "" {
+		raw = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	}
+	if raw == "" {
+		return nil
+	}
+	model := firstNonEmpty(modelCandidates...)
+	if model == "" {
+		model = strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	}
+	normalized := normalizeOpenAIReasoningEffortForModel(raw, model)
+	if normalized == "" {
+		return nil
+	}
+	return &normalized
+}

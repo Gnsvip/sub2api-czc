@@ -56,6 +56,8 @@ type OpsService struct {
 	concurrencyService          *ConcurrencyService
 	gatewayService              *GatewayService
 	openAIGatewayService        *OpenAIGatewayService
+	geminiCompatService         *GeminiMessagesCompatService
+	antigravityGatewayService   *AntigravityGatewayService
 	systemLogSink               *OpsSystemLogSink
 	ingressRejectAggregator     *OpsIngressRejectAggregator
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker
@@ -138,7 +140,7 @@ func (s *OpsService) ArchiveUsagePolicyConversation(ctx context.Context, entry *
 	s.usagePolicyObserver.ArchiveConversation(ctx, entry, input)
 }
 
-func NewOpsService(
+func NewOpsServiceWithGoogleServices(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
 	cfg *config.Config,
@@ -147,6 +149,8 @@ func NewOpsService(
 	concurrencyService *ConcurrencyService,
 	gatewayService *GatewayService,
 	openAIGatewayService *OpenAIGatewayService,
+	geminiCompatService *GeminiMessagesCompatService,
+	antigravityGatewayService *AntigravityGatewayService,
 	systemLogSink *OpsSystemLogSink,
 ) *OpsService {
 	svc := &OpsService{
@@ -157,10 +161,12 @@ func NewOpsService(
 		accountRepo: accountRepo,
 		userRepo:    userRepo,
 
-		concurrencyService:   concurrencyService,
-		gatewayService:       gatewayService,
-		openAIGatewayService: openAIGatewayService,
-		systemLogSink:        systemLogSink,
+		concurrencyService:        concurrencyService,
+		gatewayService:            gatewayService,
+		openAIGatewayService:      openAIGatewayService,
+		geminiCompatService:       geminiCompatService,
+		antigravityGatewayService: antigravityGatewayService,
+		systemLogSink:             systemLogSink,
 	}
 	svc.initRuntimeSettings(context.Background())
 	svc.applyRuntimeLogConfigOnStartup(context.Background())
@@ -1032,7 +1038,7 @@ func isSensitiveKey(key string) bool {
 }
 
 func trimConversationArrays(root map[string]any, maxBytes int) (map[string]any, bool) {
-	// Supported: anthropic/openai: messages; 其他上游: contents。
+	// Supported: anthropic/openai: messages; gemini: contents.
 	if out, ok := trimArrayField(root, "messages", maxBytes); ok {
 		return out, true
 	}
@@ -1157,4 +1163,19 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 		return truncateString(raw, maxBytes), true
 	}
 	return raw, false
+}
+
+// NewOpsService preserves the constructor for callers that do not configure Google platforms.
+func NewOpsService(
+	opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	cfg *config.Config,
+	accountRepo AccountRepository,
+	userRepo UserRepository,
+	concurrencyService *ConcurrencyService,
+	gatewayService *GatewayService,
+	openAIGatewayService *OpenAIGatewayService,
+	systemLogSink *OpsSystemLogSink,
+) *OpsService {
+	return NewOpsServiceWithGoogleServices(opsRepo, settingRepo, cfg, accountRepo, userRepo, concurrencyService, gatewayService, openAIGatewayService, nil, nil, systemLogSink)
 }

@@ -102,6 +102,7 @@ type Config struct {
 	SimpleMode               SimpleModeConfig               `mapstructure:"simple_mode" yaml:"simple_mode"`
 	RunMode                  string                         `mapstructure:"run_mode" yaml:"run_mode"`
 	Timezone                 string                         `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Gemini                   GeminiConfig                   `mapstructure:"gemini"`
 	Update                   UpdateConfig                   `mapstructure:"update"`
 	Idempotency              IdempotencyConfig              `mapstructure:"idempotency"`
 	ImageStorage             ImageStorageConfig             `mapstructure:"image_storage"`
@@ -172,6 +173,28 @@ type LogSamplingConfig struct {
 	Enabled    bool `mapstructure:"enabled"`
 	Initial    int  `mapstructure:"initial"`
 	Thereafter int  `mapstructure:"thereafter"`
+}
+
+type GeminiConfig struct {
+	OAuth GeminiOAuthConfig `mapstructure:"oauth"`
+	Quota GeminiQuotaConfig `mapstructure:"quota"`
+}
+
+type GeminiOAuthConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	Scopes       string `mapstructure:"scopes"`
+}
+
+type GeminiQuotaConfig struct {
+	Tiers  map[string]GeminiTierQuotaConfig `mapstructure:"tiers"`
+	Policy string                           `mapstructure:"policy"`
+}
+
+type GeminiTierQuotaConfig struct {
+	ProRPD          *int64 `mapstructure:"pro_rpd" json:"pro_rpd"`
+	FlashRPD        *int64 `mapstructure:"flash_rpd" json:"flash_rpd"`
+	CooldownMinutes *int   `mapstructure:"cooldown_minutes" json:"cooldown_minutes"`
 }
 
 type UpdateConfig struct {
@@ -793,7 +816,7 @@ type ProxyFallbackConfig struct {
 	// 仅影响以下非 AI 账号连接的辅助服务：
 	//   - GitHub Release 更新检查
 	//   - 定价数据拉取
-	// 不影响 AI 账号网关连接（Claude/OpenAI），
+	// 不影响 AI 账号网关连接（Claude/OpenAI/Gemini/Antigravity），
 	// 这些关键路径的代理失败始终返回错误，不会回退直连。
 	// 默认 false：避免因代理配置错误导致服务器真实 IP 泄露。
 	AllowDirectOnError bool `mapstructure:"allow_direct_on_error"`
@@ -1003,6 +1026,12 @@ type GatewayConfig struct {
 	ModelsListReadMaxBytes int64 `mapstructure:"models_list_read_max_bytes"`
 	// 代理探测响应体读取上限（字节）
 	ProxyProbeResponseReadMaxBytes int64 `mapstructure:"proxy_probe_response_read_max_bytes"`
+	// Gemini 上游响应头调试日志开关（默认关闭，避免高频日志开销）
+	SSEQueueMaxBytes                 int64 `mapstructure:"sse_queue_max_bytes"`
+	SSEEventMaxBytes                 int64 `mapstructure:"sse_event_max_bytes"`
+	SSEEventMaxLines                 int   `mapstructure:"sse_event_max_lines"`
+	GeminiCachedContentMaxTTLSeconds int   `mapstructure:"gemini_cached_content_max_ttl_seconds"`
+	GeminiDebugResponseHeaders       bool  `mapstructure:"gemini_debug_response_headers"`
 	// ConnectionPoolIsolation: 上游连接池隔离策略（proxy/account/account_proxy）
 	ConnectionPoolIsolation string `mapstructure:"connection_pool_isolation"`
 	// ForceCodexCLI: 强制将 OpenAI `/v1/responses` 请求按 Codex CLI 处理。
@@ -1129,6 +1158,12 @@ type GatewayConfig struct {
 
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
+	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
+	MaxSameAccountRetriesGemini int `mapstructure:"max_same_account_retries_gemini"`
+	MaxAccountSwitchesGemini    int `mapstructure:"max_account_switches_gemini"`
+
+	// Antigravity 429 fallback 限流时间（分钟），解析重置时间失败时使用
+	AntigravityFallbackCooldownMinutes int `mapstructure:"antigravity_fallback_cooldown_minutes"`
 
 	// Scheduling: 账号调度相关配置
 	Scheduling GatewaySchedulingConfig `mapstructure:"scheduling"`
@@ -2173,6 +2208,15 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("gateway.max_account_switches_gemini", 3)
+	viper.SetDefault("gateway.max_same_account_retries_gemini", 4)
+	viper.SetDefault("gateway.gemini_debug_response_headers", false)
+	viper.SetDefault("gateway.gemini_cached_content_max_ttl_seconds", 86400)
+	viper.SetDefault("gemini.oauth.client_id", "")
+	viper.SetDefault("gemini.oauth.client_secret", "")
+	viper.SetDefault("gemini.oauth.scopes", "")
+	viper.SetDefault("gemini.quota.policy", "")
+
 	viper.SetDefault("content_moderation_archive.key_ring_path", "")
 	viper.SetDefault("content_moderation_archive.retry_dir", "./data/content-moderation/retry")
 	viper.SetDefault("content_moderation_archive.emergency_dir", "./data/content-moderation/emergency")
@@ -2702,6 +2746,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 10)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.sse_queue_max_bytes", int64(8*1024*1024))
+	viper.SetDefault("gateway.sse_event_max_bytes", int64(0))
+	viper.SetDefault("gateway.sse_event_max_lines", 4096)
+	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -3460,6 +3508,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
+	}
+	if c.Gateway.MaxSameAccountRetriesGemini < 0 || c.Gateway.MaxSameAccountRetriesGemini > 10 {
+		return fmt.Errorf("gateway.max_same_account_retries_gemini must be between 0-10")
 	}
 	if c.Gateway.ResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.response_header_timeout must be non-negative")

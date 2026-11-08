@@ -98,6 +98,8 @@ const PLATFORM_LABELS: Record<string, string> = {
   zhipu: 'Zhipu GLM',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity',
 }
 
 function platformLabel(platform: string): string {

@@ -112,6 +112,7 @@ var ProviderSet = wire.NewSet(
 	NewTempUnschedCache,
 	NewTimeoutCounterCache,
 	NewOpenAI403CounterCache,
+	NewInternal500CounterCache,
 	ProvideConcurrencyCache,
 	ProvideSessionLimitCache,
 	NewRPMCache,
@@ -165,6 +166,10 @@ var ProviderSet = wire.NewSet(
 	NewOpenAIOAuthClient,
 	NewOpenAIReferralClient,
 	NewGrokOAuthClient,
+	NewGeminiOAuthClient,
+	NewGeminiCachedContentRepository,
+	NewGeminiCliCodeAssistClient,
+	NewGeminiDriveClient,
 
 	ProvideEnt,
 	ProvideSQLDB,

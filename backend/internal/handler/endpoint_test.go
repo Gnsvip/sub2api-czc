@@ -43,7 +43,7 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		{"/openai/v1/responses", EndpointResponses},
 		{"/openai/v1/images/generations", EndpointImagesGenerations},
 		{"/openai/v1/images/edits", EndpointImagesEdits},
-		{"/antigravity/v1beta/models/gemini:generateContent", "/antigravity/v1beta/models/gemini:generateContent"},
+		{"/antigravity/v1beta/models/gemini:generateContent", "/v1beta/models"},
 
 		// Prefixed paths — "/responses/compact" is its OWN distinct
 		// inbound endpoint, not folded into the root Responses endpoint.

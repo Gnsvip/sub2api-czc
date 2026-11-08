@@ -437,6 +437,14 @@ const grokTestModeOptions = computed(() => [
   { value: 'stt', label: t('admin.accounts.grok.testModeSTT') },
   { value: 'realtime', label: t('admin.accounts.grok.testModeRealtime') }
 ])
+const prioritizedGeminiModels = ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash']
+const supportsGeminiImageTest = computed(() => {
+  const modelID = selectedModelId.value.toLowerCase()
+  if (!modelID.startsWith('gemini-') || !modelID.includes('-image')) return false
+
+  return props.account?.platform === 'gemini' || (props.account?.platform === 'antigravity' && props.account?.type === 'apikey')
+})
+
 const supportsOpenAIImageTest = computed(() => {
   const modelID = selectedModelId.value.toLowerCase()
   if (!modelID.startsWith('gpt-image-')) return false
@@ -465,7 +473,7 @@ const supportsGrokVideoTest = computed(
 )
 
 const supportsImageTest = computed(
-  () => supportsOpenAIImageTest.value || supportsGrokImageTest.value
+  () => supportsGeminiImageTest.value || supportsOpenAIImageTest.value || supportsGrokImageTest.value
 )
 
 // Model select only when the mode needs a model.
@@ -693,6 +701,17 @@ const canStartTest = computed(() => {
   return Boolean(selectedModelId.value)
 })
 
+const sortTestModels = (models: ClaudeModel[]) => {
+  const priorityMap = new Map(prioritizedGeminiModels.map((id, index) => [id, index]))
+
+  return [...models].sort((a, b) => {
+    const aPriority = priorityMap.get(a.id) ?? Number.MAX_SAFE_INTEGER
+    const bPriority = priorityMap.get(b.id) ?? Number.MAX_SAFE_INTEGER
+    if (aPriority !== bPriority) return aPriority - bPriority
+    return 0
+  })
+}
+
 // Load available models when modal opens
 const applyDefaultPromptForMode = () => {
   if (!supportsPromptInput.value) return
@@ -744,11 +763,15 @@ const loadAvailableModels = async () => {
   try {
     const models = await adminAPI.accounts.getAvailableModels(props.account.id)
     if (version !== modelRequestVersion) return
-    availableModels.value = models
+    availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity' ? sortTestModels(models) : models
     if (availableModels.value.length > 0) {
-      // Try to select Sonnet as default, otherwise use first model
-      const sonnetModel = availableModels.value.find((m) => m.id.includes('sonnet'))
-      selectedModelId.value = sonnetModel?.id || availableModels.value[0].id
+      if (props.account.platform === 'gemini') {
+        selectedModelId.value = availableModels.value[0].id
+      } else {
+        // Try to select Sonnet as default, otherwise use first model
+        const sonnetModel = availableModels.value.find((m) => m.id.includes('sonnet'))
+        selectedModelId.value = sonnetModel?.id || availableModels.value[0].id
+      }
     }
   } catch (error) {
     if (version !== modelRequestVersion) return

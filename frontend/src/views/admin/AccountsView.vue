@@ -264,6 +264,12 @@
                   :privacy-mode="row.extra?.privacy_mode"
                   :subscription-expires-at="row.credentials?.subscription_expires_at"
                   :subscription-is-delinquent="row.credentials?.subscription_is_delinquent" />
+                <span
+                  v-if="getAntigravityTierLabel(row)"
+                  :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
+                >
+                  {{ getAntigravityTierLabel(row) }}
+                </span>
               </div>
               <div
                 v-if="getOpenAICompactMeta(row)"
@@ -768,6 +774,8 @@ const accountSupportsBatchUsage = (account: Account) => {
   if (account.platform === 'anthropic') {
     return account.type === 'oauth' || account.type === 'setup-token'
   }
+  if (account.platform === 'gemini') return true
+  if (account.platform === 'antigravity') return account.type === 'oauth'
   if (account.platform === 'openai') return account.type === 'oauth'
   if (account.platform === 'grok') return account.type === 'oauth'
   return false
@@ -1694,6 +1702,30 @@ function getOpenAIAuthMode(row: any): string | undefined {
   return typeof authMode === 'string' && authMode.trim() ? authMode : undefined
 }
 
+// Antigravity 订阅等级辅助函数
+function getAntigravityTierFromRow(row: Account): string | null {
+  if (row.platform !== 'antigravity') return null
+  const extra = row.extra as Record<string, unknown> | undefined
+  if (!extra) return null
+  const lca = extra.load_code_assist as Record<string, unknown> | undefined
+  if (!lca) return null
+  const paid = lca.paidTier as Record<string, unknown> | undefined
+  if (paid && typeof paid.id === 'string') return paid.id
+  const current = lca.currentTier as Record<string, unknown> | undefined
+  if (current && typeof current.id === 'string') return current.id
+  return null
+}
+
+function getAntigravityTierLabel(row: Account): string | null {
+  const tier = getAntigravityTierFromRow(row)
+  switch (tier) {
+    case 'free-tier': return t('admin.accounts.tier.free')
+    case 'g1-pro-tier': return t('admin.accounts.tier.pro')
+    case 'g1-ultra-tier': return t('admin.accounts.tier.ultra')
+    default: return null
+  }
+}
+
 function accountDisplayEmail(row: any): string {
   return row.extra?.email_address || row.extra?.email || row.credentials?.email || ''
 }
@@ -1749,6 +1781,16 @@ function getOpenAICompactTitle(row: any): string {
   const label = getOpenAICompactMeta(row)?.label || ''
   if (!checkedAt) return label
   return `${label} | ${t('admin.accounts.openai.compactLastChecked')}: ${formatDateTime(new Date(checkedAt))}`
+}
+
+function getAntigravityTierClass(row: any): string {
+  const tier = getAntigravityTierFromRow(row)
+  switch (tier) {
+    case 'free-tier': return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+    case 'g1-pro-tier': return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
+    case 'g1-ultra-tier': return 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300'
+    default: return ''
+  }
 }
 
 // All available columns
@@ -2348,6 +2390,12 @@ const privacyResultMessageKey = (account: Account): { type: 'success' | 'error';
       default:
         return { type: 'error', key: 'admin.accounts.privacyFailed' }
     }
+  }
+  if (account.platform === 'antigravity') {
+    if (mode === 'privacy_set') {
+      return { type: 'success', key: 'admin.accounts.privacyAntigravitySet' }
+    }
+    return { type: 'error', key: 'admin.accounts.privacyAntigravityFailed' }
   }
   return { type: 'error', key: 'admin.accounts.privacyFailed' }
 }

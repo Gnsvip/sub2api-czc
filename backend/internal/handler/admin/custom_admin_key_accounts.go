@@ -60,6 +60,14 @@ func (h *AccountHandler) ScopedAdminKeyAccounts(c *gin.Context) {
 	}
 	c.Abort()
 	base := "/api/v1/admin/accounts"
+	if path == base+"/antigravity/default-model-mapping" && c.Request.Method == "GET" {
+		if !slices.Contains(principal.Policy.GlobalPermissions, "models.defaults.read") {
+			response.Error(c, 403, "管理密钥未获此操作权限")
+			return
+		}
+		h.GetAntigravityDefaultModelMapping(c)
+		return
+	}
 	if path == base+"/import/codex-session" && c.Request.Method == "POST" {
 		h.scopedAdminImportCodexSession(c)
 		return

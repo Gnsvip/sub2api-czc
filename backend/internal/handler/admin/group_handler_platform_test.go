@@ -26,7 +26,7 @@ func bindGroupPlatformJSON(t *testing.T, target any, body string) error {
 
 func TestGroupPlatformBinding_AllowedPlatforms(t *testing.T) {
 	allowed := []string{
-		"anthropic", "openai", "grok",
+		"anthropic", "openai", "grok", "gemini", "antigravity",
 		"kimi", "zhipu", "deepseek", "minimax", "opencode_go", "composite",
 		"command_code", "cline",
 	}
@@ -55,8 +55,6 @@ func TestGroupPlatformBinding_RejectsInvalidPlatforms(t *testing.T) {
 		"openai ",  // 尾随空格
 		"glm",
 		"bogus",
-		"gemini",      // 已下线平台
-		"antigravity", // 已下线平台
 	}
 	for _, platform := range invalid {
 		t.Run("create_"+platform, func(t *testing.T) {
@@ -75,7 +73,7 @@ func TestGroupPlatformBinding_RejectsInvalidPlatforms(t *testing.T) {
 }
 
 func TestCompositeRouteTargetPlatform_AllowsConcreteProviders(t *testing.T) {
-	for _, platform := range []string{"kimi", "zhipu", "deepseek", "minimax", "opencode_go", "command_code", "cline"} {
+	for _, platform := range []string{"gemini", "antigravity", "kimi", "zhipu", "deepseek", "minimax", "opencode_go", "command_code", "cline"} {
 		var req CompositeRouteRequest
 		body := fmt.Sprintf(`{"public_model":"m","target_platform":%q}`, platform)
 		require.NoError(t, bindGroupPlatformJSON(t, &req, body))

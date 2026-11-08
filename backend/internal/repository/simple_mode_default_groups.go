@@ -20,14 +20,35 @@ func ensureSimpleModeDefaultGroups(ctx context.Context, client *dbent.Client) er
 		return err
 	}
 
-	platforms := []string{
-		service.PlatformAnthropic,
-		service.PlatformOpenAI,
-		service.PlatformGrok,
+	requiredByPlatform := map[string]int{
+		service.PlatformAnthropic:   1,
+		service.PlatformOpenAI:      1,
+		service.PlatformGemini:      1,
+		service.PlatformAntigravity: 2,
+		service.PlatformGrok:        1,
 	}
 
-	// 确保每个平台都存在 <platform>-default 分组。
-	for _, platform := range platforms {
+	for platform, minCount := range requiredByPlatform {
+		count, err := client.Group.Query().
+			Where(group.PlatformEQ(platform), group.DeletedAtIsNil()).
+			Count(ctx)
+		if err != nil {
+			return fmt.Errorf("count groups for platform %s: %w", platform, err)
+		}
+
+		if platform == service.PlatformAntigravity {
+			if count < minCount {
+				for i := count; i < minCount; i++ {
+					name := fmt.Sprintf("%s-default-%d", platform, i+1)
+					if err := createGroupIfNotExists(ctx, client, name, platform); err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+
+		// Non-antigravity platforms: ensure <platform>-default exists.
 		name := platform + "-default"
 		if err := createGroupIfNotExists(ctx, client, name, platform); err != nil {
 			return err

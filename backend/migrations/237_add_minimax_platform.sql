@@ -4,14 +4,14 @@
 --   3. channel_monitors / channel_monitor_request_templates.provider CHECK
 --
 -- 与 224/226/227 同型：DROP IF EXISTS 后重建超集约束，存量行瞬时校验通过。
--- 本 fork 已在 233 下线 Gemini / Antigravity，约束里不再写回这两个平台。
+-- Preserve Google platform rows during upgrades from deployments that still use them.
 
 ALTER TABLE user_platform_quotas
     DROP CONSTRAINT IF EXISTS user_platform_quotas_platform_check;
 
 ALTER TABLE user_platform_quotas
     ADD CONSTRAINT user_platform_quotas_platform_check
-    CHECK (platform IN ('anthropic', 'openai', 'grok',
+    CHECK (platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok',
                         'kimi', 'zhipu', 'deepseek', 'minimax'));
 
 ALTER TABLE composite_model_routes
@@ -19,7 +19,7 @@ ALTER TABLE composite_model_routes
 
 ALTER TABLE composite_model_routes
     ADD CONSTRAINT composite_model_routes_target_platform_check
-    CHECK (target_platform IN ('anthropic', 'openai', 'grok',
+    CHECK (target_platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok',
                                'kimi', 'zhipu', 'deepseek', 'minimax'));
 
 DO $$
@@ -39,7 +39,7 @@ BEGIN
             DROP CONSTRAINT IF EXISTS channel_monitors_provider_check;
         ALTER TABLE channel_monitors
             ADD CONSTRAINT channel_monitors_provider_check
-            CHECK (provider IN ('openai', 'anthropic', 'grok',
+            CHECK (provider IN ('openai', 'anthropic', 'gemini', 'antigravity', 'grok',
                                 'kimi', 'zhipu', 'deepseek', 'minimax'));
     END IF;
 
@@ -55,7 +55,7 @@ BEGIN
             DROP CONSTRAINT IF EXISTS channel_monitor_request_templates_provider_check;
         ALTER TABLE channel_monitor_request_templates
             ADD CONSTRAINT channel_monitor_request_templates_provider_check
-            CHECK (provider IN ('openai', 'anthropic', 'grok',
+            CHECK (provider IN ('openai', 'anthropic', 'gemini', 'antigravity', 'grok',
                                 'kimi', 'zhipu', 'deepseek', 'minimax'));
     END IF;
 END $$;

@@ -581,6 +581,8 @@ export default {
         usage: '用量',
         usageAnthropic: '用量 (Claude)',
         usageOpenAI: '用量 (OpenAI)',
+        usageGemini: '用量 (Gemini)',
+        usageAntigravity: '用量 (Antigravity)',
         concurrency: '并发数',
         status: '状态',
         lastActive: '最后活跃时间',
@@ -984,6 +986,8 @@ export default {
         all: '全部平台',
         anthropic: 'Anthropic',
         openai: 'OpenAI',
+        gemini: 'Gemini',
+        antigravity: 'Antigravity',
         grok: 'Grok',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
@@ -1088,6 +1092,11 @@ export default {
         perImageBilling: '按张计费',
         independentMultiplier: '生图倍率独立',
         imageMultiplier: '生图独立倍率',
+        batchDiscountMultiplier: '批量生图折扣倍率',
+        batchHoldMultiplier: '批量冻结价格比例',
+        batchSectionHint: '批量生图仅影响批量任务：结算价格会叠加批量折扣倍率，提交时冻结金额按普通生图原价 × 批量冻结价格比例计算。参考图也会产生上游输入 token 消耗，建议批量生图折扣倍率设置大于 0.5。',
+        batchDisabledHint: '请先开启当前分组生图，才能开启批量生图。',
+        batchGeminiOnlyHint: '批量生图当前仅支持 Gemini 分组。',
         modeHint: '默认关闭独立倍率时，图片费用 = 图片价格 × 当前分组有效倍率；开启独立倍率后，图片费用 = 图片价格 × 生图独立倍率。',
         finalPricePreview: '最终单张价格预览',
         notConfigured: '未配置'
@@ -1220,7 +1229,8 @@ export default {
           responses: 'Responses',
           chatCompletions: 'Chat Completions',
           embeddings: 'Embeddings',
-          images: 'Images'
+          images: 'Images',
+          gemini: 'Gemini 原生'
         },
         match: {
           exact: '精确',
@@ -1278,6 +1288,11 @@ export default {
         free: '免费 Fast',
         freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
       },
+      invalidRequestFallback: {
+        title: '无效请求兜底分组',
+        hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
+        noFallback: '不兜底'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',
@@ -1325,6 +1340,8 @@ export default {
         title: '支持的模型系列',
         tooltip: '选择此分组支持的模型系列。未勾选的系列将不会被路由到此分组。',
         claude: 'Claude',
+        geminiText: 'Gemini Text',
+        geminiImage: 'Gemini Image',
         hint: '至少选择一个模型系列'
       }
     },

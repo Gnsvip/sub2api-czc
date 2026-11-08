@@ -8,6 +8,8 @@ export const KEY_GROUP_PROVIDERS = ['anthropic', 'openai', 'domestic', 'other'] 
 const PROVIDER_BY_PLATFORM: Record<GroupPlatform, KeyGroupProvider> = {
   anthropic: 'anthropic',
   openai: 'openai',
+  gemini: 'other',
+  antigravity: 'other',
   kimi: 'domestic',
   zhipu: 'domestic',
   deepseek: 'domestic',

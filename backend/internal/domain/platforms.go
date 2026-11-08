@@ -12,7 +12,9 @@ type PlatformGateway string
 
 const (
 	// PlatformGatewayAnthropic 由 GatewayService 处理（Claude Messages 协议）。
-	PlatformGatewayAnthropic PlatformGateway = "anthropic"
+	PlatformGatewayAnthropic   PlatformGateway = "anthropic"
+	PlatformGatewayGemini      PlatformGateway = "gemini"
+	PlatformGatewayAntigravity PlatformGateway = "antigravity"
 	// PlatformGatewayOpenAI 由 OpenAIGatewayService 处理（OpenAI、Grok 与多协议 API Key 供应商）。
 	PlatformGatewayOpenAI PlatformGateway = "openai"
 )
@@ -41,6 +43,8 @@ var platformList = []PlatformSpec{
 	{ID: PlatformOpenCodeGo, DisplayName: "OpenCode", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "opencode-go"},
 	{ID: PlatformCommandCode, DisplayName: "Command Code", Gateway: PlatformGatewayOpenAI},
 	{ID: PlatformCline, DisplayName: "Cline", Gateway: PlatformGatewayOpenAI},
+	{ID: PlatformGemini, DisplayName: "Gemini", Gateway: PlatformGatewayGemini, LiteLLMProvider: "gemini"},
+	{ID: PlatformAntigravity, DisplayName: "Antigravity", Gateway: PlatformGatewayAntigravity, LiteLLMProvider: "anthropic"},
 }
 
 var platformIndex = func() map[string]int {

@@ -181,7 +181,7 @@ func TestUpdateUserPlatformQuotas_RejectsDuplicatePlatform(t *testing.T) {
 }
 
 func TestUpdateUserPlatformQuotas_RejectsInvalidPlatform(t *testing.T) {
-	for _, platform := range []string{"unknown", "gemini", "antigravity"} {
+	for _, platform := range []string{"unknown", "Gemini", "Antigravity"} {
 		h := buildTestHandler(&upsertCapturingQuotaRepo{}, &billingCacheStub{})
 		body := `{"quotas":[{"platform":"` + platform + `","daily_limit_usd":1}]}`
 		c, w := putReq(t, body)

@@ -306,9 +306,9 @@ func TestValidateCreateParams_CheckModeMatrix(t *testing.T) {
 			wantErr: ErrChannelMonitorInvalidEndpoint,
 		},
 		{
-			name: "retired provider rejected",
+			name: "unknown provider rejected",
 			params: ChannelMonitorCreateParams{
-				Provider: "antigravity", CheckMode: MonitorCheckModeQuota,
+				Provider: "unknown-provider", CheckMode: MonitorCheckModeQuota,
 				IntervalSeconds: 60, AccountID: &accountID,
 			},
 			wantErr: ErrChannelMonitorInvalidProvider,
@@ -363,14 +363,16 @@ func TestNormalizeMonitorPrimaryModel_QuotaDefault(t *testing.T) {
 
 func TestProviderProbeCapabilityMatrix(t *testing.T) {
 	for _, p := range []string{
-		MonitorProviderOpenAI, MonitorProviderAnthropic,
+		MonitorProviderOpenAI, MonitorProviderAnthropic, MonitorProviderGemini,
 		MonitorProviderGrok, MonitorProviderKimi, MonitorProviderZhipu, MonitorProviderDeepseek,
 	} {
 		require.True(t, providerSupportsProbe(p), p)
 		require.NoError(t, validateProvider(p), p)
 	}
-	// 已下线平台既不能探活也不能建监控。
-	for _, p := range []string{"gemini", "antigravity"} {
+	// Antigravity 支持配额监控，但没有模型探活 adapter。
+	require.NoError(t, validateProvider(MonitorProviderAntigravity))
+	require.False(t, providerSupportsProbe(MonitorProviderAntigravity))
+	for _, p := range []string{"unknown-provider"} {
 		require.False(t, providerSupportsProbe(p), p)
 		require.ErrorIs(t, validateProvider(p), ErrChannelMonitorInvalidProvider, p)
 	}
@@ -560,9 +562,9 @@ func TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode(t *testing.T) {
 		}
 	}
 
-	// 切到已下线 provider 直接被 provider 校验拒绝。
-	retired := "antigravity"
-	err := applyMonitorUpdate(probeKimi(), ChannelMonitorUpdateParams{Provider: &retired})
+	// 切到未知 provider 直接被 provider 校验拒绝。
+	unknown := "unknown-provider"
+	err := applyMonitorUpdate(probeKimi(), ChannelMonitorUpdateParams{Provider: &unknown})
 	require.ErrorIs(t, err, ErrChannelMonitorInvalidProvider)
 
 	// provider-only 切换到合法 provider 时复核 check_mode（probe 对 zhipu 合法）。
@@ -578,7 +580,7 @@ func TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode(t *testing.T) {
 
 	// 存量非法行（已下线 provider）仅改名/停用不被砖化。
 	legacy := &ChannelMonitor{
-		Provider: retired, APIMode: MonitorAPIModeChatCompletions,
+		Provider: unknown, APIMode: MonitorAPIModeChatCompletions,
 		Endpoint: "https://example.com", PrimaryModel: "legacy-model",
 		CheckMode: MonitorCheckModeProbe,
 	}

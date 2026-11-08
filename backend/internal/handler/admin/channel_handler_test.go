@@ -554,7 +554,7 @@ func TestSyncPricingModels_UnsupportedPlatform(t *testing.T) {
 	svc := service.NewPricingService(nil, nil)
 	router := setupSyncPricingModelsRouter(svc)
 
-	for _, platform := range []string{"unknown", "gemini", "antigravity"} {
+	for _, platform := range []string{"unknown", "unknown-gemini", "unknown-antigravity"} {
 		req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform="+platform, nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -567,7 +567,7 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 	svc := service.NewPricingService(nil, nil)
 	router := setupSyncPricingModelsRouter(svc)
 
-	for _, platform := range []string{"anthropic", "openai", "grok", "kimi", "zhipu", "deepseek", "minimax"} {
+	for _, platform := range []string{"anthropic", "openai", "grok", "kimi", "zhipu", "deepseek", "minimax", "gemini", "antigravity"} {
 		req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform="+platform, nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)

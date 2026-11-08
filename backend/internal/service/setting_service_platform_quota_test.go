@@ -92,10 +92,10 @@ func TestGetDefaultPlatformQuotas_ReturnsAllowedPlatforms(t *testing.T) {
 	if v := got["kimi"].DailyLimitUSD; v != nil {
 		t.Errorf("kimi daily want nil (not configured), got %v", *v)
 	}
-	// 已下线平台不得再被补齐进契约
-	for _, retired := range []string{"gemini", "antigravity"} {
-		if _, ok := got[retired]; ok {
-			t.Errorf("retired platform %q must not be present", retired)
+	// 恢复的平台必须包含在额度契约中
+	for _, platform := range []string{"gemini", "antigravity"} {
+		if _, ok := got[platform]; !ok {
+			t.Errorf("restored platform %q must be present", platform)
 		}
 	}
 }

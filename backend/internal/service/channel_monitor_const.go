@@ -55,6 +55,8 @@ const (
 	providerOpenAIResponsesPath = "/v1/responses"
 	// providerAnthropicPath Anthropic Messages 路径。
 	providerAnthropicPath = "/v1/messages"
+	// providerGeminiPathTemplate Gemini generateContent 路径模板（含 model 占位）。
+	providerGeminiPathTemplate = "/v1beta/models/%s:generateContent"
 
 	// MonitorProviderOpenAI 等 provider 字符串常量（也是 ent enum 的实际值）。
 	// 后 4 个 provider（kimi/zhipu/deepseek/minimax）为配额模式引入，复用 OpenAI 兼容探活。
@@ -66,6 +68,10 @@ const (
 	MonitorProviderDeepseek   = "deepseek"
 	MonitorProviderMiniMax    = "minimax"
 	MonitorProviderOpenCodeGo = "opencode_go"
+	// 后 4 个 provider（antigravity/kimi/zhipu/deepseek）为配额模式引入：
+	// antigravity 无探活 adapter（仅配额），其余 3 个复用 OpenAI 兼容探活。
+	MonitorProviderGemini      = "gemini"
+	MonitorProviderAntigravity = "antigravity"
 
 	// MonitorCheckMode 检测模式（channel_monitors.check_mode）。
 	//   probe       - LLM 探活（默认，原有行为）
@@ -148,10 +154,10 @@ var (
 		"CHANNEL_MONITOR_NOT_FOUND", "channel monitor not found",
 	)
 	ErrChannelMonitorInvalidProvider = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/grok/kimi/zhipu/deepseek/minimax",
+		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/antigravity/grok/kimi/zhipu/deepseek/minimax",
 	)
 	ErrChannelMonitorInvalidCheckMode = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_CHECK_MODE", "check_mode must be one of probe/quota/quota_probe",
+		"CHANNEL_MONITOR_INVALID_CHECK_MODE", "check_mode must be one of probe/quota/quota_probe; antigravity only supports quota",
 	)
 	ErrChannelMonitorAccountRequired = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_ACCOUNT_REQUIRED", "account_id is required for quota-based check_mode",

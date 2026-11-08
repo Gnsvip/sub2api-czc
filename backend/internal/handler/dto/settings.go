@@ -176,9 +176,15 @@ type SystemSettings struct {
 	DefaultSubscriptions         []DefaultSubscriptionSetting `json:"default_subscriptions"`
 
 	// Model fallback configuration
-	EnableModelFallback    bool   `json:"enable_model_fallback"`
-	FallbackModelAnthropic string `json:"fallback_model_anthropic"`
-	FallbackModelOpenAI    string `json:"fallback_model_openai"`
+	EnableModelFallback      bool   `json:"enable_model_fallback"`
+	FallbackModelAnthropic   string `json:"fallback_model_anthropic"`
+	FallbackModelOpenAI      string `json:"fallback_model_openai"`
+	FallbackModelGemini      string `json:"fallback_model_gemini"`
+	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
+
+	// Identity patch configuration (Claude -> Gemini)
+	EnableIdentityPatch bool   `json:"enable_identity_patch"`
+	IdentityPatchPrompt string `json:"identity_patch_prompt"`
 
 	// Ops monitoring (vNext)
 	OpsMonitoringEnabled         bool   `json:"ops_monitoring_enabled"`
@@ -216,6 +222,7 @@ type SystemSettings struct {
 	OpenAICodexTicketEnabled                bool   `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyConfigured bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
+	AntigravityUserAgentVersion             string `json:"antigravity_user_agent_version"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`

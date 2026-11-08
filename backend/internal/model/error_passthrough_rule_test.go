@@ -18,5 +18,7 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"opencode_go",
 		"command_code",
 		"cline",
+		"gemini",
+		"antigravity",
 	}, AllPlatforms())
 }

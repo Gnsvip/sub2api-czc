@@ -48,8 +48,8 @@ func TestAccountHandlerCheckMixedChannelNoRisk(t *testing.T) {
 	require.Equal(t, []int64{27}, adminSvc.lastMixedCheck.groupIDs)
 }
 
-func TestAccountHandlerRejectsRetiredPlatforms(t *testing.T) {
-	for _, platform := range []string{"gemini", "antigravity"} {
+func TestAccountHandlerRejectsUnknownPlatforms(t *testing.T) {
+	for _, platform := range []string{"unknown-provider", "Gemini"} {
 		t.Run(platform, func(t *testing.T) {
 			adminSvc := newStubAdminService()
 			router := setupAccountMixedChannelRouter(adminSvc)
@@ -63,7 +63,7 @@ func TestAccountHandlerRejectsRetiredPlatforms(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			router.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
-			require.Equal(t, "", adminSvc.lastMixedCheck.platform, "已下线平台不应到达 service 层")
+			require.Equal(t, "", adminSvc.lastMixedCheck.platform, "未知平台不应到达 service 层")
 
 			createBody, _ := json.Marshal(map[string]any{
 				"name":        "legacy-account",

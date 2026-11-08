@@ -514,3 +514,7 @@ func TestGetOpenAIUsage_ConsiderOpenAI429Recovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{account.ID}, recorder.accountIDs)
 }
+
+func (r *openai429RecoveryRepo) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
+	return nil
+}

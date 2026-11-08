@@ -1730,3 +1730,65 @@ func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64,
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	return 0, errors.New("not implemented")
 }
+
+// Native Gemini must retain the same CZC admission gates as other protocols.
+func TestGoogleAuthPreservesAdmissionGates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*service.APIKey)
+		status int
+	}{
+		{"valid", func(k *service.APIKey) {}, 200},
+		{"disabled key", func(k *service.APIKey) { k.Status = "disabled" }, 401},
+		{"disabled user", func(k *service.APIKey) { k.User.Status = "disabled" }, 401},
+		{"disabled group", func(k *service.APIKey) { k.Group.Status = "disabled" }, 403},
+		{"exclusive group", func(k *service.APIKey) { k.Group.IsExclusive = true }, 403},
+		{"exhausted balance", func(k *service.APIKey) { k.User.Balance = 0 }, 403},
+		{"expired key", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }, 403},
+		{"exhausted quota", func(k *service.APIKey) { k.Quota = 1; k.QuotaUsed = 1 }, 429},
+	} {
+		for _, credential := range []string{"header", "query"} {
+			t.Run(tc.name+"/"+credential, func(t *testing.T) {
+				group := &service.Group{ID: 202, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+				key := &service.APIKey{ID: 100, UserID: 7, Key: "test-key", Status: service.StatusActive, GroupID: &group.ID, Group: group,
+					User: &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 10, Concurrency: 3}}
+				tc.mutate(key)
+				repo := &stubApiKeyRepo{getByKey: func(_ context.Context, got string) (*service.APIKey, error) {
+					require.Equal(t, key.Key, got)
+					return key, nil
+				}}
+				cfg := &config.Config{RunMode: config.RunModeStandard}
+				svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+				router := gin.New()
+				router.Use(APIKeyAuthWithSubscriptionGoogle(svc, nil, cfg))
+				router.GET("/v1beta/models", func(c *gin.Context) {
+					require.Equal(t, int64(7), c.Request.Context().Value(ctxkey.UserID))
+					c.Status(200)
+				})
+				path := "/v1beta/models"
+				if credential == "query" {
+					path += "?key=test-key"
+				}
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				if credential == "header" {
+					req.Header.Set("x-goog-api-key", key.Key)
+				}
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, req)
+				require.Equal(t, tc.status, w.Code, w.Body.String())
+				if tc.status != 200 {
+					var response struct {
+						Error struct {
+							Code   int    `json:"code"`
+							Status string `json:"status"`
+						} `json:"error"`
+					}
+					require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+					require.Equal(t, tc.status, response.Error.Code)
+					require.NotEmpty(t, response.Error.Status)
+				}
+			})
+		}
+	}
+}

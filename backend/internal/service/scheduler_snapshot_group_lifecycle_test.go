@@ -329,7 +329,8 @@ func expectedGroupLifecycleBuckets(groupID int64) []SchedulerBucket {
 }
 
 func schedulerCanonicalAccountQueryCount() int {
-	return len(schedulerSnapshotPlatforms())
+	// single/forced share queries; Anthropic and Gemini each add a mixed query.
+	return len(schedulerSnapshotPlatforms()) + 2
 }
 
 func bucketStrings(buckets []SchedulerBucket) map[string]struct{} {

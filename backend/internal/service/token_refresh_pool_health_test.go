@@ -372,9 +372,11 @@ func TestTokenRefreshService_RegistrationsAreCandidateEligibilitySource(t *testi
 	require.Equal(t, []string{
 		PlatformAnthropic,
 		PlatformOpenAI,
+		PlatformGemini,
+		PlatformAntigravity,
 		PlatformGrok,
 	}, svc.eligiblePlatforms())
-	require.Len(t, svc.registrations, 3)
+	require.Len(t, svc.registrations, 5)
 	for _, registration := range svc.registrations {
 		require.NotNil(t, registration.refresher)
 		require.NotNil(t, registration.executor)

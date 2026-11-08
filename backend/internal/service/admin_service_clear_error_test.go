@@ -79,3 +79,7 @@ func TestAdminService_ClearAccountError_AlsoClearsRecoverableRuntimeState(t *tes
 	require.Empty(t, updated.TempUnschedulableReason)
 	require.Equal(t, []int64{31}, blocker.clearedIDs)
 }
+
+func (r *accountRepoStubForClearAccountError) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
+	return nil
+}

@@ -11,8 +11,10 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -278,6 +280,19 @@ func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
 	case PlatformOpenAI:
 		return openai.DefaultModelIDs()
+	case PlatformGemini:
+		ids := make([]string, 0, len(geminicli.DefaultModels))
+		for _, model := range geminicli.DefaultModels {
+			ids = append(ids, model.ID)
+		}
+		return ids
+	case PlatformAntigravity:
+		models := antigravity.DefaultModels()
+		ids := make([]string, 0, len(models))
+		for _, model := range models {
+			ids = append(ids, model.ID)
+		}
+		return ids
 	case PlatformGrok:
 		return xai.DefaultModelIDs()
 	case PlatformOpenCodeGo:
@@ -332,7 +347,9 @@ func canCopyAccountsFromGroupPlatform(targetPlatform, sourcePlatform string) boo
 
 func groupSupportsOAuthOnlyFilter(platform string) bool {
 	return platform == PlatformOpenAI ||
+		platform == PlatformAntigravity ||
 		platform == PlatformAnthropic ||
+		platform == PlatformGemini ||
 		platform == PlatformGrok ||
 		platform == PlatformComposite
 }
@@ -702,8 +719,8 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 // platform/subscriptionType: 当前分组的有效平台/订阅类型
 // fallbackGroupID: 兜底分组 ID
 func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Context, currentGroupID int64, platform, subscriptionType string, fallbackGroupID int64) error {
-	if platform != PlatformAnthropic {
-		return fmt.Errorf("invalid request fallback only supported for anthropic groups")
+	if platform != PlatformAnthropic && platform != PlatformAntigravity {
+		return fmt.Errorf("invalid request fallback only supported for anthropic or antigravity groups")
 	}
 	if subscriptionType == SubscriptionTypeSubscription {
 		return fmt.Errorf("subscription groups cannot set invalid request fallback")

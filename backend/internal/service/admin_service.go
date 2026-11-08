@@ -100,8 +100,12 @@ type AdminService interface {
 	SetAccountError(ctx context.Context, id int64, errorMsg string) error
 	// EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号 privacy_mode，未设置则尝试关闭训练数据共享并持久化。
 	EnsureOpenAIPrivacy(ctx context.Context, account *Account) string
+	// EnsureAntigravityPrivacy 检查 Antigravity OAuth 账号 privacy_mode，未设置则调用 setUserSettings 并持久化。
+	EnsureAntigravityPrivacy(ctx context.Context, account *Account) string
 	// ForceOpenAIPrivacy 强制重新设置 OpenAI OAuth 账号隐私，无论当前状态。
 	ForceOpenAIPrivacy(ctx context.Context, account *Account) string
+	// ForceAntigravityPrivacy 强制重新设置 Antigravity OAuth 账号隐私，无论当前状态。
+	ForceAntigravityPrivacy(ctx context.Context, account *Account) string
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	// SetOpenAICreditsEnabled 切换 OpenAI OAuth/SetupToken 账号"额度用尽后消耗点数"开关。
 	// 开启时解除当前限流，让账号立即恢复调度并由上游消耗点数。
@@ -282,7 +286,7 @@ type CreateGroupInput struct {
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
 	MCPXMLInject        *bool
-	// 支持的模型系列
+	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool
@@ -365,7 +369,7 @@ type UpdateGroupInput struct {
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
 	MCPXMLInject        *bool
-	// 支持的模型系列
+	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       *bool
@@ -651,6 +655,14 @@ var proxyQualityTargets = []proxyQualityTarget{
 			http.StatusMethodNotAllowed: {},
 			http.StatusNotFound:         {},
 			http.StatusBadRequest:       {},
+		},
+	},
+	{
+		Target: "gemini",
+		URL:    "https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta",
+		Method: http.MethodGet,
+		AllowedStatuses: map[int]struct{}{
+			http.StatusOK: {},
 		},
 	},
 	{

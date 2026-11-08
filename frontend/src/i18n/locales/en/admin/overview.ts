@@ -605,6 +605,8 @@ export default {
         usage: 'Usage',
         usageAnthropic: 'Usage (Claude)',
         usageOpenAI: 'Usage (OpenAI)',
+        usageGemini: 'Usage (Gemini)',
+        usageAntigravity: 'Usage (Antigravity)',
         concurrency: 'Concurrency',
         status: 'Status',
         lastActive: 'Last Active',
@@ -1057,6 +1059,8 @@ export default {
         all: 'All Platforms',
         anthropic: 'Anthropic',
         openai: 'OpenAI',
+        gemini: 'Gemini',
+        antigravity: 'Antigravity',
         grok: 'Grok',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
@@ -1091,6 +1095,11 @@ export default {
         perImageBilling: 'Bill per generated image',
         independentMultiplier: 'Use independent image multiplier',
         imageMultiplier: 'Image multiplier',
+        batchDiscountMultiplier: 'Batch image discount',
+        batchHoldMultiplier: 'Batch hold price ratio',
+        batchSectionHint: 'Batch image settings only apply to batch jobs: settlement applies the batch discount, and the upfront hold is normal image price × batch hold price ratio. Reference images also create upstream input-token usage, so a batch image discount above 0.5 is recommended.',
+        batchDisabledHint: 'Enable image generation for this group before enabling batch image generation.',
+        batchGeminiOnlyHint: 'Batch image generation is currently available only for Gemini groups.',
         modeHint: 'By default, image billing uses image price × current effective group multiplier. Independent mode uses image price × image multiplier.',
         finalPricePreview: 'Final per-image price preview',
         notConfigured: 'Not configured'
@@ -1223,7 +1232,8 @@ export default {
           responses: 'Responses',
           chatCompletions: 'Chat Completions',
           embeddings: 'Embeddings',
-          images: 'Images'
+          images: 'Images',
+          gemini: 'Gemini Native'
         },
         match: {
           exact: 'Exact',
@@ -1280,6 +1290,11 @@ export default {
         free: 'Free Fast',
         freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
       },
+      invalidRequestFallback: {
+        title: 'Invalid Request Fallback Group',
+        hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
+        noFallback: 'No Fallback'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',
@@ -1326,6 +1341,8 @@ export default {
         title: 'Supported Model Families',
         tooltip: 'Select the model families this group supports. Unchecked families will not be routed to this group.',
         claude: 'Claude',
+        geminiText: 'Gemini Text',
+        geminiImage: 'Gemini Image',
         hint: 'Select at least one model family'
       }
     },

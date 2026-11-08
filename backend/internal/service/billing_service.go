@@ -1391,7 +1391,7 @@ func (s *BillingService) CacheStoragePricePerTokenHour(model string) float64 {
 			return pricing.CacheStorageCostPerTokenPerHour
 		}
 	}
-	return 0
+	return builtinGeminiCacheStoragePrice(model)
 }
 
 // getModelPricingAt 保留带计费时点的内部调用接口。DeepSeek 默认低谷价

@@ -2605,3 +2605,7 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
 }
+
+func (r *mockAccountRepoForPlatform) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
+	return nil
+}

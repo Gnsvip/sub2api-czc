@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountUnsupportedPlatform = infraerrors.BadRequest("ACCOUNT_UNSUPPORTED_PLATFORM", "account platform must be one of anthropic/openai/grok/kimi/zhipu/deepseek")
+	ErrAccountNotFound            = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput            = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback       = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
 const AccountListGroupUngrouped int64 = -1

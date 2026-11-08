@@ -52,10 +52,8 @@ const (
 	PlatformCommandCode = domain.PlatformCommandCode
 	PlatformCline       = domain.PlatformCline
 	PlatformComposite   = domain.PlatformComposite
-	// Unregistered in this fork; skip branches and leftover tests only.
-	PlatformGemini      = domain.PlatformGemini
-	PlatformAntigravity = domain.PlatformAntigravity
-	PlatformTypeSafe    = domain.PlatformTypeSafe
+	// TypeSafe remains unregistered in this fork.
+	PlatformTypeSafe = domain.PlatformTypeSafe
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
 	PlatformKiro = "kiro"

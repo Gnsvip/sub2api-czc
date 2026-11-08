@@ -180,11 +180,27 @@ export default {
       },
       cliTabs: {
         claudeCode: 'Claude Code',
+        geminiCli: 'Gemini CLI',
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
         systemOne: 'System One',
         opencode: 'OpenCode'
+      },
+      antigravity: {
+        description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',
+        claudeCode: 'Claude Code',
+        geminiCli: 'Gemini CLI',
+        claudeNote:
+          '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。',
+        geminiNote:
+          '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
+      },
+      gemini: {
+        description:
+          '将以下环境变量添加到您的终端配置文件或直接在终端中运行，以配置 Gemini CLI 访问。',
+        modelComment: '如果你有 Gemini 3 权限可以填：gemini-3-pro-preview',
+        note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },
       grok: {
         description:
@@ -268,7 +284,9 @@ export default {
       title: '选择客户端',
       description: '请选择您要导入到 CC-Switch 的客户端类型：',
       claudeCode: 'Claude Code',
-      claudeCodeDesc: '导入为 Claude Code 配置'
+      claudeCodeDesc: '导入为 Claude Code 配置',
+      geminiCli: 'Gemini CLI',
+      geminiCliDesc: '导入为 Gemini CLI 配置'
     },
     // 配额和有效期
     quotaLimit: '额度限制',
@@ -490,7 +508,9 @@ export default {
     providers: {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
+      gemini: 'Gemini',
       grok: 'Grok',
+      antigravity: 'Antigravity',
       kimi: 'Kimi',
       zhipu: '智谱 GLM',
       deepseek: 'DeepSeek',

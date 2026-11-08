@@ -114,7 +114,7 @@ describe('ModelWhitelistSelector', () => {
     resetPlatformCatalog()
   })
 
-  it.each(['anthropic', 'openai', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline'])(
+  it.each(['anthropic', 'openai', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline', 'gemini', 'antigravity'])(
     'supports upstream sync for %s saved accounts and creation previews',
     (platform) => {
       const wrappers = [
@@ -128,8 +128,8 @@ describe('ModelWhitelistSelector', () => {
     }
   )
 
-  // gemini / antigravity / typesafe are not registered in this fork's platform catalog (c37d4b680).
-  it.each(['gemini', 'antigravity', 'typesafe', 'unregistered'])(
+  // Unknown providers do not have an upstream model request builder.
+  it.each(['typesafe', 'unregistered'])(
     'hides upstream sync for unsupported %s saved accounts and creation previews',
     (platform) => {
       const wrappers = [

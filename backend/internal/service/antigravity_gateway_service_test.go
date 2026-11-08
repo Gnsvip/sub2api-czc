@@ -144,15 +144,15 @@ func (s *httpUpstreamStub) DoWithTLS(_ *http.Request, _ string, _ int64, _ int, 
 	return s.resp, s.err
 }
 
-type queuedHTTPUpstreamStub struct {
+type googleQueuedHTTPUpstreamStub struct {
 	responses     []*http.Response
 	errors        []error
 	requestBodies [][]byte
 	callCount     int
-	onCall        func(*http.Request, *queuedHTTPUpstreamStub)
+	onCall        func(*http.Request, *googleQueuedHTTPUpstreamStub)
 }
 
-func (s *queuedHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (s *googleQueuedHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	if req != nil && req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.requestBodies = append(s.requestBodies, body)
@@ -181,7 +181,7 @@ func (s *queuedHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int)
 	return resp, err
 }
 
-func (s *queuedHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+func (s *googleQueuedHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return s.Do(req, proxyURL, accountID, concurrency)
 }
 
@@ -299,7 +299,7 @@ func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t
 	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:streamGenerateContent", bytes.NewReader(body))
 
 	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusOK,
@@ -347,7 +347,7 @@ func TestAntigravityGatewayService_ForwardGemini_ImageUsesDefaultMappingAndOAuth
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}],"generationConfig":{"responseModalities":["TEXT","IMAGE"],"imageConfig":{"aspectRatio":"1:1"}}}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-3.1-flash-image:generateContent", bytes.NewReader(body))
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -355,7 +355,7 @@ func TestAntigravityGatewayService_ForwardGemini_ImageUsesDefaultMappingAndOAuth
 				"data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"aGVsbG8=\"}}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n",
 			)),
 		}},
-		onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+		onCall: func(req *http.Request, _ *googleQueuedHTTPUpstreamStub) {
 			require.Equal(t, "Bearer test-access-token", req.Header.Get("Authorization"))
 			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			require.Contains(t, req.URL.String(), "/v1internal:streamGenerateContent?alt=sse")
@@ -407,7 +407,7 @@ func TestAntigravityGatewayService_ForwardGemini_StripsBuiltinsWhenClientFunctio
 	body = bytes.ReplaceAll(body, []byte{92}, nil)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
 
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{}}}\n\n")),
@@ -456,7 +456,7 @@ func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError
 	require.NoError(t, err)
 	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:streamGenerateContent", bytes.NewReader(body))
 
-	upstream := &queuedHTTPUpstreamStub{}
+	upstream := &googleQueuedHTTPUpstreamStub{}
 	internal500Cache := &recordingInternal500CounterCache{}
 	svc := &AntigravityGatewayService{
 		tokenProvider:    &AntigravityTokenProvider{},
@@ -983,7 +983,7 @@ func TestAntigravityGatewayService_ForwardGemini_FallbackReportsActualUpstreamMo
 		mappedModel   = "gemini-primary-upstream"
 		fallbackModel = "gemini-fallback-upstream"
 	)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{
 		{
 			StatusCode: http.StatusNotFound,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -1057,7 +1057,7 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 	firstRespBody := []byte(`{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`)
 	secondRespBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":8,\"candidatesTokenCount\":3}}}\n\n")
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusBadRequest,
@@ -1161,7 +1161,7 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 		},
 	}
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusBadRequest,
@@ -1172,7 +1172,7 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 				Body: io.NopCloser(bytes.NewReader(firstRespBody)),
 			},
 		},
-		onCall: func(_ *http.Request, stub *queuedHTTPUpstreamStub) {
+		onCall: func(_ *http.Request, stub *googleQueuedHTTPUpstreamStub) {
 			if stub.callCount != 1 {
 				return
 			}
@@ -2028,7 +2028,7 @@ func TestAntigravityGatewayService_ForwardGemini_NonStreamPreservesFunctionCallA
 		"",
 	}, "\n")
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -2117,7 +2117,7 @@ func TestAntigravityGatewayService_ForwardGemini_StreamAndFunctionResponseFollow
 		"",
 	}, "\n")
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusOK,

@@ -40,7 +40,7 @@ func TestInternal500OnImageModelCoolsOnlyThatModel(t *testing.T) {
 	svc.handleInternal500ForModel(context.Background(), "[test]", account, "gemini-3.1-flash-image")
 
 	require.Empty(t, cache.incrementCalls, "an image 500 must not count toward the account penalty")
-	require.Empty(t, repo.tempUnschedCalls, "an image 500 must not make the account unschedulable")
+	require.Empty(t, repo.antigravityTempUnschedCalls, "an image 500 must not make the account unschedulable")
 	require.Empty(t, repo.setErrorCalls)
 	require.Len(t, repo.modelLimitCalls, 1)
 	call := repo.modelLimitCalls[0]
@@ -57,7 +57,7 @@ func TestInternal500OnTextModelKeepsTheAccountPenalty(t *testing.T) {
 	svc.handleInternal500ForModel(context.Background(), "[test]", account, "gemini-4-argon-high")
 
 	require.Len(t, cache.incrementCalls, 1)
-	require.Len(t, repo.tempUnschedCalls, 1)
+	require.Len(t, repo.antigravityTempUnschedCalls, 1)
 	require.Empty(t, repo.modelLimitCalls)
 }
 
@@ -98,7 +98,7 @@ func TestInternal500PenaltyUsesConfiguredTiers(t *testing.T) {
 		before := time.Now()
 		svc.applyInternal500Penalty(context.Background(), "[test]", &Account{ID: 9, Name: "ag"}, tc.count)
 		require.Empty(t, repo.setErrorCalls, "count=%d must not disable the account when disabled by env", tc.count)
-		require.Len(t, repo.tempUnschedCalls, 1, "count=%d", tc.count)
-		require.WithinDuration(t, before.Add(tc.want), repo.tempUnschedCalls[0].until, 2*time.Second, "count=%d", tc.count)
+		require.Len(t, repo.antigravityTempUnschedCalls, 1, "count=%d", tc.count)
+		require.WithinDuration(t, before.Add(tc.want), repo.antigravityTempUnschedCalls[0].until, 2*time.Second, "count=%d", tc.count)
 	}
 }

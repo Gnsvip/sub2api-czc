@@ -166,9 +166,9 @@ func TestAntigravitySystemIdentityAcrossProtocols(t *testing.T) {
 						body, err := json.Marshal(request)
 						require.NoError(t, err)
 						var forwarded []byte
-						upstream := &queuedHTTPUpstreamStub{
+						upstream := &googleQueuedHTTPUpstreamStub{
 							responses: []*http.Response{antigravityCompatSuccessResponse()},
-							onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+							onCall: func(req *http.Request, _ *googleQueuedHTTPUpstreamStub) {
 								forwarded, err = io.ReadAll(req.Body)
 								require.NoError(t, err)
 							},
@@ -269,9 +269,9 @@ func TestAntigravitySystemIdentityMultipleBlocksForward(test *testing.T) {
 					body, err := json.Marshal(request)
 					require.NoError(test, err)
 					var forwarded []byte
-					upstream := &queuedHTTPUpstreamStub{
+					upstream := &googleQueuedHTTPUpstreamStub{
 						responses: []*http.Response{antigravityCompatSuccessResponse()},
-						onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+						onCall: func(req *http.Request, _ *googleQueuedHTTPUpstreamStub) {
 							forwarded, err = io.ReadAll(req.Body)
 							require.NoError(test, err)
 						},
@@ -392,9 +392,9 @@ func TestAntigravityCompatOAuthUsesNativeTokenAndRoute(t *testing.T) {
 			var authorization string
 			var upstreamPath string
 			var upstreamAlt string
-			upstream := &queuedHTTPUpstreamStub{
+			upstream := &googleQueuedHTTPUpstreamStub{
 				responses: []*http.Response{antigravityCompatSuccessResponse()},
-				onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+				onCall: func(req *http.Request, _ *googleQueuedHTTPUpstreamStub) {
 					authorization = req.Header.Get("Authorization")
 					upstreamPath = req.URL.Path
 					upstreamAlt = req.URL.Query().Get("alt")
@@ -540,7 +540,7 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 
 func TestAntigravityCompatChatMixedBuiltInToolsPreferClientFunctions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
 	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 	body := []byte(`{
 		"model":"claude-opus-4-6-thinking",
@@ -572,7 +572,7 @@ func TestAntigravityCompatChatMixedBuiltInToolsPreferClientFunctions(t *testing.
 
 func TestAntigravityCompatResponsesCodexWebSearchMixedWithFunctionsDropsBuiltins(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
 	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 	body := []byte(`{
 		"model":"claude-sonnet-4-6",
@@ -636,7 +636,7 @@ func TestAntigravityCompatPreservesChatTokenLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
 			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 			body := []byte(tt.body)
 			c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
@@ -690,7 +690,7 @@ func TestAntigravityCompatRoutesByMappedModelFamily(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
 			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 			body := []byte(`{"model":"` + tt.model + `","messages":[{"role":"user","content":"ok"}],"max_tokens":8}`)
 			c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
@@ -714,7 +714,7 @@ func TestAntigravityCompatRoutesByMappedModelFamily(t *testing.T) {
 
 func TestAntigravityCompatUnauthorizedIsCredentialFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusUnauthorized,
 		Header:     http.Header{"X-Request-Id": []string{"auth-3757"}},
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Invalid bearer token"}}`)),
@@ -861,7 +861,7 @@ func TestAntigravityCompatUsageOnlyNonStreamingTriggersFailover(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 				Body: io.NopCloser(strings.NewReader(

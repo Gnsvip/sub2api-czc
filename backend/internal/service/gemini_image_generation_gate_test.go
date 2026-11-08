@@ -238,7 +238,7 @@ func TestAntigravityForwards_ImageGenerationGate(t *testing.T) {
 	}
 	for _, fw := range forwards {
 		t.Run(fw.name+"/disabled group rejects", func(t *testing.T) {
-			upstream := &queuedHTTPUpstreamStub{}
+			upstream := &googleQueuedHTTPUpstreamStub{}
 			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 			c, rec := newAntigravityCompatContext(http.MethodPost, fw.path, fw.body)
 			withGeminiImageGateAPIKey(c, &Group{ID: 20, Platform: PlatformAntigravity, AllowImageGeneration: false})
@@ -250,7 +250,7 @@ func TestAntigravityForwards_ImageGenerationGate(t *testing.T) {
 			requireGeminiImagePermissionError(t, rec, fw.wantGoogleStatus)
 		})
 		t.Run(fw.name+"/enabled group reaches upstream", func(t *testing.T) {
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
 			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 			c, rec := newAntigravityCompatContext(http.MethodPost, fw.path, fw.body)
 			withGeminiImageGateAPIKey(c, &Group{ID: 21, Platform: PlatformAntigravity, AllowImageGeneration: true})

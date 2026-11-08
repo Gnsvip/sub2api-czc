@@ -37,11 +37,11 @@ func (m *mockInternal500Cache) ResetInternal500Count(_ context.Context, accountI
 type internal500AccountRepoStub struct {
 	AccountRepository // 嵌入接口，未实现的方法会 panic（不应被调用）
 
-	tempUnschedCalls []tempUnschedCall
+	antigravityTempUnschedCalls []antigravityTempUnschedCall
 	setErrorCalls    []setErrorCall
 }
 
-type tempUnschedCall struct {
+type antigravityTempUnschedCall struct {
 	accountID int64
 	until     time.Time
 	reason    string
@@ -53,7 +53,7 @@ type setErrorCall struct {
 }
 
 func (r *internal500AccountRepoStub) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
-	r.tempUnschedCalls = append(r.tempUnschedCalls, tempUnschedCall{accountID: id, until: until, reason: reason})
+	r.antigravityTempUnschedCalls = append(r.antigravityTempUnschedCalls, antigravityTempUnschedCall{accountID: id, until: until, reason: reason})
 	return nil
 }
 
@@ -124,10 +124,10 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 1)
 		after := time.Now()
 
-		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Len(t, repo.antigravityTempUnschedCalls, 1)
 		require.Empty(t, repo.setErrorCalls)
 
-		call := repo.tempUnschedCalls[0]
+		call := repo.antigravityTempUnschedCalls[0]
 		require.Equal(t, int64(1), call.accountID)
 		require.Contains(t, call.reason, "INTERNAL 500")
 		// until 应在 [before+10m, after+10m] 范围内
@@ -144,10 +144,10 @@ func TestApplyInternal500Penalty(t *testing.T) {
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 2)
 		after := time.Now()
 
-		require.Len(t, repo.tempUnschedCalls, 1)
+		require.Len(t, repo.antigravityTempUnschedCalls, 1)
 		require.Empty(t, repo.setErrorCalls)
 
-		call := repo.tempUnschedCalls[0]
+		call := repo.antigravityTempUnschedCalls[0]
 		require.Equal(t, int64(2), call.accountID)
 		require.Contains(t, call.reason, "INTERNAL 500")
 		require.True(t, call.until.After(before.Add(internal500PenaltyTier2Duration).Add(-time.Second)))
@@ -161,7 +161,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 3)
 
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Len(t, repo.setErrorCalls, 1)
 
 		call := repo.setErrorCalls[0]
@@ -176,7 +176,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 5)
 
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Len(t, repo.setErrorCalls, 1)
 
 		call := repo.setErrorCalls[0]
@@ -191,7 +191,7 @@ func TestApplyInternal500Penalty(t *testing.T) {
 
 		svc.applyInternal500Penalty(context.Background(), "[test]", account, 0)
 
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Empty(t, repo.setErrorCalls)
 	})
 }
@@ -213,7 +213,7 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 		require.NotPanics(t, func() {
 			svc.handleInternal500RetryExhausted(context.Background(), "[test]", account)
 		})
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Empty(t, repo.setErrorCalls)
 	})
 
@@ -232,7 +232,7 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 
 		require.Len(t, cache.incrementCalls, 1)
 		require.Equal(t, int64(2), cache.incrementCalls[0])
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Empty(t, repo.setErrorCalls)
 	})
 
@@ -252,8 +252,8 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 		require.Len(t, cache.incrementCalls, 1)
 		require.Equal(t, int64(3), cache.incrementCalls[0])
 		// tier1: SetTempUnschedulable
-		require.Len(t, repo.tempUnschedCalls, 1)
-		require.Equal(t, int64(3), repo.tempUnschedCalls[0].accountID)
+		require.Len(t, repo.antigravityTempUnschedCalls, 1)
+		require.Equal(t, int64(3), repo.antigravityTempUnschedCalls[0].accountID)
 		require.Empty(t, repo.setErrorCalls)
 	})
 
@@ -271,7 +271,7 @@ func TestHandleInternal500RetryExhausted(t *testing.T) {
 		svc.handleInternal500RetryExhausted(context.Background(), "[test]", account)
 
 		require.Len(t, cache.incrementCalls, 1)
-		require.Empty(t, repo.tempUnschedCalls)
+		require.Empty(t, repo.antigravityTempUnschedCalls)
 		require.Len(t, repo.setErrorCalls, 1)
 		require.Equal(t, int64(4), repo.setErrorCalls[0].accountID)
 	})

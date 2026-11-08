@@ -63,7 +63,7 @@ export function resolveCcSwitchImportConfig(
     case 'antigravity':
       return {
         app: clientType === 'gemini' ? 'gemini' : 'claude',
-        endpoint: `${baseUrl}/antigravity`
+        endpoint: `${withoutTrailingSlashes(baseUrl)}/antigravity`
       }
     case 'openai':
       return {

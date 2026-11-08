@@ -68,7 +68,7 @@ func TestGeminiNativeReasoningPricingUsesExplicitForwardedLevel(t *testing.T) {
 						contentType = "text/event-stream"
 						responseBody = "data: " + responseBody + "\n\n"
 					}
-					upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+					upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 						StatusCode: http.StatusOK,
 						Header:     http.Header{"Content-Type": []string{contentType}},
 						Body:       io.NopCloser(strings.NewReader(responseBody)),
@@ -157,7 +157,7 @@ func TestGeminiChatCompatReasoningPricingUsesForwardedEffort(t *testing.T) {
 				contentType = "text/event-stream"
 				responseBody = "data: " + responseBody + "\n\n"
 			}
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{contentType}},
 				Body:       io.NopCloser(strings.NewReader(responseBody)),

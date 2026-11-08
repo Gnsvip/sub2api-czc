@@ -104,7 +104,7 @@ func TestGeminiForwardAsChatCompletions_StreamsThoughtsAsReasoningContent(t *tes
 	upstreamBody := `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Weighing options","thought":true}]}}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":" carefully.","thought":true}]}}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Final answer","thoughtSignature":"sig"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":7}}` + "\n\n"
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
@@ -148,7 +148,7 @@ func TestGeminiForwardAsChatCompletions_StreamsThoughtsAsReasoningContent(t *tes
 
 func TestGeminiForwardAsChatCompletions_NonStreamForwardsEffortWithoutThoughts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}`)),
@@ -189,7 +189,7 @@ func TestGeminiMessagesForward_IncludeThoughtsFollowsClientThinking(t *testing.T
 				respBody = "data: " + respBody + "\n\n"
 				contentType = "text/event-stream"
 			}
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+			upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{contentType}},
 				Body:       io.NopCloser(strings.NewReader(respBody)),
@@ -276,7 +276,7 @@ func TestConvertClaudeMessagesToGemini_DropsHistoryThinkingBlocks(t *testing.T) 
 
 func TestGeminiForwardAsChatCompletions_DropsHistoryReasoningContent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}`)),
@@ -309,7 +309,7 @@ func TestGeminiForwardAsChatCompletions_DropsHistoryReasoningContent(t *testing.
 func TestGeminiMessagesForward_SignatureRetryKeepsClientThinkingParams(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	okBody := "data: " + `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}` + "\n\n"
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+	upstream := &googleQueuedHTTPUpstreamStub{responses: []*http.Response{
 		{
 			StatusCode: http.StatusBadRequest,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},

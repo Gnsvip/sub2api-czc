@@ -218,7 +218,7 @@ func TestAntigravityRetryLoop_ModelRateLimited_InjectsCredits(t *testing.T) {
 	antigravity.BaseURLs = []string{"https://ag-1.test"}
 	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
 
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusOK,
@@ -334,7 +334,7 @@ func TestAntigravityRetryLoop_CreditErrorMarksExhausted(t *testing.T) {
 	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
 
 	repo := &stubAntigravityAccountRepo{}
-	upstream := &queuedHTTPUpstreamStub{
+	upstream := &googleQueuedHTTPUpstreamStub{
 		responses: []*http.Response{
 			{
 				StatusCode: http.StatusForbidden,

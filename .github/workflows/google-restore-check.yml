@@ -58,12 +58,9 @@ jobs:
       - name: Generate dependency wiring
         working-directory: backend
         run: go generate ./cmd/server
-      - name: Compile restored services and tests
-        working-directory: backend
-        run: go test -tags=unit ./... -run '^$'
       - name: Backend regression tests
         working-directory: backend
-        run: go test -tags=unit ./... -count=1 -json > "$RUNNER_TEMP/backend-tests.jsonl"
+        run: go test -gcflags='github.com/Wei-Shaw/sub2api/...=-e' -tags=unit ./... -count=1 -json > "$RUNNER_TEMP/backend-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -75,4 +72,39 @@ jobs:
         with:
           name: google-generated-wiring
           path: backend/cmd/server/wire_gen.go
+          retention-days: 7
+
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: migration_rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Rehearse the existing schema without production data
+        env:
+          SCHEMA_PART_1: ${{ secrets.REHEARSAL_SCHEMA_PART_1 }}
+          SCHEMA_PART_2: ${{ secrets.REHEARSAL_SCHEMA_PART_2 }}
+          MIGRATIONS_B64: ${{ secrets.REHEARSAL_MIGRATIONS }}
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+          REHEARSAL_DSN: postgres://postgres:ci-only-password@127.0.0.1:5432/migration_rehearsal?sslmode=disable
+        run: bash .github/release-tools/rehearse-migration.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: migration-validation
+          path: ${{ runner.temp }}/migration-result.txt
           retention-days: 7

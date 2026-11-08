@@ -112,7 +112,7 @@ func TestBuildGeminiDigestChain(t *testing.T) {
 			}
 
 			// 检查分段数量
-			parts := splitChain(result)
+			parts := splitGeminiChain(result)
 			if len(parts) != tt.wantLen {
 				t.Errorf("expected %d parts, got %d: %s", tt.wantLen, len(parts), result)
 			}
@@ -246,8 +246,8 @@ func TestFormatGeminiSessionValue(t *testing.T) {
 	}
 }
 
-// splitChain 辅助函数：按 "-" 分割摘要链
-func splitChain(chain string) []string {
+// splitGeminiChain 辅助函数：按 "-" 分割摘要链
+func splitGeminiChain(chain string) []string {
 	if chain == "" {
 		return nil
 	}
@@ -323,8 +323,8 @@ func TestDigestChainTamperedMiddleContent(t *testing.T) {
 	}
 
 	// 验证第一个 user 的 hash 相同
-	parts1 := splitChain(chain1)
-	parts2 := splitChain(chain2)
+	parts1 := splitGeminiChain(chain1)
+	parts2 := splitGeminiChain(chain2)
 
 	if parts1[0] != parts2[0] {
 		t.Error("First user message hash should be the same")

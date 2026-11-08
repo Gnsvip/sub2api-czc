@@ -191,3 +191,7 @@ func (m *mockAccountRepoForTest) RevertProxyFallback(ctx context.Context, accoun
 
 // Verify interface implementation
 var _ AccountRepository = (*mockAccountRepoForTest)(nil)
+
+func (r *mockAccountRepoForTest) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
+	return nil
+}

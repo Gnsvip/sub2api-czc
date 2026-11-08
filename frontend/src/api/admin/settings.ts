@@ -640,12 +640,18 @@ export interface SystemSettings {
   enable_model_fallback: boolean;
   fallback_model_anthropic: string;
   fallback_model_openai: string;
+  fallback_model_gemini: string;
+  fallback_model_antigravity: string;
   grok_default_text_model: string;
   grok_cross_client_model_map_enabled: boolean;
   grok_default_base_url_mode: string;
 
   // Per-platform account auto-pause thresholds (100 = disabled)
   account_scheduling_thresholds: AccountSchedulingThresholdsMap;
+
+  // Identity patch configuration (Claude -> Gemini)
+  enable_identity_patch: boolean;
+  identity_patch_prompt: string;
 
   // Ops Monitoring (vNext)
   ops_monitoring_enabled: boolean;
@@ -671,6 +677,7 @@ export interface SystemSettings {
   enable_anthropic_cache_ttl_1h_injection: boolean;
   rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
+  antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
@@ -976,10 +983,14 @@ export interface UpdateSettingsRequest {
   enable_model_fallback?: boolean;
   fallback_model_anthropic?: string;
   fallback_model_openai?: string;
+  fallback_model_gemini?: string;
+  fallback_model_antigravity?: string;
   grok_default_text_model?: string;
   grok_cross_client_model_map_enabled?: boolean;
   grok_default_base_url_mode?: string;
   account_scheduling_thresholds?: AccountSchedulingThresholdsMap;
+  enable_identity_patch?: boolean;
+  identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;
   ops_realtime_monitoring_enabled?: boolean;
   ops_query_mode_default?: "auto" | "raw" | "preagg" | string;
@@ -997,6 +1008,7 @@ export interface UpdateSettingsRequest {
   enable_anthropic_cache_ttl_1h_injection?: boolean;
   rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
+  antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;

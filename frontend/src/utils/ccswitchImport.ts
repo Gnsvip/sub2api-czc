@@ -3,7 +3,7 @@ import type { GroupPlatform } from '@/types'
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 
-export type CcSwitchClientType = 'claude'
+export type CcSwitchClientType = 'claude' | 'gemini'
 
 export interface CcSwitchImportConfig {
   app: string
@@ -56,9 +56,15 @@ function withoutTrailingSlashes(baseUrl: string): string {
 
 export function resolveCcSwitchImportConfig(
   platform: GroupPlatform | undefined | null,
+  clientType: CcSwitchClientType,
   baseUrl: string
 ): CcSwitchImportConfig {
   switch (platform || 'anthropic') {
+    case 'antigravity':
+      return {
+        app: clientType === 'gemini' ? 'gemini' : 'claude',
+        endpoint: `${baseUrl}/antigravity`
+      }
     case 'openai':
       return {
         app: 'codex',
@@ -66,6 +72,11 @@ export function resolveCcSwitchImportConfig(
         // Passing /v1 here can make the client request /v1/v1/....
         endpoint: withoutTrailingSlashes(baseUrl),
         model: OPENAI_CC_SWITCH_CODEX_MODEL
+      }
+    case 'gemini':
+      return {
+        app: 'gemini',
+        endpoint: baseUrl
       }
     case 'grok':
       return {
@@ -82,7 +93,7 @@ export function resolveCcSwitchImportConfig(
 }
 
 export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput): string {
-  const config = resolveCcSwitchImportConfig(input.platform, input.baseUrl)
+  const config = resolveCcSwitchImportConfig(input.platform, input.clientType, input.baseUrl)
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', config.app],

@@ -15,6 +15,20 @@
       "litellm_provider": "openai"
     },
     {
+      "id": "antigravity",
+      "display_name": "Antigravity",
+      "gateway": "antigravity",
+      "cn_provider": false,
+      "litellm_provider": "anthropic"
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini",
+      "gateway": "gemini",
+      "cn_provider": false,
+      "litellm_provider": "gemini"
+    },
+    {
       "id": "grok",
       "display_name": "Grok",
       "gateway": "openai",

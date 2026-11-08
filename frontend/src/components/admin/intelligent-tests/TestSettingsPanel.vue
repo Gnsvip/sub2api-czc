@@ -1,14 +1,25 @@
 <template>
   <div class="space-y-5">
-    <div class="rounded-xl border border-primary-200 bg-primary-50/50 p-4 text-sm leading-relaxed text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">测试功能与用户可见性独立控制。关闭用户可见后，普通用户的入口和结果接口都会隐藏。管理员页不会自动发起测试，只能手动点运行；用户页鹈鹕动画仍按独立日程定时生成。检测不会自动修改账号策略。</div>
+    <div class="rounded-xl border border-primary-200 bg-primary-50/50 p-4 text-sm leading-relaxed text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">鹈鹕测试关闭“启用测试功能”会停止新测试并隐藏用户入口和结果；关闭“用户可查看”只隐藏展示。自动测试需要单独开启并选择分组，管理员仍可手动测试。其他测试的管理员可用与用户可见性独立控制。检测不会自动修改账号策略。</div>
     <form v-for="setting in drafts" :key="setting.test_type" class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-800" @submit.prevent="save(setting)">
       <fieldset :disabled="saving === setting.test_type" @input="markDirty(setting.test_type)" @change="markDirty(setting.test_type)">
       <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
         <div><h2 class="font-semibold">{{ setting.name || testName(setting.test_type) }}</h2><p class="mt-1 text-xs text-gray-500">独立的题目、模型和评分规则</p></div>
         <div class="flex flex-wrap gap-5 text-sm">
-          <label class="flex items-center gap-2"><input v-model="setting.enabled" type="checkbox" class="rounded text-primary-600" /> 管理员可用</label>
+          <label class="flex items-center gap-2"><input v-model="setting.enabled" type="checkbox" class="rounded text-primary-600" /> {{ setting.test_type === 'pelican' ? '启用测试功能' : '管理员可用' }}</label>
           <label class="flex items-center gap-2"><input v-model="setting.user_visible" type="checkbox" class="rounded text-primary-600" /> 用户可查看</label>
         </div>
+      </div>
+      <div v-if="setting.test_type === 'pelican'" class="mt-4 space-y-3 rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+        <label class="flex items-center gap-2 text-sm"><input v-model="setting.config.schedule_enabled" data-testid="pelican-schedule" type="checkbox" class="rounded text-primary-600" :disabled="!setting.enabled" /> 自动测试</label>
+        <label class="block text-sm">测试分组
+          <select v-model.number="setting.config.group_id" data-testid="pelican-group" class="input mt-2" :disabled="groupsLoading" :required="setting.enabled && setting.config.schedule_enabled">
+            <option :value="0">请选择已有分组</option>
+            <option v-for="group in groups" :key="group.id" :value="group.id" :disabled="group.status !== undefined && group.status !== 'active'">{{ group.name }}{{ group.status && group.status !== 'active' ? '（已停用）' : '' }}</option>
+            <option v-if="setting.config.group_id && !groups.some(group => group.id === setting.config.group_id)" :value="setting.config.group_id" disabled>原分组已不可用，请重新选择</option>
+          </select>
+        </label>
+        <p class="text-xs leading-relaxed text-gray-500">开启后，北京时间每天 08:00–24:00 每 30 分钟从所选分组抽取可用的 OpenAI OAuth / Setup Token 账号生成动画，会消耗上游额度。用户页也只展示该分组的结果。关闭自动测试不影响手动测试，已在运行的请求会完成。</p>
       </div>
       <div class="mt-4 grid gap-4 sm:grid-cols-2">
         <label class="block text-sm">模型<input v-model.trim="setting.config.model" class="input mt-2" :list="`intelligent-models-${setting.test_type}`" placeholder="留空：ChatGPT OAuth 使用 gpt-6-astra" maxlength="200" />
@@ -47,6 +58,7 @@ import { ref, watch } from 'vue'
 import { intelligentTestsAPI, type TestSetting, type TestRecord } from '@/api/intelligentTests'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { testName } from './display'
+import { usePelicanStore } from '@/stores/pelican'
 import TestAssessment from './TestAssessment.vue'
 import TestGeneratedImage from './TestGeneratedImage.vue'
 function evaluatorHint(evaluator?: string) {
@@ -54,7 +66,8 @@ function evaluatorHint(evaluator?: string) {
   if (evaluator === 'tibo_answer') return '与路由探测同一道题，只看 True / False 答案。'
   return 'B 方案分别判断答案和格式。12、12.0、全角数字及允许单位可数值等价；Markdown 和格式差异不扣答案分。多个冲突答案显示无法判定。仅检查最终答案，不验证完整推导。修改题目时请同步标准答案与单位。'
 }
-const props = defineProps<{ settings: TestSetting[] }>()
+const props = withDefaults(defineProps<{ settings: TestSetting[]; groups?: { id: number; name: string; status?: string }[]; groupsLoading?: boolean }>(), { groups: () => [], groupsLoading: false })
+const pelican = usePelicanStore()
 const emit = defineEmits<{ saved: [setting: TestSetting] }>()
 const drafts = ref<TestSetting[]>([]), saving = ref(''), saved = ref(''), errors = ref<Record<string, string>>({})
 const dirty = new Set<string>()
@@ -66,7 +79,7 @@ watch(() => props.settings, value => {
   drafts.value = value.map(item => {
     const existing = drafts.value.find(draft => draft.test_type === item.test_type)
     if (existing && dirty.has(item.test_type)) return existing
-    return { ...item, config: { answer_type: 'auto', answer_format: 'answer_line', answer_unit_mode: item.config.answer_unit ? 'configured' : 'legacy', ...item.config } }
+    return { ...item, config: { schedule_enabled: false, group_id: 0, answer_type: 'auto', answer_format: 'answer_line', answer_unit_mode: item.config.answer_unit ? 'configured' : 'legacy', ...item.config } }
   })
 }, { immediate: true, deep: true })
 async function preview(setting: TestSetting) {
@@ -81,9 +94,17 @@ async function preview(setting: TestSetting) {
 }
 async function save(setting: TestSetting) {
   if (saving.value) return
+  if (setting.test_type === 'pelican' && setting.enabled && setting.config.schedule_enabled && !setting.config.group_id) {
+    errors.value[setting.test_type] = '请选择自动测试使用的分组'
+    return
+  }
   const snapshot: TestSetting = { ...setting, config: { ...setting.config } }
   saving.value = setting.test_type; saved.value = ''; errors.value[setting.test_type] = ''
-  try { const result = await intelligentTestsAPI.saveSetting(snapshot); dirty.delete(snapshot.test_type); saved.value = snapshot.test_type; emit('saved', result) }
+  try {
+    const result = await intelligentTestsAPI.saveSetting(snapshot)
+    if (snapshot.test_type === 'pelican') pelican.setVisible(snapshot.enabled && snapshot.user_visible)
+    dirty.delete(snapshot.test_type); saved.value = snapshot.test_type; emit('saved', result)
+  }
   catch (error) { errors.value[setting.test_type] = extractApiErrorMessage(error, '设置保存失败') }
   finally { saving.value = '' }
 }

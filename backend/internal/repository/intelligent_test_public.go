@@ -15,6 +15,7 @@ import (
 // This predicate is shared by list, detail, history and image reads. Visibility
 // is checked from current settings at request time, never from a cached snapshot.
 const publicIntelligentAccessSQL = `a.deleted_at IS NULL AND s.user_visible
+ AND (s.test_type <> 'pelican' OR s.enabled)
  AND EXISTS(SELECT 1 FROM users u WHERE u.id=$1 AND u.status='active' AND u.deleted_at IS NULL
  AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
  WHERE ag.account_id=a.id AND g.deleted_at IS NULL AND g.status='active'
@@ -140,11 +141,11 @@ func (r *intelligentTestRepository) FirstAdminUserID(ctx context.Context) (int64
 	return id, err
 }
 
-func (r *intelligentTestRepository) ListPelicanCandidates(ctx context.Context) ([]service.PelicanCandidate, error) {
+func (r *intelligentTestRepository) ListPelicanCandidates(ctx context.Context, groupID int64) ([]service.PelicanCandidate, error) {
 	// Same schedulable gates as normal OpenAI routing, plus skip 5h/7d quota
 	// exhaustion. HTTP health is the persisted Tibo HTTP verdict (not stale).
 	// A valid ticket is an unexpired 292 with its harvest cookies.
-	// Candidates are GPT-PRO OAuth / setup-token accounts.
+	// Candidates belong to the configured group ID, independent of its name.
 	const astraTicket = `codex_turn_ticket:gpt-6-astra`
 	const tiboHTTP = `codex_tibo_verdict:http`
 	rows, err := r.db.QueryContext(ctx, `
@@ -170,7 +171,7 @@ JOIN groups g ON g.id=ag.group_id
 WHERE a.deleted_at IS NULL AND a.status=$1 AND a.platform=$2
   AND a.type = ANY($3)
   AND a.parent_account_id IS NULL AND a.schedulable=true
-  AND g.deleted_at IS NULL AND g.status=$1 AND lower(g.name)=$4
+  AND g.deleted_at IS NULL AND g.status=$1 AND g.id=$4
   AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
   AND (a.overload_until IS NULL OR a.overload_until <= NOW())
   AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
@@ -185,7 +186,7 @@ WHERE a.deleted_at IS NULL AND a.status=$1 AND a.platform=$2
     AND NULLIF(btrim(a.extra->>'codex_7d_reset_at'),'') IS NOT NULL
     AND (a.extra->>'codex_7d_reset_at')::timestamptz > NOW()
   )
-ORDER BY a.id`, service.StatusActive, service.PlatformOpenAI, pq.Array([]string{service.AccountTypeOAuth, service.AccountTypeSetupToken}), service.IntelligentTestPublicGroupName, astraTicket, tiboHTTP)
+ORDER BY a.id`, service.StatusActive, service.PlatformOpenAI, pq.Array([]string{service.AccountTypeOAuth, service.AccountTypeSetupToken}), groupID, astraTicket, tiboHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -229,27 +230,32 @@ ORDER BY t.id`, slotKey)
 
 func (r *intelligentTestRepository) UserPelicanTests(ctx context.Context, f service.IntelligentTestFilter) (*service.UserPelicanTests, error) {
 	out := &service.UserPelicanTests{Items: []service.UserPelicanTest{}, Page: f.Page, PageSize: f.PageSize}
+	if f.GroupID <= 0 {
+		return out, nil
+	}
 	base := `
 FROM account_tests t
 JOIN accounts a ON a.id=t.account_id
 JOIN test_settings s ON s.test_type=t.test_type
 WHERE t.test_type='pelican' AND t.status NOT IN ('queued','running','cancelled')
-  AND s.user_visible
+  AND s.enabled AND s.user_visible
+  AND (s.config->>'group_id')::bigint=$1
+  AND t.config_snapshot->>'group_id'=s.config->>'group_id'
   AND a.deleted_at IS NULL
   AND t.result ILIKE '%<svg%'
   AND COALESCE(t.finished_at, t.created_at) >= NOW() - INTERVAL '24 hours'
   AND EXISTS (
     SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
-    WHERE ag.account_id=a.id AND g.deleted_at IS NULL AND lower(g.name)=$1
+    WHERE ag.account_id=a.id AND g.deleted_at IS NULL AND g.status='active' AND g.id=$1
   )`
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, service.IntelligentTestPublicGroupName).Scan(&out.Total); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, f.GroupID).Scan(&out.Total); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT t.id,t.status,t.result,t.model,t.created_at,t.finished_at,t.duration_ms,
-COALESCE(NULLIF(t.config_snapshot#>>'{execution,group_name}',''),'GPT-PRO'),
+COALESCE((SELECT name FROM groups WHERE id=$1 AND deleted_at IS NULL),''),
 COALESCE(NULLIF(t.config_snapshot#>>'{execution,reasoning_effort}',''),'low'),
 COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),'')
-`+base+` ORDER BY t.id DESC LIMIT $2 OFFSET $3`, service.IntelligentTestPublicGroupName, f.PageSize, (f.Page-1)*f.PageSize)
+`+base+` ORDER BY t.id DESC LIMIT $2 OFFSET $3`, f.GroupID, f.PageSize, (f.Page-1)*f.PageSize)
 	if err != nil {
 		return nil, err
 	}

@@ -37,6 +37,8 @@ export interface TestOverview {
 }
 export interface TestPage<T> { items: T[]; total: number; page: number; page_size: number }
 export interface TestConfig {
+  schedule_enabled?: boolean
+  group_id?: number
   answer_type?: 'auto' | 'number' | 'text'
   answer_unit?: string
   answer_unit_mode?: 'legacy' | 'none' | 'configured'

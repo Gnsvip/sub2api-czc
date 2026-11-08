@@ -11,19 +11,25 @@ import (
 
 type hourlyPelicanRepo struct {
 	IntelligentTestRepository
-	adminID    int64
-	accountIDs []int64
-	candidates []PelicanCandidate
-	enqueued   []IntelligentTestEnqueue
-	actors     []int64
-	attempts   []PelicanSlotAttempt
+	setting          *IntelligentTestSetting
+	candidateGroupID int64
+	adminID          int64
+	accountIDs       []int64
+	candidates       []PelicanCandidate
+	enqueued         []IntelligentTestEnqueue
+	actors           []int64
+	attempts         []PelicanSlotAttempt
 }
 
 func (r *hourlyPelicanRepo) Settings(context.Context) ([]IntelligentTestSetting, error) {
-	return []IntelligentTestSetting{{TestType: "pelican", Enabled: true}}, nil
+	if r.setting != nil {
+		return []IntelligentTestSetting{*r.setting}, nil
+	}
+	return []IntelligentTestSetting{{TestType: "pelican", Enabled: true, Config: IntelligentTestConfig{ScheduleEnabled: true, GroupID: 42}}}, nil
 }
 func (r *hourlyPelicanRepo) FirstAdminUserID(context.Context) (int64, error) { return r.adminID, nil }
-func (r *hourlyPelicanRepo) ListPelicanCandidates(context.Context) ([]PelicanCandidate, error) {
+func (r *hourlyPelicanRepo) ListPelicanCandidates(_ context.Context, groupID int64) ([]PelicanCandidate, error) {
+	r.candidateGroupID = groupID
 	if len(r.candidates) > 0 {
 		return r.candidates, nil
 	}
@@ -75,26 +81,72 @@ func TestRunScheduledPelicanEnqueuesRandomAnimalPrompt(t *testing.T) {
 	require.True(t, matched, "prompt %q should name a known animal", prompt)
 	require.Regexp(t, `^pelican-slot-\d{12}$`, repo.enqueued[0].IdempotencyKey)
 	require.Equal(t, IntelligentTestSourcePelicanSchedule, repo.enqueued[0].Source)
+	require.EqualValues(t, 42, repo.candidateGroupID)
+	require.EqualValues(t, 42, repo.enqueued[0].ScheduledGroupID)
+}
+
+func TestScheduledPelicanRequiresExplicitSwitchAndGroup(t *testing.T) {
+	for _, setting := range []IntelligentTestSetting{
+		{TestType: "pelican", Enabled: true}, // An old installation must opt in.
+		{TestType: "pelican", Enabled: true, Config: IntelligentTestConfig{GroupID: 42}},
+		{TestType: "pelican", Enabled: true, Config: IntelligentTestConfig{ScheduleEnabled: true}},
+		{TestType: "pelican", Config: IntelligentTestConfig{ScheduleEnabled: true, GroupID: 42}},
+	} {
+		repo := &hourlyPelicanRepo{setting: &setting, adminID: 3, accountIDs: []int64{11}}
+		(&IntelligentTestService{repo: repo}).runScheduledPelicanAt(context.Background(), pelicanNoonBeijing(t))
+		require.Empty(t, repo.enqueued)
+		require.Zero(t, repo.candidateGroupID)
+	}
 }
 
 type userPelicanListRepo struct {
 	IntelligentTestRepository
-	filter IntelligentTestFilter
+	filter  IntelligentTestFilter
+	setting *IntelligentTestSetting
+	called  bool
+}
+
+func (r *userPelicanListRepo) Settings(context.Context) ([]IntelligentTestSetting, error) {
+	if r.setting != nil {
+		return []IntelligentTestSetting{*r.setting}, nil
+	}
+	return []IntelligentTestSetting{{TestType: "pelican", Enabled: true, UserVisible: true, Config: IntelligentTestConfig{GroupID: 77}}}, nil
 }
 
 func (r *userPelicanListRepo) UserPelicanTests(_ context.Context, f IntelligentTestFilter) (*UserPelicanTests, error) {
 	r.filter = f
+	r.called = true
 	return &UserPelicanTests{Items: []UserPelicanTest{}, Page: f.Page, PageSize: f.PageSize}, nil
 }
 
 func TestUserPelicanTestsListsLastTwentyFourHours(t *testing.T) {
 	repo := &userPelicanListRepo{}
 	svc := &IntelligentTestService{repo: repo}
-	out, err := svc.UserPelicanTests(context.Background(), 9, IntelligentTestFilter{Page: 3, PageSize: 12})
+	out, err := svc.UserPelicanTests(context.Background(), 9, IntelligentTestFilter{Page: 3, PageSize: 12, GroupID: 999})
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.filter.Page)
 	require.Equal(t, pelicanUserPageSize, repo.filter.PageSize)
 	require.Equal(t, pelicanUserPageSize, out.PageSize)
+	require.EqualValues(t, 77, repo.filter.GroupID)
+}
+
+func TestPelicanVisibilityRevokesResultAccess(t *testing.T) {
+	for _, setting := range []IntelligentTestSetting{
+		{TestType: "pelican", Enabled: true, UserVisible: false},
+		{TestType: "pelican", Enabled: false, UserVisible: true},
+	} {
+		repo := &userPelicanListRepo{setting: &setting}
+		svc := &IntelligentTestService{repo: repo}
+		visible, err := svc.PelicanVisible(context.Background(), 9)
+		require.NoError(t, err)
+		require.False(t, visible)
+		_, err = svc.UserPelicanTests(context.Background(), 9, IntelligentTestFilter{})
+		require.ErrorIs(t, err, ErrIntelligentTestNotFound)
+		require.False(t, repo.called)
+	}
+	visible, err := (&IntelligentTestService{repo: &userPelicanListRepo{}}).PelicanVisible(context.Background(), 9)
+	require.NoError(t, err)
+	require.True(t, visible, "manual results can remain visible while the timer is off")
 }
 
 type purgePelicanRepo struct {

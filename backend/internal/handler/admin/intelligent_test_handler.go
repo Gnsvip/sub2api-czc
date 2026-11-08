@@ -104,6 +104,7 @@ func IntelligentTestParamID(c *gin.Context, param string) (int64, bool) {
 	return id, true
 }
 func (h *IntelligentTestHandler) UserPelicanTests(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	actor, ok := intelligentUserActor(c)
 	if !ok {
 		return
@@ -115,6 +116,18 @@ func (h *IntelligentTestHandler) UserPelicanTests(c *gin.Context) {
 	out, err := h.svc.UserPelicanTests(c.Request.Context(), actor, f)
 	if !response.ErrorFrom(c, err) {
 		response.Success(c, out)
+	}
+}
+
+func (h *IntelligentTestHandler) PelicanVisibility(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	actor, ok := intelligentUserActor(c)
+	if !ok {
+		return
+	}
+	visible, err := h.svc.PelicanVisible(c.Request.Context(), actor)
+	if !response.ErrorFrom(c, err) {
+		response.Success(c, gin.H{"visible": visible})
 	}
 }
 

@@ -190,6 +190,7 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { usePelicanStore } from '@/stores/pelican'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import VersionBadge from '@/components/common/VersionBadge.vue'
@@ -239,6 +240,7 @@ const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
+const pelican = usePelicanStore()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
@@ -701,7 +703,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   }
   items.push(
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
-    { path: '/pelican-test', label: t('nav.pelicanTest'), icon: GlobeIcon },
+    { path: '/pelican-test', label: t('nav.pelicanTest'), icon: GlobeIcon, featureFlag: () => pelican.visible },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
@@ -927,7 +929,20 @@ watch(
   { immediate: true }
 )
 
+let pelicanRefreshTimer: ReturnType<typeof setInterval> | undefined
+async function refreshPelicanVisibility() {
+  if (document.hidden) return
+  const visible = await pelican.refresh()
+  if (!visible && route.path === '/pelican-test') {
+    void router.replace(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+  }
+}
+
 onMounted(() => {
+  void refreshPelicanVisibility()
+  pelicanRefreshTimer = setInterval(() => { void refreshPelicanVisibility() }, 30000)
+  window.addEventListener('focus', refreshPelicanVisibility)
+  document.addEventListener('visibilitychange', refreshPelicanVisibility)
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
@@ -942,6 +957,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearInterval(pelicanRefreshTimer)
+  window.removeEventListener('focus', refreshPelicanVisibility)
+  document.removeEventListener('visibilitychange', refreshPelicanVisibility)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }

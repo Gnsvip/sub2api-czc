@@ -16,6 +16,7 @@ vi.mock('@/api/intelligentTests', () => ({
 }))
 vi.mock('@/api/admin/accounts', () => ({ getAvailableModels: vi.fn() }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() }) }))
+vi.mock('@/stores/pelican', () => ({ usePelicanStore: () => ({ setVisible: vi.fn() }) }))
 const BaseDialog = defineComponent({ props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
 const settings: TestSetting[] = [{ test_type: 'pelican', enabled: true, user_visible: false, config: { prompt: 'Draw a pelican', model: '', evaluator: 'svg_structure', timeout_seconds: 180 } }, { test_type: 'candy', enabled: false, user_visible: true, config: { prompt: '12 minus 5?', model: '', evaluator: 'exact_answer', expected_answer: '7', timeout_seconds: 120 } }]
 const record: TestRecord = { id: 1, account_id: 42, test_type: 'pelican', status: 'running', score: null, result: '', result_image: '', duration_ms: 0, model: 'test-model', anti_degradation: true, started_at: '2026-09-12T12:00:00Z', finished_at: null, created_at: '2026-09-12T12:00:00Z' }

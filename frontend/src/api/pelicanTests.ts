@@ -22,6 +22,9 @@ export interface PelicanTestPage {
 }
 
 export const pelicanTestsAPI = {
+  async visibility() {
+    return (await apiClient.get<{ visible: boolean }>('/pelican-tests/visibility')).data
+  },
   async list(page = 1, pageSize = 12) {
     return (await apiClient.get<PelicanTestPage>('/pelican-tests', { params: { page, page_size: pageSize } })).data
   }

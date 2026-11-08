@@ -132,9 +132,9 @@ func TestPreviewIntelligentTestHTMLReportsUnavailable(t *testing.T) {
 	}
 }
 
-func TestPelicanTestGroupNameUsesGPTPro(t *testing.T) {
+func TestPelicanTestGroupNameUsesConfiguredID(t *testing.T) {
 	t.Parallel()
-	require.Empty(t, pelicanTestGroupName(nil))
-	require.Equal(t, "GPT-PRO", pelicanTestGroupName(&Account{Groups: []*Group{{Name: "other"}, {Name: "GPT-PRO"}}}))
-	require.Empty(t, pelicanTestGroupName(&Account{Groups: []*Group{{Name: "default"}}}))
+	require.Empty(t, pelicanTestGroupName(nil, 42))
+	require.Equal(t, "Renamed group", pelicanTestGroupName(&Account{Groups: []*Group{{ID: 1, Name: "GPT-PRO"}, {ID: 42, Name: "Renamed group"}}}, 42))
+	require.Empty(t, pelicanTestGroupName(&Account{Groups: []*Group{{ID: 1, Name: "default"}}}, 42))
 }

@@ -580,7 +580,7 @@ func TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode(t *testing.T) {
 
 	// 存量非法行（已下线 provider）仅改名/停用不被砖化。
 	legacy := &ChannelMonitor{
-		Provider: retired, APIMode: MonitorAPIModeChatCompletions,
+		Provider: unknown, APIMode: MonitorAPIModeChatCompletions,
 		Endpoint: "https://example.com", PrimaryModel: "legacy-model",
 		CheckMode: MonitorCheckModeProbe,
 	}

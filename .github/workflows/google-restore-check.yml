@@ -1,8 +1,6 @@
 name: Google restoration checks
 
 on:
-  push:
-    branches: [feature/restore-google-platforms]
   workflow_dispatch:
 
 permissions:

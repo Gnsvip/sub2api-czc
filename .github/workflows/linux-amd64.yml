@@ -25,6 +25,9 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Google restoration regression checks
+        working-directory: backend
+        run: go test -tags=unit ./internal/service -run '^(TestAdminService_.*InvalidRequestFallback|TestSetAntigravityModelRateLimits_Image|TestValidateCreateParams_CheckModeMatrix|TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode|TestMatchingPlatforms|TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets|TestCacheStoragePricePerTokenHourPriority|TestPlatformListDerived|TestScheduler|TestTokenRefreshService_Registrations)' -count=1 -json > "$RUNNER_TEMP/google-focused.jsonl"
       - name: Unit tests
         working-directory: backend
         run: |
@@ -44,6 +47,7 @@ jobs:
         with:
           name: backend-validation
           path: |
+            ${{ runner.temp }}/google-focused.jsonl
             ${{ runner.temp }}/backend-tests.jsonl
             ${{ runner.temp }}/integration-tests.jsonl
             ${{ runner.temp }}/subscription-tests.jsonl

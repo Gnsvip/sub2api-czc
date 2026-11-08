@@ -584,6 +584,12 @@ func (s *stubAdminService) SetOpenAICreditsEnabled(ctx context.Context, id int64
 	return &account, nil
 }
 
+func (s *stubAdminService) SetOpenAIAstraProbeEnabled(ctx context.Context, id int64, enabled bool) (*service.Account, error) {
+	account := service.Account{ID: id, Name: "account", Status: service.StatusActive, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Extra: map[string]any{service.OpenAIAstraProbeEnabledExtraKey: enabled}}
+	return &account, nil
+}
+
 func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error) {
 	s.lastBulkUpdateAccountInput = input
 	if s.bulkUpdateAccountErr != nil {

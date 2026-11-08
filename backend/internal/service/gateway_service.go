@@ -1466,15 +1466,14 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 // mixedListingAccountAllowed mirrors the mixed-scheduling rule in
 // GeminiMessagesCompatService.listSchedulableAccountsOnce: a gemini group may be
 // served by antigravity accounts, so model listing must consider them too.
-func mixedListingAccountAllowed(string, *Account) bool {
-	// 本 fork 已下线 Gemini / Antigravity，混合调度不再把它们列入模型目录。
-	return false
+func mixedListingAccountAllowed(groupPlatform string, account *Account) bool {
+	return groupPlatform == PlatformGemini && account.IsMixedSchedulingEnabled()
 }
 
 // mixedListingModelAllowed limits what a mixed-scheduling account may advertise
 // on the group's platform: only gemini-* wire IDs are meaningful on a gemini group.
-func mixedListingModelAllowed(string, string) bool {
-	return false
+func mixedListingModelAllowed(groupPlatform, model string) bool {
+	return groupPlatform == PlatformGemini && isAntigravityGeminiModel(model)
 }
 
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {

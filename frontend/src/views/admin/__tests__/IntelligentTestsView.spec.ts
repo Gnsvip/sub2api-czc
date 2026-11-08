@@ -85,7 +85,7 @@ describe('IntelligentTestsView router modes', () => {
     expect((schedule.element as HTMLInputElement).checked).toBe(false)
     await schedule.setValue(true)
     await wrapper.get('[data-testid="pelican-group"]').setValue('10')
-    await wrapper.findAll('form')[0].trigger('submit')
+    await wrapper.findAll('form').find(form => form.find('[data-testid="pelican-group"]').exists())!.trigger('submit')
     await flushPromises()
     expect(intelligentTestsAPI.saveSetting).toHaveBeenCalledWith(expect.objectContaining({
       test_type: 'pelican', config: expect.objectContaining({ schedule_enabled: true, group_id: 10 })

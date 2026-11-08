@@ -380,10 +380,11 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		assert.Equal(t, 1, countDirectiveValue(enhanced, "worker-src", TencentCaptchaWorkerSource))
 	})
 
-	t.Run("allows_redeem_code_store_frames_for_old_custom_policies", func(t *testing.T) {
+	t.Run("does_not_add_unconfigured_redeem_code_store_frames", func(t *testing.T) {
 		enhanced := enhanceCSPPolicy("default-src 'self'; frame-src 'self'")
 
-		assert.Equal(t, 1, countDirectiveValue(enhanced, "frame-src", RedeemCodeStoreDomain))
+		assert.Equal(t, 0, countDirectiveValue(enhanced, "frame-src", "https://catfk.com"))
+		assert.NotContains(t, config.DefaultCSPPolicy, "https://catfk.com")
 	})
 
 	t.Run("default_policy_already_carries_tencent_captcha_domains", func(t *testing.T) {

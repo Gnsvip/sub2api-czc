@@ -1,10 +1,10 @@
 ## 本站网址与 API 地址
 
-本站名称：**AIFXO**。网站与 API 根地址：[https://api.aifxo.com](https://api.aifxo.com)。
+本站名称：**AIFXO**。网站、登录和控制台入口：[https://www.aifxo.com/](https://www.aifxo.com/)。API 根地址：`https://api.aifxo.com`。
 
 | 用途 | 填写地址 |
 | --- | --- |
-| 网站、登录和控制台入口 | `https://api.aifxo.com` |
+| 网站、登录和控制台入口 | `https://www.aifxo.com/` |
 | API 根地址（客户端要求根地址时） | `https://api.aifxo.com` |
 | Codex / OpenAI 兼容客户端的 Base URL | `https://api.aifxo.com/v1` |
 | 检查模型列表的完整请求地址 | `https://api.aifxo.com/v1/models` |

@@ -261,17 +261,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/redeem-store',
-    name: 'RedeemStore',
-    component: () => import('@/views/user/RedeemStoreView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Buy Redeem Codes',
-      titleKey: 'nav.buyRedeemCode'
-    }
-  },
-  {
     path: '/affiliate',
     name: 'Affiliate',
     component: () => import('@/views/user/AffiliateView.vue'),

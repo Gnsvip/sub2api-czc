@@ -98,7 +98,7 @@ test('public guide workflow', async ({ context, page }, testInfo) => {
   await expect(page.locator('#goal-workflow')).toHaveText('使用 goal-workflow 小助手')
   await expect(page.locator('#svip')).toHaveText('SVIP 能得到什么、需要注意什么')
 
-  const sameHostPaths = ['/redeem-store', '/redeem', '/keys']
+  const sameHostPaths = ['/purchase', '/redeem', '/keys']
   for (const path of sameHostPaths) {
     const link = page.locator(`a[href="${path}"]`).first()
     await expect(link).toBeAttached()
@@ -107,6 +107,11 @@ test('public guide workflow', async ({ context, page }, testInfo) => {
   }
 
   await expect(page.locator('#domains')).toHaveText('本站网址与 API 地址')
+  await expect(page.getByRole('row').filter({ hasText: '网站、登录和控制台入口' }))
+    .toContainText('https://www.aifxo.com/')
+  await expect(page.getByRole('row').filter({ hasText: 'API 根地址（客户端要求根地址时）' }))
+    .toContainText('https://api.aifxo.com')
+  await expect(page.locator('a[href="/redeem-store"]')).toHaveCount(0)
   await expect(page.locator('#speed-script')).toHaveText('检查与 AIFXO 的连接')
   await expect(page.locator('[data-test="guide-content"]')).toContainText('https://api.aifxo.com/v1')
   await expect(page.locator('[data-test="guide-download"]')).toHaveCount(0)

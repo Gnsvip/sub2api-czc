@@ -78,7 +78,7 @@ func newVertexTokenErrorService() (*GeminiMessagesCompatService, *geminiCompatHT
 		accountRepo:      repo,
 		httpUpstream:     httpStub,
 		tokenProvider:    NewGeminiTokenProvider(repo, nil, nil),
-		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+		rateLimitService: NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil),
 		cfg:              &config.Config{},
 	}
 	return svc, httpStub, repo

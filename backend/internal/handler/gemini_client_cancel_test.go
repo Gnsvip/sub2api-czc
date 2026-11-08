@@ -78,7 +78,7 @@ func newGeminiClientCancelFixture(t *testing.T) *geminiClientCancelFixture {
 func (f *geminiClientCancelFixture) serve(t *testing.T, route, path, body string, call func(*gin.Context)) (*httptest.ResponseRecorder, int64) {
 	t.Helper()
 	setupOpsErrorLogTestQueue(t, 4)
-	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	ops := service.NewOpsServiceWithGoogleServices(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router := gin.New()
 	router.Use(OpsErrorLoggerMiddleware(ops))
 	router.POST(route, func(c *gin.Context) {

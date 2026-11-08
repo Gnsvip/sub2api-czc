@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -801,7 +802,7 @@ func (s *AccountTestService) fetchUpstreamModelListRequest(ctx context.Context, 
 
 	if account.Platform == PlatformAntigravity && account.Type != AccountTypeAPIKey {
 		models, err := s.fetchAntigravityOAuthUpstreamModels(ctx, account)
-		return models, nil, err
+		return models, nil, nil, err
 	}
 
 	if s.httpUpstream == nil {
@@ -1089,7 +1090,7 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Invalid Antigravity model list URL", err)
 	}
-	for key, value := range claude.DefaultHeaders {
+	for key, value := range claude.DefaultHeaders() {
 		req.Header.Set(key, value)
 	}
 	req.Header.Set("Accept", "application/json")
@@ -1791,3 +1792,5 @@ func buildVertexPublisherModelsURL(location, pageToken string) (string, error) {
 const vertexPublisherModelsMaxPages = 20
 
 const vertexGooglePublisherModelPrefix = "publishers/google/models/"
+
+const vertexPublisherModelsPageSize = 300

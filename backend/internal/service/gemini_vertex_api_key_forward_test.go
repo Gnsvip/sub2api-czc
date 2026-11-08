@@ -146,7 +146,7 @@ func TestGeminiForwardNative_VertexSharedCapacity429RetriesSameAccountWithoutCoo
 				httpUpstream:     upstream,
 				cfg:              &config.Config{Gateway: config.GatewayConfig{MaxSameAccountRetriesGemini: 1}},
 				accountRepo:      repo,
-				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+				rateLimitService: NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil),
 			}
 			c, rec := newGeminiNativeTestContext(t)
 

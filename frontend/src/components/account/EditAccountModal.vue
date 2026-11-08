@@ -5554,7 +5554,7 @@ const openMixedChannelDialog = (opts: {
   showMixedChannelWarning.value = true
 }
 
-const withAntigravityConfirmFlag = (payload: Record<string, unknown>) => {
+const withMixedChannelConfirmFlag = (payload: Record<string, unknown>) => {
   if (needsMixedChannelCheck() && antigravityMixedChannelConfirmed.value) {
     return {
       ...payload,
@@ -5566,7 +5566,7 @@ const withAntigravityConfirmFlag = (payload: Record<string, unknown>) => {
   return cloned
 }
 
-const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
+const ensureMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
   if (!needsMixedChannelCheck()) {
     return true
   }

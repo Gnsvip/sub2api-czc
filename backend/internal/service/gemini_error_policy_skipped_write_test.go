@@ -41,7 +41,7 @@ func newGeminiSkippedWriteService(status int, body string) (*GeminiMessagesCompa
 	svc := &GeminiMessagesCompatService{
 		httpUpstream:     httpStub,
 		cfg:              &config.Config{},
-		rateLimitService: NewRateLimitService(&errorPolicyRepoStub{}, nil, &config.Config{}, nil, nil),
+		rateLimitService: NewRateLimitServiceWithGoogleServices(&errorPolicyRepoStub{}, nil, &config.Config{}, nil, nil),
 	}
 	return svc, httpStub
 }

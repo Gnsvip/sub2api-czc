@@ -355,7 +355,7 @@ func withOpenAIAccountTestDisplayNames(models []openai.Model) []openai.Model {
 }
 
 // NewAccountTestService creates a new AccountTestService
-func NewAccountTestService(
+func NewAccountTestServiceWithGoogleServices(
 	accountRepo AccountRepository,
 	geminiTokenProvider *GeminiTokenProvider,
 	claudeTokenProvider *ClaudeTokenProvider,
@@ -3484,4 +3484,16 @@ func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) er
 	logAccountTestError(c, errorMsg)
 	s.sendEvent(c, TestEvent{Type: "error", Error: errorMsg})
 	return fmt.Errorf("%s", errorMsg)
+}
+
+// NewAccountTestService preserves the constructor for callers that do not configure Google platforms.
+func NewAccountTestService(
+	accountRepo AccountRepository,
+	claudeTokenProvider *ClaudeTokenProvider,
+	grokTokenProvider *GrokTokenProvider,
+	httpUpstream HTTPUpstream,
+	cfg *config.Config,
+	tlsFPProfileService *TLSFingerprintProfileService,
+) *AccountTestService {
+	return NewAccountTestServiceWithGoogleServices(accountRepo, nil, claudeTokenProvider, grokTokenProvider, nil, httpUpstream, cfg, tlsFPProfileService)
 }

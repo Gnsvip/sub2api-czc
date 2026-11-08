@@ -314,7 +314,7 @@ type openAI429RecoveryScheduler interface {
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
-func NewAccountUsageService(
+func NewAccountUsageServiceWithGoogleServices(
 	accountRepo AccountRepository,
 	usageLogRepo UsageLogRepository,
 	usageFetcher ClaudeUsageFetcher,
@@ -1873,4 +1873,25 @@ type AntigravityQuotaGroup struct {
 	Name        string                    `json:"name"`
 	Description string                    `json:"description,omitempty"`
 	Windows     []*AntigravityQuotaWindow `json:"windows"`
+}
+
+// NewAccountUsageService preserves the constructor for callers that do not configure Google platforms.
+func NewAccountUsageService(
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageFetcher ClaudeUsageFetcher,
+	grokQuotaFetcher *GrokQuotaFetcher,
+	grokQuotaService *GrokQuotaService,
+	openAIQuotaService *OpenAIQuotaService,
+	cache *UsageCache,
+	identityCache IdentityCache,
+	tlsFPProfileService *TLSFingerprintProfileService,
+) *AccountUsageService {
+	return NewAccountUsageServiceWithGoogleServices(accountRepo, usageLogRepo, usageFetcher, nil, nil, grokQuotaFetcher, grokQuotaService, openAIQuotaService, cache, identityCache, tlsFPProfileService)
+}
+
+type AntigravityQuotaWindow struct {
+	Window      string     `json:"window"`
+	Utilization float64    `json:"utilization"` // used percentage, 0-100
+	ResetsAt    *time.Time `json:"resets_at"`
 }

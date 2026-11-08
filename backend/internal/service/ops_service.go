@@ -140,7 +140,7 @@ func (s *OpsService) ArchiveUsagePolicyConversation(ctx context.Context, entry *
 	s.usagePolicyObserver.ArchiveConversation(ctx, entry, input)
 }
 
-func NewOpsService(
+func NewOpsServiceWithGoogleServices(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
 	cfg *config.Config,
@@ -1163,4 +1163,19 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 		return truncateString(raw, maxBytes), true
 	}
 	return raw, false
+}
+
+// NewOpsService preserves the constructor for callers that do not configure Google platforms.
+func NewOpsService(
+	opsRepo OpsRepository,
+	settingRepo SettingRepository,
+	cfg *config.Config,
+	accountRepo AccountRepository,
+	userRepo UserRepository,
+	concurrencyService *ConcurrencyService,
+	gatewayService *GatewayService,
+	openAIGatewayService *OpenAIGatewayService,
+	systemLogSink *OpsSystemLogSink,
+) *OpsService {
+	return NewOpsServiceWithGoogleServices(opsRepo, settingRepo, cfg, accountRepo, userRepo, concurrencyService, gatewayService, openAIGatewayService, nil, nil, systemLogSink)
 }

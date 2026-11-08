@@ -172,7 +172,7 @@ func TestCheckErrorPolicy_GeminiAccounts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &errorPolicyRepoStub{}
-			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc := NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil)
 
 			result := svc.CheckErrorPolicy(context.Background(), tt.account, tt.statusCode, tt.body)
 			require.Equal(t, tt.expected, result)
@@ -302,7 +302,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &geminiErrorPolicyRepo{}
-			rlSvc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			rlSvc := NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil)
 			svc := &GeminiMessagesCompatService{
 				accountRepo:      repo,
 				rateLimitService: rlSvc,
@@ -479,7 +479,7 @@ func TestGeminiErrorPolicy_NilRateLimitService(t *testing.T) {
 func TestHandleGeminiUpstreamError_GoogleOneCapacityExhaustedUsesTierCooldown(t *testing.T) {
 	repo := &rateLimit429AccountRepoStub{}
 	quotaSvc := NewGeminiQuotaService(&config.Config{}, nil)
-	rlSvc := NewRateLimitService(repo, nil, &config.Config{}, quotaSvc, nil)
+	rlSvc := NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, quotaSvc, nil)
 	svc := &GeminiMessagesCompatService{
 		accountRepo:      repo,
 		rateLimitService: rlSvc,
@@ -590,7 +590,7 @@ func TestHandleGeminiUpstreamError_PoolMode429(t *testing.T) {
 			repo := &rateLimit429AccountRepoStub{}
 			svc := &GeminiMessagesCompatService{
 				accountRepo:      repo,
-				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+				rateLimitService: NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil),
 			}
 
 			svc.handleGeminiUpstreamError(context.Background(), tt.account, http.StatusTooManyRequests, http.Header{}, body)
@@ -848,7 +848,7 @@ func TestHandleGeminiUpstreamError_ThirdPartyAPIKey429(t *testing.T) {
 			repo := &rateLimit429AccountRepoStub{}
 			svc := &GeminiMessagesCompatService{
 				accountRepo:      repo,
-				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+				rateLimitService: NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil),
 			}
 			account := &Account{
 				ID:          700,

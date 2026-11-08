@@ -1207,7 +1207,7 @@ func GeminiCachedContentView(record *GeminiCachedContent) map[string]any {
 // （api_key、base_url、auth_mode、上游显式缓存声明）都在调度快照投影内，候选过滤一次算全；
 // 选中后仍对完整账号复核。
 func (s *GatewayService) GeminiExplicitCacheExclusions(ctx context.Context, groupID *int64, boundAccountID int64) (map[int64]struct{}, error) {
-	accounts, _, err := s.listSchedulableAccounts(ctx, groupID, PlatformGemini, false)
+	accounts, _, err := s.listSchedulableAccountsWithMode(ctx, groupID, PlatformGemini, false)
 	if err != nil {
 		return nil, err
 	}

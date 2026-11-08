@@ -224,7 +224,7 @@ func (s *SchedulerSnapshotService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+func (s *SchedulerSnapshotService) ListSchedulableAccountsWithMode(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
@@ -628,7 +628,7 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		switch {
 		case isConcreteRequestPlatform(account.Platform) && account.Platform != PlatformAntigravity:
 			addPlatformGroups(account.Platform, accountGroupIDs)
-		case PlatformAntigravity:
+		case account.Platform == PlatformAntigravity:
 			// 批量更新可能刚关闭 mixed_scheduling，仍需清理两个兼容平台的旧快照。
 			addPlatformGroups(PlatformAntigravity, accountGroupIDs)
 			addPlatformGroups(PlatformAnthropic, accountGroupIDs)
@@ -1741,4 +1741,9 @@ func (l *fallbackLimiter) Allow() bool {
 	}
 	l.count++
 	return true
+}
+
+func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
+	accounts, _, err := s.ListSchedulableAccountsWithMode(ctx, groupID, platform, hasForcePlatform)
+	return accounts, err
 }

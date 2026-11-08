@@ -67,7 +67,7 @@ func (s *geminiSequenceUpstreamStub) DoWithTLS(req *http.Request, proxyURL strin
 
 func newGeminiSingleCheckService(responses ...geminiSequenceUpstreamResponse) (*GeminiMessagesCompatService, *geminiSequenceUpstreamStub, *geminiSingleCheckRepoStub) {
 	repo := &geminiSingleCheckRepoStub{}
-	rateLimit := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimit := NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil)
 	upstream := &geminiSequenceUpstreamStub{responses: responses}
 	svc := &GeminiMessagesCompatService{
 		accountRepo:      repo,

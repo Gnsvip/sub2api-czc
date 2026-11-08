@@ -30,7 +30,7 @@ func newGeminiCachedContentTestService(status int, body string) (*GeminiMessages
 	svc := &GeminiMessagesCompatService{
 		httpUpstream:     httpStub,
 		cfg:              &config.Config{},
-		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+		rateLimitService: NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil),
 	}
 	return svc, httpStub, repo
 }

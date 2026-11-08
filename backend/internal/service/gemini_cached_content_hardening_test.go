@@ -272,7 +272,7 @@ func TestGeminiForwardNative_BoundCacheUpstreamGatewayErrorsSkipAccountPenalty(t
 			svc, httpStub, _ := newGeminiCachedContentTestService(status, body)
 			repo := &geminiBoundCacheRateLimitRepo{}
 			svc.accountRepo = repo
-			svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc.rateLimitService = NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil)
 			account := &Account{ID: 711, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{
 				"api_key": "k", "base_url": "https://gw.example.com", "explicit_cache_upstream": true,
 			}}
@@ -309,7 +309,7 @@ func TestGeminiForwardNative_BoundCacheUpstreamGatewayErrorsRetryablePerPoolMode
 			svc, httpStub, _ := newGeminiCachedContentTestService(tt.status, body)
 			repo := &geminiBoundCacheRateLimitRepo{}
 			svc.accountRepo = repo
-			svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc.rateLimitService = NewRateLimitServiceWithGoogleServices(repo, nil, &config.Config{}, nil, nil)
 			account := &Account{ID: 712, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{
 				"api_key": "k", "base_url": "https://gw.example.com", "explicit_cache_upstream": true,
 				"pool_mode": true, "pool_mode_retry_count": float64(2), "pool_mode_retry_status_codes": []any{float64(429)},

@@ -212,7 +212,7 @@ func ProvideAccountHandler(
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	grokQuotaService *service.GrokQuotaService,
 ) *AccountHandler {
-	handler := NewAccountHandler(
+	handler := NewAccountHandlerWithGoogleServices(
 		adminService,
 		oauthService,
 		openaiOAuthService,

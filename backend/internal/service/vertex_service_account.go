@@ -462,3 +462,12 @@ func buildVertexGeminiExpressURL(model, action string, stream bool) (string, err
 	}
 	return u, nil
 }
+
+func validateVertexGeminiAction(action string) error {
+	switch action {
+	case "generateContent", "streamGenerateContent", "countTokens":
+		return nil
+	default:
+		return fmt.Errorf("unsupported vertex gemini action: %s", action)
+	}
+}

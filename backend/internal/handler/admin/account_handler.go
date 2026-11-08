@@ -90,7 +90,7 @@ func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService
 }
 
 // NewAccountHandler creates a new admin account handler
-func NewAccountHandler(
+func NewAccountHandlerWithGoogleServices(
 	adminService service.AdminService,
 	oauthService *service.OAuthService,
 	openaiOAuthService *service.OpenAIOAuthService,
@@ -3324,4 +3324,22 @@ func sanitizeExtraBaseRPM(extra map[string]any) {
 		v = 10000
 	}
 	extra["base_rpm"] = v
+}
+
+// NewAccountHandler preserves the constructor for callers that do not configure Google platforms.
+func NewAccountHandler(
+	adminService service.AdminService,
+	oauthService *service.OAuthService,
+	openaiOAuthService *service.OpenAIOAuthService,
+	grokOAuthService service.GrokOAuthTokenService,
+	rateLimitService *service.RateLimitService,
+	accountUsageService *service.AccountUsageService,
+	accountTestService *service.AccountTestService,
+	concurrencyService *service.ConcurrencyService,
+	crsSyncService *service.CRSSyncService,
+	sessionLimitCache service.SessionLimitCache,
+	rpmCache service.RPMCache,
+	tokenCacheInvalidator service.TokenCacheInvalidator,
+) *AccountHandler {
+	return NewAccountHandlerWithGoogleServices(adminService, oauthService, openaiOAuthService, nil, nil, grokOAuthService, rateLimitService, accountUsageService, accountTestService, concurrencyService, crsSyncService, sessionLimitCache, rpmCache, tokenCacheInvalidator)
 }

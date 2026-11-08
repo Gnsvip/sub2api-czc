@@ -126,7 +126,7 @@ func ProvideTokenRefreshService(
 	refreshAPI *OAuthRefreshAPI,
 	runtimeBlocker AccountRuntimeBlocker,
 ) *TokenRefreshService {
-	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
+	svc := NewTokenRefreshServiceWithGoogleServices(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
 	// 注入 OpenAI privacy opt-out 依赖
 	svc.SetPrivacyDeps(privacyClientFactory, proxyRepo)
 	// 注入统一 OAuth 刷新 API（消除 TokenRefreshService 与 TokenProvider 之间的竞争条件）
@@ -226,7 +226,7 @@ func ProvideAccountUsageService(
 	openAIGatewayService *OpenAIGatewayService,
 	rateLimitService *RateLimitService,
 ) *AccountUsageService {
-	service := NewAccountUsageService(
+	service := NewAccountUsageServiceWithGoogleServices(
 		accountRepo,
 		usageLogRepo,
 		usageFetcher,
@@ -259,7 +259,7 @@ func ProvideAccountTestService(
 	settingService *SettingService,
 	pluginManager *PluginManager,
 ) *AccountTestService {
-	service := NewAccountTestService(
+	service := NewAccountTestServiceWithGoogleServices(
 		accountRepo,
 		geminiTokenProvider,
 		claudeTokenProvider,
@@ -533,7 +533,7 @@ func ProvideRateLimitService(
 	tokenCacheInvalidator TokenCacheInvalidator,
 	ollamaCloudUsage *OllamaCloudUsageService,
 ) *RateLimitService {
-	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
+	svc := NewRateLimitServiceWithGoogleServices(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {
 		svc.SetOpenAIAPIKeyHealthCache(healthCache)
 	}
@@ -787,7 +787,7 @@ func ProvideOpsService(
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
 	apiKeyService *APIKeyService,
 ) *OpsService {
-	svc := NewOpsService(
+	svc := NewOpsServiceWithGoogleServices(
 		opsRepo,
 		settingRepo,
 		cfg,

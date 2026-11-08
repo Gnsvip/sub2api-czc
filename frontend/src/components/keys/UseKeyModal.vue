@@ -905,7 +905,6 @@ function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
   const modelComment = t('keys.useKeyModal.gemini.modelComment')
   let path: string
   let content: string
-  let highlighted: string
 
   switch (activeTab.value) {
     case 'unix':
@@ -913,36 +912,25 @@ function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
       content = `export GOOGLE_GEMINI_BASE_URL="${baseUrl}"
 export GEMINI_API_KEY="${apiKey}"
 export GEMINI_MODEL="${model}"  # ${modelComment}`
-      highlighted = `${keyword('export')} ${variable('GOOGLE_GEMINI_BASE_URL')}${operator('=')}${string(`"${baseUrl}"`)}
-${keyword('export')} ${variable('GEMINI_API_KEY')}${operator('=')}${string(`"${apiKey}"`)}
-${keyword('export')} ${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model}"`)}  ${comment(`# ${modelComment}`)}`
       break
     case 'cmd':
       path = 'Command Prompt'
       content = `set GOOGLE_GEMINI_BASE_URL=${baseUrl}
 set GEMINI_API_KEY=${apiKey}
 set GEMINI_MODEL=${model}`
-      highlighted = `${keyword('set')} ${variable('GOOGLE_GEMINI_BASE_URL')}${operator('=')}${string(baseUrl)}
-${keyword('set')} ${variable('GEMINI_API_KEY')}${operator('=')}${string(apiKey)}
-${keyword('set')} ${variable('GEMINI_MODEL')}${operator('=')}${string(model)}
-${comment(`REM ${modelComment}`)}`
       break
     case 'powershell':
       path = 'PowerShell'
       content = `$env:GOOGLE_GEMINI_BASE_URL="${baseUrl}"
 $env:GEMINI_API_KEY="${apiKey}"
 $env:GEMINI_MODEL="${model}"  # ${modelComment}`
-      highlighted = `${keyword('$env:')}${variable('GOOGLE_GEMINI_BASE_URL')}${operator('=')}${string(`"${baseUrl}"`)}
-${keyword('$env:')}${variable('GEMINI_API_KEY')}${operator('=')}${string(`"${apiKey}"`)}
-${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model}"`)}  ${comment(`# ${modelComment}`)}`
       break
     default:
       path = 'Terminal'
       content = ''
-      highlighted = ''
   }
 
-  return { path, content, highlighted }
+  return { path, content }
 }
 
 function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {

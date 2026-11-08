@@ -87,7 +87,7 @@ type TokenRefreshService struct {
 }
 
 // NewTokenRefreshService 创建token刷新服务
-func NewTokenRefreshService(
+func NewTokenRefreshServiceWithGoogleServices(
 	accountRepo AccountRepository,
 	oauthService *OAuthService,
 	openaiOAuthService *OpenAIOAuthService,
@@ -1515,4 +1515,18 @@ func (s *TokenRefreshService) ensureAntigravityPrivacy(ctx context.Context, acco
 			"privacy_mode", mode,
 		)
 	}
+}
+
+// NewTokenRefreshService preserves the constructor for callers that do not configure Google platforms.
+func NewTokenRefreshService(
+	accountRepo AccountRepository,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	cacheInvalidator TokenCacheInvalidator,
+	schedulerCache SchedulerCache,
+	cfg *config.Config,
+	tempUnschedCache TempUnschedCache,
+	grokOAuthServices ...*GrokOAuthService,
+) *TokenRefreshService {
+	return NewTokenRefreshServiceWithGoogleServices(accountRepo, oauthService, openaiOAuthService, nil, nil, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthServices...)
 }

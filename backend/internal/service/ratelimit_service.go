@@ -104,7 +104,7 @@ const (
 )
 
 // NewRateLimitService 创建RateLimitService实例
-func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogRepository, cfg *config.Config, geminiQuotaService *GeminiQuotaService, tempUnschedCache TempUnschedCache) *RateLimitService {
+func NewRateLimitServiceWithGoogleServices(accountRepo AccountRepository, usageRepo UsageLogRepository, cfg *config.Config, geminiQuotaService *GeminiQuotaService, tempUnschedCache TempUnschedCache) *RateLimitService {
 	return &RateLimitService{
 		accountRepo:             accountRepo,
 		usageRepo:               usageRepo,
@@ -3005,4 +3005,9 @@ func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, accoun
 
 	slog.Warn("stream_timeout_account_error", "account_id", account.ID, "model", model)
 	return true
+}
+
+// NewRateLimitService preserves the constructor for callers that do not configure Google platforms.
+func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogRepository, cfg *config.Config, tempUnschedCache TempUnschedCache) *RateLimitService {
+	return NewRateLimitServiceWithGoogleServices(accountRepo, usageRepo, cfg, nil, tempUnschedCache)
 }

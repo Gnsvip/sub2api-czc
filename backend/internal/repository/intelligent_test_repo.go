@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -130,6 +131,16 @@ func (r *intelligentTestRepository) UpdateSetting(ctx context.Context, actor int
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if s.TestType == "pelican" && s.Enabled && s.Config.ScheduleEnabled {
+		var groupID int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM groups WHERE id=$1 AND deleted_at IS NULL AND status='active' FOR SHARE`, s.Config.GroupID).Scan(&groupID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return infraerrors.BadRequest("INTELLIGENT_TEST_GROUP_UNAVAILABLE", "请选择存在且启用的测试分组")
+		}
+		if err != nil {
+			return err
+		}
+	}
 	cfg, err := json.Marshal(s.Config)
 	if err != nil {
 		return err

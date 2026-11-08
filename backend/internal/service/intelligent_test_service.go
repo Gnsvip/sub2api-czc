@@ -103,6 +103,10 @@ func (s *IntelligentTestService) UpdateSetting(ctx context.Context, actor int64,
 	}
 	cfg := &setting.Config
 	cfg.Execution = nil // Only a runner may produce an execution snapshot.
+	cfg.Source = ""     // Only the scheduler may mark an automatically created run.
+	if cfg.GroupID < 0 || (setting.TestType == "pelican" && setting.Enabled && cfg.ScheduleEnabled && cfg.GroupID == 0) {
+		return intelligentTestBad("请选择自动测试使用的分组")
+	}
 	if err := validateIntelligentTestConfig(cfg, s.evaluators); err != nil {
 		return err
 	}
@@ -311,10 +315,39 @@ func (s *IntelligentTestService) UserPelicanTests(ctx context.Context, user int6
 	if user < 1 {
 		return nil, ErrIntelligentTestForbidden
 	}
+	setting, err := s.pelicanSetting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !setting.Enabled || !setting.UserVisible {
+		return nil, ErrIntelligentTestNotFound
+	}
 	f = normalizeIntelligentFilter(f)
 	f.Page = 1
 	f.PageSize = pelicanUserPageSize
+	f.GroupID = setting.Config.GroupID // Never trust a user-supplied group filter.
 	return s.repo.UserPelicanTests(ctx, f)
+}
+
+func (s *IntelligentTestService) pelicanSetting(ctx context.Context) (IntelligentTestSetting, error) {
+	settings, err := s.repo.Settings(ctx)
+	if err != nil {
+		return IntelligentTestSetting{}, err
+	}
+	for _, setting := range settings {
+		if setting.TestType == "pelican" {
+			return setting, nil
+		}
+	}
+	return IntelligentTestSetting{}, nil
+}
+
+func (s *IntelligentTestService) PelicanVisible(ctx context.Context, user int64) (bool, error) {
+	if user < 1 {
+		return false, ErrIntelligentTestForbidden
+	}
+	setting, err := s.pelicanSetting(ctx)
+	return setting.Enabled && setting.UserVisible, err
 }
 
 func pelicanSlotKey(now time.Time) string {
@@ -537,14 +570,14 @@ func (s *IntelligentTestService) runScheduledPelicanAt(ctx context.Context, now 
 		slog.Error("scheduled pelican settings failed", "error", err)
 		return
 	}
-	enabled := false
+	var pelican IntelligentTestSetting
 	for _, setting := range settings {
-		if setting.TestType == "pelican" && setting.Enabled {
-			enabled = true
+		if setting.TestType == "pelican" {
+			pelican = setting
 			break
 		}
 	}
-	if !enabled {
+	if !pelican.Enabled || !pelican.Config.ScheduleEnabled || pelican.Config.GroupID <= 0 {
 		return
 	}
 	actor, err := s.repo.FirstAdminUserID(ctx)
@@ -554,13 +587,13 @@ func (s *IntelligentTestService) runScheduledPelicanAt(ctx context.Context, now 
 		}
 		return
 	}
-	cands, err := s.repo.ListPelicanCandidates(ctx)
+	cands, err := s.repo.ListPelicanCandidates(ctx, pelican.Config.GroupID)
 	if err != nil {
 		slog.Error("scheduled pelican account list failed", "error", err)
 		return
 	}
 	if len(cands) == 0 {
-		slog.Info("scheduled pelican skipped: no schedulable GPT-PRO ChatGPT OAuth account")
+		slog.Info("scheduled pelican skipped: no eligible account in selected group", "group_id", pelican.Config.GroupID)
 		return
 	}
 	s.markPelicanLiveWS(cands)
@@ -589,12 +622,13 @@ func (s *IntelligentTestService) runScheduledPelicanAt(ctx context.Context, now 
 		return
 	}
 	req := IntelligentTestEnqueue{
-		AccountIDs:     []int64{picked},
-		TestTypes:      []string{"pelican"},
-		Models:         map[string]string{"pelican": intelligentTestDefaultCodexModel},
-		Prompts:        map[string]string{"pelican": intelligentAnimalHTMLPrompt(animal)},
-		IdempotencyKey: pelicanAttemptKey(now, len(attempts)),
-		Source:         IntelligentTestSourcePelicanSchedule,
+		AccountIDs:       []int64{picked},
+		TestTypes:        []string{"pelican"},
+		Models:           map[string]string{"pelican": intelligentTestDefaultCodexModel},
+		Prompts:          map[string]string{"pelican": intelligentAnimalHTMLPrompt(animal)},
+		IdempotencyKey:   pelicanAttemptKey(now, len(attempts)),
+		Source:           IntelligentTestSourcePelicanSchedule,
+		ScheduledGroupID: pelican.Config.GroupID,
 	}
 	out, err := s.repo.Enqueue(ctx, actor, req)
 	if err != nil {

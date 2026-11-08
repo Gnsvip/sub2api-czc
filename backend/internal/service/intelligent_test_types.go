@@ -6,16 +6,18 @@ import (
 )
 
 type IntelligentTestConfig struct {
-	AnswerType     string                       `json:"answer_type,omitempty"`
-	AnswerUnit     string                       `json:"answer_unit,omitempty"`
-	AnswerUnitMode string                       `json:"answer_unit_mode,omitempty"`
-	AnswerFormat   string                       `json:"answer_format,omitempty"`
-	Execution      *IntelligentTestRuntimeState `json:"execution,omitempty"`
-	Prompt         string                       `json:"prompt"`
-	Model          string                       `json:"model"`
-	Evaluator      string                       `json:"evaluator"`
-	ExpectedAnswer string                       `json:"expected_answer"`
-	TimeoutSeconds int                          `json:"timeout_seconds"`
+	ScheduleEnabled bool                         `json:"schedule_enabled,omitempty"`
+	GroupID         int64                        `json:"group_id,omitempty"`
+	AnswerType      string                       `json:"answer_type,omitempty"`
+	AnswerUnit      string                       `json:"answer_unit,omitempty"`
+	AnswerUnitMode  string                       `json:"answer_unit_mode,omitempty"`
+	AnswerFormat    string                       `json:"answer_format,omitempty"`
+	Execution       *IntelligentTestRuntimeState `json:"execution,omitempty"`
+	Prompt          string                       `json:"prompt"`
+	Model           string                       `json:"model"`
+	Evaluator       string                       `json:"evaluator"`
+	ExpectedAnswer  string                       `json:"expected_answer"`
+	TimeoutSeconds  int                          `json:"timeout_seconds"`
 	// Source marks how the run was created. "pelican-schedule" is the user-page
 	// timer and is hidden from the admin intelligent-test console.
 	Source string `json:"source,omitempty"`
@@ -108,9 +110,10 @@ type IntelligentTestEnqueue struct {
 	Prompts map[string]string `json:"prompts,omitempty"`
 	// PromptFor supplies a per-record prompt when Prompts[kind] is empty.
 	// Admin pelican batch tests use this so each account gets its own animal.
-	PromptFor      func(accountID int64, kind string) string `json:"-"`
-	IdempotencyKey string                                    `json:"idempotency_key"`
-	Source         string                                    `json:"source,omitempty"`
+	PromptFor        func(accountID int64, kind string) string `json:"-"`
+	IdempotencyKey   string                                    `json:"idempotency_key"`
+	Source           string                                    `json:"source,omitempty"`
+	ScheduledGroupID int64                                     `json:"-"`
 }
 type IntelligentTestEnqueued struct {
 	CreatedCount int                      `json:"created_count"`
@@ -185,7 +188,7 @@ type IntelligentTestRepository interface {
 	PublicRecords(context.Context, int64, IntelligentTestFilter) (*PublicAccountTests, error)
 	PublicGet(context.Context, int64, int64) (*PublicAccountTest, error)
 	FirstAdminUserID(context.Context) (int64, error)
-	ListPelicanCandidates(context.Context) ([]PelicanCandidate, error)
+	ListPelicanCandidates(context.Context, int64) ([]PelicanCandidate, error)
 	ListPelicanSlotAttempts(context.Context, string) ([]PelicanSlotAttempt, error)
 	UserPelicanTests(context.Context, IntelligentTestFilter) (*UserPelicanTests, error)
 	DeleteStalePelicanTests(context.Context) (int64, error)
@@ -198,7 +201,7 @@ type PelicanSlotAttempt struct {
 	HasSVG    bool
 }
 
-// PelicanCandidate is a schedulable GPT-PRO OAuth or setup-token account
+// PelicanCandidate is a schedulable OAuth or setup-token account in the selected group
 // eligible for the timer. HasHealthyHTTP means Tibo currently treats this
 // account's HTTP path as not degraded. HasTicket means it has an unexpired
 // 292 gpt-6-astra ticket and its harvest cookies. HasWS means this process

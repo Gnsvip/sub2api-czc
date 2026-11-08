@@ -28,8 +28,6 @@ type intelligentRunContext struct {
 // intelligent tests use gpt-6-astra with explicit reasoning: xhigh for Tibo,
 // low for other tests. Omitting reasoning.effort lets Codex default to medium.
 const (
-	// IntelligentTestPublicGroupName 是智能测试公开结果所属的分组，不代表计费优惠。
-	IntelligentTestPublicGroupName        = "gpt-pro"
 	intelligentTestDefaultCodexModel      = "gpt-6-astra"
 	intelligentTestDefaultReasoningEffort = "low"
 	intelligentCaptureRawLimit            = 256 << 10
@@ -39,12 +37,12 @@ const (
 
 // Only an empty selection receives the protocol default. Explicit choices
 // remain observable even when the upstream rejects the requested model.
-func pelicanTestGroupName(account *Account) string {
+func pelicanTestGroupName(account *Account, groupID int64) string {
 	if account == nil {
 		return ""
 	}
 	for _, group := range account.Groups {
-		if group != nil && strings.EqualFold(strings.TrimSpace(group.Name), IntelligentTestPublicGroupName) {
+		if group != nil && group.ID == groupID {
 			return strings.TrimSpace(group.Name)
 		}
 	}
@@ -156,7 +154,7 @@ func (s *AccountTestService) RunIntelligentTest(ctx context.Context, r *Intellig
 	r.ConfigSnapshot.Execution.RequestedModel = r.ConfigSnapshot.Model
 	r.ConfigSnapshot.Execution.Model = r.Model
 	r.ConfigSnapshot.Execution.ReasoningEffort = intelligentTestReasoningEffort(r.TestType)
-	r.ConfigSnapshot.Execution.GroupName = pelicanTestGroupName(account)
+	r.ConfigSnapshot.Execution.GroupName = pelicanTestGroupName(account, r.ConfigSnapshot.GroupID)
 	capture := &intelligentCapture{}
 	capture.collectCredentialSecrets(account.Credentials)
 	ctx = context.WithValue(ctx, intelligentRunKey{}, &intelligentRunContext{prompt: r.Input, testType: r.TestType, capture: capture})

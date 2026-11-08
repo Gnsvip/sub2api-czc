@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 
 vi.mock('@/api/intelligentTests', () => ({
   intelligentTestsAPI: {
+    saveSetting: vi.fn().mockImplementation(setting => Promise.resolve(setting)),
     run: vi.fn().mockResolvedValue({ records: [], submitted: 1 }),
     accounts: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 24, overview: {} }),
     records: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 24 }),
@@ -37,6 +38,8 @@ vi.mock('@/api/admin/groups', () => ({
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: true }) }))
+const pelicanStore = vi.hoisted(() => ({ setVisible: vi.fn() }))
+vi.mock('@/stores/pelican', () => ({ usePelicanStore: () => pelicanStore }))
 
 import IntelligentTestsView from '../IntelligentTestsView.vue'
 import { intelligentTestsAPI } from '@/api/intelligentTests'
@@ -78,6 +81,16 @@ describe('IntelligentTestsView router modes', () => {
     })
     expect(visibility).toHaveLength(2)
     expect(visibility.every(input => !(input.element as HTMLInputElement).checked)).toBe(true)
+    const schedule = wrapper.get('[data-testid="pelican-schedule"]')
+    expect((schedule.element as HTMLInputElement).checked).toBe(false)
+    await schedule.setValue(true)
+    await wrapper.get('[data-testid="pelican-group"]').setValue('10')
+    await wrapper.findAll('form')[0].trigger('submit')
+    await flushPromises()
+    expect(intelligentTestsAPI.saveSetting).toHaveBeenCalledWith(expect.objectContaining({
+      test_type: 'pelican', config: expect.objectContaining({ schedule_enabled: true, group_id: 10 })
+    }))
+    expect(pelicanStore.setVisible).toHaveBeenCalledWith(false)
     wrapper.unmount()
   })
 

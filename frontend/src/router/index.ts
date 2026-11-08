@@ -6,6 +6,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { usePelicanStore } from '@/stores/pelican'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAdminComplianceStore } from '@/stores/adminCompliance'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
@@ -924,6 +925,11 @@ router.beforeEach(async (to, _from, next) => {
       path: '/login',
       query: { redirect: to.fullPath } // Save intended destination
     })
+    return
+  }
+
+  if (to.path === '/pelican-test' && !(await usePelicanStore().refresh())) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
     return
   }
 

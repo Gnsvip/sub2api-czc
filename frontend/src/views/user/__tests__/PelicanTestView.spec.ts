@@ -1,11 +1,13 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
+import { createPinia, setActivePinia } from 'pinia'
+import { usePelicanStore } from '@/stores/pelican'
 import PelicanTestView from '../PelicanTestView.vue'
 import { pelicanTestsAPI } from '@/api/pelicanTests'
 
 vi.mock('@/api/pelicanTests', () => ({
-  pelicanTestsAPI: { list: vi.fn() }
+  pelicanTestsAPI: { list: vi.fn(), visibility: vi.fn() }
 }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({
   default: { template: '<div><slot /></div>' }
@@ -45,10 +47,28 @@ function mountView() {
     }
   }
   const i18n = createI18n({ legacy: false, locale: 'zh', messages: compiled })
-  return mount(PelicanTestView, { global: { plugins: [i18n] } })
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  usePelicanStore().setVisible(true)
+  return mount(PelicanTestView, { global: { plugins: [i18n, pinia] } })
 }
 
 describe('PelicanTestView', () => {
+  it('refreshes visibility and ignores a response started before an administrator hid it', async () => {
+    setActivePinia(createPinia())
+    const store = usePelicanStore()
+    expect(store.visible).toBe(false)
+    vi.mocked(pelicanTestsAPI.visibility).mockResolvedValueOnce({ visible: true })
+    expect(await store.refresh()).toBe(true)
+    let resolve!: (value: { visible: boolean }) => void
+    vi.mocked(pelicanTestsAPI.visibility).mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const pending = store.refresh()
+    store.setVisible(false)
+    resolve({ visible: true })
+    expect(await pending).toBe(false)
+    vi.mocked(pelicanTestsAPI.visibility).mockRejectedValueOnce(new Error('offline'))
+    expect(await store.refresh()).toBe(false)
+  })
   it('selects a complete result and labels interrupted attempts without rendering partial HTML', async () => {
     const base = {
       model: 'gpt-6-astra', group_name: 'GPT-PRO', reasoning_effort: 'low',
@@ -88,6 +108,10 @@ describe('PelicanTestView', () => {
     await flushPromises()
     expect(wrapper.get('[role="status"]').text()).toContain('当前预览不执行脚本')
     expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
+    usePelicanStore().setVisible(false)
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('测试分组')
     wrapper.unmount()
   })
 

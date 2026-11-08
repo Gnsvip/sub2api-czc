@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -29,7 +30,7 @@ func newTiboGroupFixture(t *testing.T) *tiboGroupFixture {
 	t.Helper()
 	f := &tiboGroupFixture{t: t, ctx: context.Background(), client: testEntClient(t), cache: &schedulerCacheRecorder{}}
 	f.repo = newAccountRepositoryWithSQL(f.client, integrationDB, f.cache)
-	for i, name := range []string{service.TiboWelfareGroupName, service.TiboHealthyGroupName, "tibo-unrelated-" + t.Name()} {
+	for i, name := range []string{"my-backup-" + t.Name(), "my-pro-" + t.Name(), "tibo-unrelated-" + t.Name()} {
 		g := mustCreateGroup(t, f.client, &service.Group{Name: name, Platform: service.PlatformOpenAI})
 		id := g.ID
 		t.Cleanup(func() {
@@ -45,7 +46,21 @@ func newTiboGroupFixture(t *testing.T) *tiboGroupFixture {
 			f.other = id
 		}
 	}
+	f.configure(true, f.healthy, f.welfare, time.Now().Add(-time.Hour))
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM settings WHERE key=$1", service.SettingKeyAstraAutoGroup)
+		require.NoError(t, err)
+	})
 	return f
+}
+
+func (f *tiboGroupFixture) configure(enabled bool, healthy, degraded int64, updatedAt time.Time) {
+	f.t.Helper()
+	raw, err := json.Marshal(service.AstraAutoGroupSettings{Enabled: enabled, HealthyGroupID: healthy, DegradedGroupID: degraded})
+	require.NoError(f.t, err)
+	_, err = integrationDB.ExecContext(f.ctx, `INSERT INTO settings (key,value,updated_at) VALUES ($1,$2,$3)
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at`, service.SettingKeyAstraAutoGroup, string(raw), updatedAt)
+	require.NoError(f.t, err)
 }
 
 func (f *tiboGroupFixture) account(kind, platform string, groups ...int64) *service.Account {
@@ -160,7 +175,67 @@ func TestTiboAutoGroupScopeAndUnavailableTargets(t *testing.T) {
 	_, err = f.client.Group.UpdateOneID(f.welfare).SetStatus(service.StatusActive).SetName("renamed-welfare").Save(f.ctx)
 	require.NoError(t, err)
 	f.sample(a.ID, "degraded")
+	require.Contains(t, f.memberships(a.ID), f.welfare, "renaming a configured group preserves its ID-based rule")
+	require.NotContains(t, f.memberships(a.ID), f.healthy)
+}
+
+func TestTiboAutoGroupConfiguredSwitchAndFreshSamples(t *testing.T) {
+	f := newTiboGroupFixture(t)
+	a := f.account(service.AccountTypeOAuth, service.PlatformOpenAI, f.healthy, f.other)
+	before := f.memberships(a.ID)
+	f.configure(false, f.healthy, f.welfare, time.Now().Add(-time.Hour))
+	f.sample(a.ID, "degraded")
 	require.Equal(t, before, f.memberships(a.ID))
+	current, err := f.repo.GetByID(f.ctx, a.ID)
+	require.NoError(t, err)
+	verdict, _ := service.LatestOpenAIAstraSample(current.Extra[service.OpenAIAstraPolicyExtraKey])
+	require.Equal(t, "degraded", verdict, "disabling moves keeps the probe history")
+	_, err = integrationDB.ExecContext(f.ctx, "DELETE FROM settings WHERE key=$1", service.SettingKeyAstraAutoGroup)
+	require.NoError(t, err)
+	f.sample(a.ID, "degraded")
+	require.Equal(t, before, f.memberships(a.ID), "missing settings default to disabled")
+	started := time.Now().Add(-time.Second)
+	f.configure(true, f.healthy, f.welfare, time.Now())
+	updates, sample := tiboGroupObservation("degraded", started, time.Now())
+	require.NoError(t, f.repo.PersistTiboProbeResult(f.ctx, a.ID, updates, sample))
+	require.Equal(t, before, f.memberships(a.ID), "a probe started before the configuration changed cannot move an account")
+	// Backdate only the fixture configuration; replaying the consumed sample
+	// still must not move, while a new sample follows the selected target.
+	f.configure(true, f.healthy, f.welfare, time.Now().Add(-time.Hour))
+	require.NoError(t, f.repo.PersistTiboProbeResult(f.ctx, a.ID, updates, sample))
+	require.Equal(t, before, f.memberships(a.ID))
+	f.sample(a.ID, "degraded")
+	require.Contains(t, f.memberships(a.ID), f.welfare)
+	require.Contains(t, f.memberships(a.ID), f.other)
+	require.NoError(t, f.repo.UpdateExtra(f.ctx, a.ID, map[string]any{service.OpenAIAstraProbeEnabledExtraKey: false}))
+	f.sample(a.ID, "healthy")
+	require.Contains(t, f.memberships(a.ID), f.welfare, "an in-flight probe cannot move an account after its probe switch is disabled")
+}
+
+func TestTiboAutoGroupDisableWhileProbeWaits(t *testing.T) {
+	f := newTiboGroupFixture(t)
+	a := f.account(service.AccountTypeOAuth, service.PlatformOpenAI, f.healthy, f.other)
+	manual, err := integrationDB.BeginTx(f.ctx, nil)
+	require.NoError(t, err)
+	defer manual.Rollback()
+	var id int64
+	require.NoError(t, manual.QueryRowContext(f.ctx, `SELECT id FROM accounts WHERE id=$1 FOR UPDATE`, a.ID).Scan(&id))
+	now := time.Now()
+	updates, sample := tiboGroupObservation("degraded", now.Add(-time.Second), now)
+	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- f.repo.PersistTiboProbeResult(ctx, a.ID, updates, sample) }()
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := integrationDB.QueryRowContext(f.ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT platform, type, status, extra FROM accounts%')`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond)
+	f.configure(false, f.healthy, f.welfare, time.Now())
+	require.NoError(t, manual.Commit())
+	require.NoError(t, <-done)
+	require.Contains(t, f.memberships(a.ID), f.healthy)
+	require.NotContains(t, f.memberships(a.ID), f.welfare)
 }
 
 func TestTiboAutoGroupOldAndDuplicateSamples(t *testing.T) {

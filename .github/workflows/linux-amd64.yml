@@ -25,9 +25,9 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Google restoration regression checks
+      - name: Google and Astra settings regression checks
         working-directory: backend
-        run: go test -tags=unit ./internal/service -run '^(TestAdminService_.*InvalidRequestFallback|TestSetAntigravityModelRateLimits_Image|TestValidateCreateParams_CheckModeMatrix|TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode|TestMatchingPlatforms|TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets|TestCacheStoragePricePerTokenHourPriority|TestPlatformListDerived|TestCodexCatalogUsesAntigravityCapabilitiesInGeminiMixedGroup|TestCodexCatalogGeminiCapabilitiesExcludeNonMixedAntigravityAccounts|TestScheduler|TestTokenRefreshService_Registrations)' -count=1 -json > "$RUNNER_TEMP/google-focused.jsonl"
+        run: go test -tags=unit ./internal/service ./internal/handler/admin -run '^(TestSettingHandler_AstraAutoGroup|TestSettingService_AstraAutoGroup|TestAdminService_.*InvalidRequestFallback|TestSetAntigravityModelRateLimits_Image|TestValidateCreateParams_CheckModeMatrix|TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode|TestMatchingPlatforms|TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets|TestCacheStoragePricePerTokenHourPriority|TestPlatformListDerived|TestCodexCatalogUsesAntigravityCapabilitiesInGeminiMixedGroup|TestCodexCatalogGeminiCapabilitiesExcludeNonMixedAntigravityAccounts|TestScheduler|TestTokenRefreshService_Registrations)' -count=1 -json > "$RUNNER_TEMP/google-focused.jsonl"
       - name: Unit tests
         working-directory: backend
         run: |
@@ -40,7 +40,7 @@ jobs:
         run: |
           # Standalone billing/soft-delete tests commit fixtures. Run the list
           # suite in a fresh harness database so its exact counts stay isolated.
-          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          go test -tags=integration ./internal/repository -run 'TestTiboAutoGroup|TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -64,7 +64,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Native continuation, diagnostics and HTTP/2 race regression
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

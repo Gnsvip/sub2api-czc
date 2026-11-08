@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -73,4 +74,58 @@ func TestSettingsAuditTracksOAuthRateValueNotPointer(t *testing.T) {
 	require.NotContains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAIOAuthSchedulingRateMultiplier)
 	after.OpenAIOAuthSchedulingRateMultiplier = nil
 	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAIOAuthSchedulingRateMultiplier)
+}
+
+type astraSettingsGroupReader struct{}
+
+func (astraSettingsGroupReader) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	if id != 11 && id != 12 {
+		return nil, service.ErrGroupNotFound
+	}
+	return &service.Group{ID: id, Platform: service.PlatformOpenAI, Status: service.StatusActive}, nil
+}
+
+func TestSettingHandler_AstraAutoGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"enabled":true,"healthy_group_id":11,"degraded_group_id":12}`, http.StatusOK},
+		{`{"enabled":false,"healthy_group_id":11,"degraded_group_id":99}`, http.StatusOK},
+		{`{}`, http.StatusBadRequest},
+		{`{"enabled":null}`, http.StatusBadRequest},
+		{`{"enabled":"true"}`, http.StatusBadRequest},
+		{`{"enabled":true}`, http.StatusBadRequest},
+		{`{"enabled":true,"healthy_group_id":11,"degraded_group_id":11}`, http.StatusBadRequest},
+		{`{"enabled":true,"healthy_group_id":11,"degraded_group_id":99}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			h, repo := newStepUpSwitchTestHandler(t, map[string]string{service.SettingKeySiteName: "Keep brand"})
+			h.settingService.SetDefaultSubscriptionGroupReader(astraSettingsGroupReader{})
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/astra-auto-group", bytes.NewBufferString(tc.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			h.UpdateAstraAutoGroupSettings(c)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			require.Equal(t, "Keep brand", repo.values[service.SettingKeySiteName])
+			if tc.status != http.StatusOK {
+				require.NotContains(t, repo.values, service.SettingKeyAstraAutoGroup)
+				return
+			}
+			var expected service.AstraAutoGroupSettings
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &expected))
+			getRec := httptest.NewRecorder()
+			getCtx, _ := gin.CreateTestContext(getRec)
+			getCtx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/astra-auto-group", nil)
+			h.GetAstraAutoGroupSettings(getCtx)
+			require.Equal(t, http.StatusOK, getRec.Code)
+			var payload struct {
+				Data service.AstraAutoGroupSettings `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(getRec.Body.Bytes(), &payload))
+			require.Equal(t, expected, payload.Data)
+		})
+	}
 }

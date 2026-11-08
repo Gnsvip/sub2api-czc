@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,8 +85,8 @@ func (r *accountRepository) persistTiboProbeResult(ctx context.Context, id int64
 	changed := false
 	var fromID, toID int64
 	reason := "ineligible_account"
-	if platform == service.PlatformOpenAI && credentialType == service.AccountTypeOAuth && status == service.StatusActive {
-		fromID, toID, changed, reason, err = moveTiboAccountGroup(ctx, client, id, sample.Verdict)
+	if platform == service.PlatformOpenAI && credentialType == service.AccountTypeOAuth && status == service.StatusActive && extra[service.OpenAIAstraProbeEnabledExtraKey] != false {
+		fromID, toID, changed, reason, err = moveTiboAccountGroup(ctx, client, id, sample)
 		if err != nil {
 			return err
 		}
@@ -121,36 +122,59 @@ func (r *accountRepository) persistTiboProbeResult(ctx context.Context, id int64
 	return r.syncSchedulerAccountSnapshot(ctx, id)
 }
 
-func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, verdict string) (from, to int64, changed bool, reason string, err error) {
-	rows, err := client.QueryContext(ctx, `SELECT id,name FROM groups WHERE name IN ($1,$2)
-		AND platform='openai' AND status='active' AND deleted_at IS NULL ORDER BY id FOR SHARE`,
-		service.TiboWelfareGroupName, service.TiboHealthyGroupName)
+func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, sample service.TiboAutoGroupSample) (from, to int64, changed bool, reason string, err error) {
+	// Read the current configuration under the same transaction as the move.
+	// A concurrent disable waits for this transaction, so no move can commit
+	// after that settings save returns. Missing configuration defaults to off.
+	var raw string
+	var updatedAt time.Time
+	err = scanSingleRow(ctx, client, `SELECT value,updated_at FROM settings WHERE key=$1 FOR SHARE`,
+		[]any{service.SettingKeyAstraAutoGroup}, &raw, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, "auto_group_disabled", nil
+	}
 	if err != nil {
 		return 0, 0, false, "", err
 	}
-	groups := map[string]int64{}
+	var settings service.AstraAutoGroupSettings
+	if err = json.Unmarshal([]byte(raw), &settings); err != nil {
+		return 0, 0, false, "", err
+	}
+	if !settings.Enabled {
+		return 0, 0, false, "auto_group_disabled", nil
+	}
+	if sample.StartedAt.Before(updatedAt) {
+		return 0, 0, false, "settings_changed_during_probe", nil
+	}
+	if settings.HealthyGroupID <= 0 || settings.DegradedGroupID <= 0 || settings.HealthyGroupID == settings.DegradedGroupID {
+		return 0, 0, false, "target_unavailable", nil
+	}
+	from, to = settings.HealthyGroupID, settings.DegradedGroupID
+	if sample.Verdict == "healthy" {
+		from, to = to, from
+	}
+	rows, err := client.QueryContext(ctx, `SELECT id FROM groups WHERE id IN ($1,$2)
+		AND platform='openai' AND status='active' AND deleted_at IS NULL ORDER BY id FOR SHARE`,
+		from, to)
+	if err != nil {
+		return 0, 0, false, "", err
+	}
 	count := 0
 	for rows.Next() {
 		count++
 		var groupID int64
-		var name string
-		if err = rows.Scan(&groupID, &name); err != nil {
+		if err = rows.Scan(&groupID); err != nil {
 			rows.Close()
 			return 0, 0, false, "", err
 		}
-		groups[name] = groupID
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return 0, 0, false, "", err
 	}
-	if len(groups) != 2 || count != 2 {
+	if count != 2 {
 		return 0, 0, false, "target_unavailable", nil
-	}
-	from, to = groups[service.TiboHealthyGroupName], groups[service.TiboWelfareGroupName]
-	if verdict == "healthy" {
-		from, to = to, from
 	}
 	rows, err = client.QueryContext(ctx, `SELECT group_id FROM account_groups
 		WHERE account_id=$1 AND group_id IN ($2,$3) ORDER BY group_id FOR UPDATE`, id, from, to)

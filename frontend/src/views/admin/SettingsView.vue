@@ -4950,6 +4950,7 @@
               </p>
             </div>
             <div class="space-y-5 p-6">
+              <AstraAutoGroupSettings />
               <div class="flex items-center justify-between">
                 <div>
                   <label
@@ -8989,6 +8990,7 @@ import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vu
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import AstraAutoGroupSettings from "@/components/admin/settings/AstraAutoGroupSettings.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";

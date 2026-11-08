@@ -1,5 +1,21 @@
 export default {
     settings: {
+      astraAutoGroup: {
+        title: 'Automatic Astra group switching',
+        description: 'Move OpenAI OAuth accounts between two selected groups using background Astra probe results. Disabled by default and independent of each account’s Astra probe switch.',
+        enabled: 'Enable automatic group switching',
+        healthy: 'Group for healthy results',
+        degraded: 'Group for degraded results',
+        choose: 'Select an existing OpenAI group',
+        unavailable: 'Previous group unavailable; select another',
+        scope: 'Only accounts already in either selected group are moved. Other memberships are retained. Timeouts and request errors do not move accounts. Disabling group switching keeps probes running; disabling an account’s Astra probes also stops automatic moves. Configuration changes apply to new probes.',
+        invalid: 'Select two different active OpenAI groups before enabling.',
+        save: 'Save group switching settings',
+        saved: 'Group switching settings saved',
+        retry: 'Reload',
+        loadFailed: 'Unable to load group switching settings. Please retry.',
+        saveFailed: 'Unable to save group switching settings. Please retry.',
+      },
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {

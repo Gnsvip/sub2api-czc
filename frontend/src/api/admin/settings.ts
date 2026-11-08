@@ -1690,6 +1690,8 @@ export async function resetWebSearchUsage(payload: {
 }
 
 export const settingsAPI = {
+  getAstraAutoGroupSettings,
+  updateAstraAutoGroupSettings,
   getSettings,
   updateSettings,
   getGuideSettings,
@@ -1728,3 +1730,19 @@ export const settingsAPI = {
 };
 
 export default settingsAPI;
+
+export interface AstraAutoGroupSettings {
+  enabled: boolean;
+  healthy_group_id: number;
+  degraded_group_id: number;
+}
+
+export async function getAstraAutoGroupSettings(): Promise<AstraAutoGroupSettings> {
+  const { data } = await apiClient.get<AstraAutoGroupSettings>('/admin/settings/astra-auto-group');
+  return data;
+}
+
+export async function updateAstraAutoGroupSettings(settings: AstraAutoGroupSettings): Promise<AstraAutoGroupSettings> {
+  const { data } = await apiClient.put<AstraAutoGroupSettings>('/admin/settings/astra-auto-group', settings);
+  return data;
+}

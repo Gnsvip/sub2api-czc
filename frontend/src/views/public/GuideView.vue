@@ -145,7 +145,7 @@ import {
 } from '@/utils/guideMarkdown'
 import { getBundledGuideChapters } from '@/utils/guideSections'
 
-const bundledGuideVersion = '1.10'
+const bundledGuideVersion = '1.11'
 const bundledGuideUpdatedAt = '2026-11-09'
 const commandLabels: Record<string, string> = {
   'skill-install': '安装 goal-workflow',

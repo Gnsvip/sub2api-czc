@@ -64,12 +64,12 @@ describe('AppSidebar header styles', () => {
 })
 
 describe('AppSidebar redeem code store entry', () => {
-  it('places the redeem code store next to the redeem action', () => {
-    const storeIndex = componentSource.indexOf("{ path: '/redeem-store', label: t('nav.buyRedeemCode')")
-    const redeemIndex = componentSource.indexOf("{ path: '/redeem', label: t('nav.redeem')")
-
-    expect(storeIndex).toBeGreaterThan(-1)
-    expect(redeemIndex).toBeGreaterThan(storeIndex)
+  it('keeps redemption without the retired third-party store entry or route', () => {
+    expect(componentSource).toContain("{ path: '/redeem', label: t('nav.redeem')")
+    expect(componentSource).not.toContain('/redeem-store')
+    const routerSource = readFileSync(resolve(dirname(componentPath), '../../router/index.ts'), 'utf8')
+    expect(routerSource).not.toContain('/redeem-store')
+    expect(routerSource).not.toContain('RedeemStoreView')
   })
 })
 

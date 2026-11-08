@@ -25,6 +25,10 @@ describe('bundled AIFXO guide', () => {
     expect(guide).toContain('https://api.aifxo.com/v1/models')
     expect(guide).toContain('base_url = "https://api.aifxo.com/v1"')
     expect(guide).toContain('https://api.aifxo.com/health')
+    expect(guide).toContain('| 网站、登录和控制台入口 | `https://www.aifxo.com/` |')
+    expect(guide).toContain('| API 根地址（客户端要求根地址时） | `https://api.aifxo.com` |')
+    expect(guide).not.toContain('/redeem-store')
+    expect(guide).not.toContain('IGUZN6L4')
     expect(guide).toContain('QQ：1038539305')
     expect(guide).not.toMatch(/mofa\.love\.gd|mofayaoshipu\.cc\.cd|key66\.cc\.cd|key66\.vip|mofa\.duoduohuiying\.cn|15\.204\.82\.11/)
     expect(guide).not.toContain('select-fastest-codex-base-url.bat')
@@ -38,12 +42,12 @@ describe('bundled AIFXO guide', () => {
     const viewVersion = guideViewSource.match(/^const bundledGuideVersion = '([^']+)'$/m)?.[1]
 
     // Both patterns must actually match; an absent version is a failure, not a passing match.
-    expect(documentVersion).toBe('1.9')
-    expect(viewVersion).toBe('1.9')
+    expect(documentVersion).toBe('1.10')
+    expect(viewVersion).toBe('1.10')
     expect(documentVersion).toBe(viewVersion)
     const documentDate = guide.match(/^- 更新日期：`([^`]+)`$/m)?.[1]
     const viewDate = guideViewSource.match(/^const bundledGuideUpdatedAt = '([^']+)'$/m)?.[1]
-    expect(documentDate).toBe('2026-11-08')
+    expect(documentDate).toBe('2026-11-09')
     expect(viewDate).toBe(documentDate)
   })
 

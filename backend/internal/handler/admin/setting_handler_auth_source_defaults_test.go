@@ -35,6 +35,9 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
+	if key == service.SettingKeyAstraAutoGroup {
+		return s.SetMultiple(ctx, map[string]string{key: value})
+	}
 	panic("unexpected Set call")
 }
 

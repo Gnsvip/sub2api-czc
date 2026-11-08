@@ -150,6 +150,73 @@ type defaultSubGroupReaderStub struct {
 	calls []int64
 }
 
+type astraAutoGroupSettingRepoStub struct {
+	SettingRepository
+	value string
+	err   error
+}
+
+func (r *astraAutoGroupSettingRepoStub) GetValue(context.Context, string) (string, error) {
+	if r.value == "" {
+		return "", ErrSettingNotFound
+	}
+	return r.value, r.err
+}
+
+func (r *astraAutoGroupSettingRepoStub) Set(_ context.Context, key, value string) error {
+	if r.err != nil {
+		return r.err
+	}
+	if key != SettingKeyAstraAutoGroup {
+		return errors.New("unexpected setting key")
+	}
+	r.value = value
+	return nil
+}
+
+func TestSettingService_AstraAutoGroupSettings(t *testing.T) {
+	repo := &astraAutoGroupSettingRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+	svc.SetDefaultSubscriptionGroupReader(&defaultSubGroupReaderStub{byID: map[int64]*Group{
+		11: {ID: 11, Name: "My Pro", Platform: PlatformOpenAI, Status: StatusActive},
+		12: {ID: 12, Name: "My Backup", Platform: PlatformOpenAI, Status: StatusActive},
+		13: {ID: 13, Platform: PlatformAnthropic, Status: StatusActive},
+		14: {ID: 14, Platform: PlatformOpenAI, Status: StatusDisabled},
+	}})
+	got, err := svc.GetAstraAutoGroupSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, &AstraAutoGroupSettings{}, got)
+	valid := AstraAutoGroupSettings{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 12}
+	require.NoError(t, svc.UpdateAstraAutoGroupSettings(context.Background(), valid))
+	got, err = svc.GetAstraAutoGroupSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, &valid, got)
+	saved := repo.value
+	for _, invalid := range []AstraAutoGroupSettings{
+		{Enabled: true}, {Enabled: true, HealthyGroupID: 11, DegradedGroupID: 11},
+		{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 13},
+		{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 14},
+		{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 99},
+		{HealthyGroupID: -1},
+	} {
+		require.Error(t, svc.UpdateAstraAutoGroupSettings(context.Background(), invalid))
+		require.Equal(t, saved, repo.value, "invalid configuration must not overwrite a saved setting")
+	}
+	repo.err = errors.New("storage unavailable")
+	require.ErrorContains(t, svc.UpdateAstraAutoGroupSettings(context.Background(), valid), "storage unavailable")
+	require.Equal(t, saved, repo.value)
+	repo.err = nil
+	// An unavailable target must not prevent turning the feature off.
+	disabled := AstraAutoGroupSettings{HealthyGroupID: 11, DegradedGroupID: 99}
+	require.NoError(t, svc.UpdateAstraAutoGroupSettings(context.Background(), disabled))
+	got, err = svc.GetAstraAutoGroupSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, &disabled, got)
+	repo.value = "invalid json"
+	_, err = svc.GetAstraAutoGroupSettings(context.Background())
+	require.Error(t, err)
+}
+
 func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 	t.Run("missing value defaults to disabled", func(t *testing.T) {
 		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})

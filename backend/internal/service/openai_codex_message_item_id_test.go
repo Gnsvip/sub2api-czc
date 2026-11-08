@@ -3,10 +3,43 @@
 package service
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestFilterCodexInput_MessageIDsRespectTypeWithNativeReplay(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, tc := range []struct {
+			id   string
+			keep bool
+		}{
+			{"item_bad_message", false},
+			{"msg_valid", true},
+			{"msg" + strings.Repeat("x", 62), false},
+		} {
+			t.Run(fmt.Sprintf("native=%t/%s", native, tc.id), func(t *testing.T) {
+				original := map[string]any{"type": "message", "id": tc.id, "role": "assistant", "content": "preserve history"}
+				filtered := filterCodexInputWithOptions([]any{original}, codexInputFilterOptions{
+					PreserveReferences: true,
+					NativeItemIDs:      native,
+				})
+				require.Len(t, filtered, 1)
+				message := filtered[0].(map[string]any)
+				_, hasID := message["id"]
+				require.Equal(t, tc.keep, hasID)
+				if tc.keep {
+					require.Equal(t, tc.id, message["id"])
+				}
+				require.Equal(t, "assistant", message["role"])
+				require.Equal(t, "preserve history", message["content"])
+				require.Equal(t, tc.id, original["id"], "caller history must remain unchanged")
+			})
+		}
+	}
+}
 
 // TestFilterCodexInput_StripsMessageItemID_WhenPreservingReferences
 // verifies that message items with a non-msg id (e.g. item_*) have their id

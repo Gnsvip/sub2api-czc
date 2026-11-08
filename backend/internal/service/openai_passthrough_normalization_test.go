@@ -95,6 +95,33 @@ func TestNormalizeOpenAIResponsesWebSocketCompatibilityBody_SanitizesNativeItemI
 	}
 }
 
+func TestNormalizeOpenAIResponsesWebSocketCompatibilityBody_OAuthMessageIDs(t *testing.T) {
+	body := []byte(`{"type":"response.create","input":[
+		{"type":"message","id":"item_bad_message","role":"assistant","content":"preserve history"},
+		{"type":"message","id":"msg_valid","role":"user","content":"continue"},
+		{"type":"custom_tool_call","id":"item_native_tool","call_id":"call_pair","name":"apply_patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"ctco_native_output","call_id":"call_pair","output":"done"},
+		{"type":"reasoning","id":"future_native","encrypted_content":"opaque-synthetic","summary":[],"status":"completed"},
+		{"type":"item_reference","id":"msg_valid"}
+	]}`)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	normalized, changed, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "response.create", gjson.GetBytes(normalized, "type").String())
+	items := gjson.GetBytes(normalized, "input").Array()
+	original := gjson.GetBytes(body, "input").Array()
+	require.Len(t, items, len(original))
+	require.JSONEq(t, `{"type":"message","role":"assistant","content":"preserve history"}`, items[0].Raw)
+	for i := 1; i < len(items); i++ {
+		require.JSONEq(t, original[i].Raw, items[i].Raw)
+	}
+	repeated, changed, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(normalized, account, false)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, normalized, repeated)
+}
+
 func TestNormalizeOpenAIResponsesWebSocketCompatibilityBody_APIKeyStoreFalseReplay(t *testing.T) {
 	body := []byte(`{"type":"response.create","store":false,"parallel_tool_calls":true,"input":[` +
 		`{"type":"reasoning","id":"rs_drop","summary":[]},` +

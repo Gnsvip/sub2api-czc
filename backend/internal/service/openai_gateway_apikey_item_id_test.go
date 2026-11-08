@@ -117,6 +117,49 @@ func TestOpenAIGatewayService_OAuthPassthrough_ScopesNativeItemIDs(t *testing.T)
 	}
 }
 
+func TestOpenAIGatewayService_OAuthForward_StripsInvalidMessageIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-6.1-sol\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n")),
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_exec/0.167.0")
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Type = AccountTypeOAuth
+			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}
+			account.Extra = astraHealthyTestExtra(map[string]any{"openai_passthrough": passthrough})
+			body := []byte(`{"model":"gpt-6.1-sol","stream":true,"instructions":"test","input":[
+				{"type":"message","id":"msg_valid","role":"developer","content":"preserve instructions"},
+				{"type":"message","id":"item_bad_message","role":"assistant","content":[{"type":"output_text","text":"preserve history"}],"status":"completed"},
+				{"type":"function_call","id":"item_native_tool","call_id":"call_pair","name":"lookup","arguments":"{}"},
+				{"type":"function_call_output","id":"fco_native_output","call_id":"call_pair","output":"done"},
+				{"type":"reasoning","id":"future_native","encrypted_content":"opaque-synthetic","summary":[],"status":"completed"},
+				{"type":"message","id":"msg_user","role":"user","content":"continue"}
+			]}`)
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			forwarded := gjson.GetBytes(upstream.lastBody, "input").Array()
+			original := gjson.GetBytes(body, "input").Array()
+			require.Len(t, forwarded, len(original))
+			for i := range original {
+				if i == 1 {
+					require.False(t, forwarded[i].Get("id").Exists())
+					require.JSONEq(t, `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"preserve history"}],"status":"completed"}`, forwarded[i].Raw)
+					continue
+				}
+				require.JSONEq(t, original[i].Raw, forwarded[i].Raw)
+			}
+			require.Equal(t, "item_bad_message", original[1].Get("id").String())
+		})
+	}
+}
+
 func TestOpenAIGatewayService_SetupTokenLegacy_SanitizesAndTransforms(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamSSE := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.6-sol\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n"

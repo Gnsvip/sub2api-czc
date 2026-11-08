@@ -51,7 +51,7 @@
         <TestHistoryTable v-else :records="records" @detail="detailId = $event" />
         <Pagination v-if="total" :page="page" :page-size="pageSize" :total="total" @update:page="changePage" @update:page-size="changePageSize" />
       </template>
-      <TestSettingsPanel v-else-if="settings.length" :settings="settings" @saved="settingSaved" />
+      <TestSettingsPanel v-else-if="settings.length" :settings="settings" :groups="groups" :groups-loading="metadataLoading" @saved="settingSaved" />
       <p v-else-if="loading" class="py-12 text-center text-sm text-gray-500">正在加载设置…</p>
     </div>
     <TestDetailDialog :record-id="detailId" :running="running" @close="detailId = null" @history="showHistory" @run="(id, type) => run([id], [type])" @updated="load(false)" />
@@ -77,7 +77,7 @@ const props = defineProps<{ mode: 'tests' | 'history' | 'settings' }>()
 const titles = { tests: '智能测试中心', history: '测试记录', settings: '测试设置' }
 const app = useAppStore(), router = useRouter(), route = useRoute()
 const accounts = ref<TestAccount[]>([]), records = ref<TestRecord[]>([]), settings = ref<TestSetting[]>([])
-const groups = ref<{ id: number; name: string }[]>([]), selected = ref<number[]>([])
+const groups = ref<{ id: number; name: string; status?: string }[]>([]), selected = ref<number[]>([])
 const loading = ref(false), running = ref(false), error = ref(''), detailId = ref<number | null>(null)
 const metadataError = ref(''), metadataLoading = ref(false)
 const page = ref(1), pageSize = ref(12), total = ref(0), now = ref(Date.now())

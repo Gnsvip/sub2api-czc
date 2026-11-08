@@ -25,6 +25,18 @@ const intelligentClaimPickSQL = `SELECT q.id FROM account_tests q WHERE q.status
 
 const intelligentStartSetSQL = `status='running',queue_reason='',started_at=NOW(),lease_token=$1,lease_until=NOW()+make_interval(secs=>LEAST(600,GREATEST(30,(t.config_snapshot->>'timeout_seconds')::integer))+90),anti_degradation=false`
 
+// Recheck current switches and membership before claiming queued work. Stopping
+// the timer or changing its group must not leave old scheduled calls runnable.
+const intelligentRunnableSQL = `EXISTS(SELECT 1 FROM accounts a WHERE a.id=t.account_id AND a.deleted_at IS NULL)
+AND EXISTS(SELECT 1 FROM test_settings s WHERE s.test_type=t.test_type AND s.enabled
+ AND (COALESCE(t.config_snapshot->>'source','') <> 'pelican-schedule' OR (
+   s.config->>'schedule_enabled'='true'
+   AND s.config->>'group_id'=t.config_snapshot->>'group_id'
+   AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
+     WHERE ag.account_id=t.account_id AND g.id=(s.config->>'group_id')::bigint
+       AND g.deleted_at IS NULL AND g.status='active')
+ )))`
+
 func (r *intelligentTestRepository) Enqueue(ctx context.Context, actor int64, req service.IntelligentTestEnqueue) (*service.IntelligentTestEnqueued, error) {
 	accountIDs := append([]int64{}, req.AccountIDs...)
 	types := append([]string{}, req.TestTypes...)
@@ -91,6 +103,10 @@ func (r *intelligentTestRepository) Enqueue(ctx context.Context, actor int64, re
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return nil, err
 		}
+		if req.Source == service.IntelligentTestSourcePelicanSchedule &&
+			(!cfg.ScheduleEnabled || cfg.GroupID <= 0 || cfg.GroupID != req.ScheduledGroupID) {
+			return nil, infraerrors.Conflict("INTELLIGENT_TEST_SCHEDULE_CHANGED", "自动测试配置已变更，跳过本次任务")
+		}
 		settings[kind] = cfg
 	}
 	out := &service.IntelligentTestEnqueued{Records: []*service.IntelligentTestRecord{}}
@@ -105,6 +121,15 @@ func (r *intelligentTestRepository) Enqueue(ctx context.Context, actor int64, re
 		}
 		for _, kind := range types {
 			cfg := settings[kind]
+			if req.Source == service.IntelligentTestSourcePelicanSchedule {
+				var member bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND g.id=$2 AND g.deleted_at IS NULL AND g.status='active')`, id, cfg.GroupID).Scan(&member); err != nil {
+					return nil, err
+				}
+				if !member {
+					return nil, infraerrors.Conflict("INTELLIGENT_TEST_GROUP_CHANGED", "账号已不属于自动测试分组")
+				}
+			}
 			cfg.Execution = nil
 			if override := strings.TrimSpace(req.Models[kind]); override != "" {
 				cfg.Model = override
@@ -173,12 +198,12 @@ func (r *intelligentTestRepository) Claim(ctx context.Context) (*service.Intelli
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE account_tests t SET status='cancelled',error_message='执行前测试已停用或账号已删除',finished_at=NOW() WHERE t.status='queued' AND (NOT EXISTS(SELECT 1 FROM accounts a WHERE a.id=t.account_id AND a.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM test_settings s WHERE s.test_type=t.test_type AND s.enabled))`)
+	_, err = tx.ExecContext(ctx, `UPDATE account_tests t SET status='cancelled',error_message='执行前测试已停用或账号、分组配置已变更',finished_at=NOW() WHERE t.status='queued' AND NOT (`+intelligentRunnableSQL+`)`)
 	if err != nil {
 		return nil, err
 	}
 	token := uuid.NewString()
-	record, err := scanIntelligentRecord(tx.QueryRowContext(ctx, `WITH picked AS(`+intelligentClaimPickSQL+`) UPDATE account_tests t SET `+intelligentStartSetSQL+` FROM picked WHERE t.id=picked.id RETURNING `+intelligentRecordColumns, token))
+	record, err := scanIntelligentRecord(tx.QueryRowContext(ctx, `WITH picked AS(`+intelligentClaimPickSQL+`) UPDATE account_tests t SET `+intelligentStartSetSQL+` FROM picked WHERE t.id=picked.id AND `+intelligentRunnableSQL+` RETURNING `+intelligentRecordColumns, token))
 	if errors.Is(err, service.ErrIntelligentTestNotFound) {
 		return nil, tx.Commit()
 	}
@@ -193,7 +218,7 @@ func (r *intelligentTestRepository) ClaimID(ctx context.Context, id int64) (*ser
 		return nil, nil
 	}
 	token := uuid.NewString()
-	record, err := scanIntelligentRecord(r.db.QueryRowContext(ctx, `UPDATE account_tests t SET `+intelligentStartSetSQL+` WHERE t.id=$2 AND t.status='queued' RETURNING `+intelligentRecordColumns, token, id))
+	record, err := scanIntelligentRecord(r.db.QueryRowContext(ctx, `UPDATE account_tests t SET `+intelligentStartSetSQL+` WHERE t.id=$2 AND t.status='queued' AND `+intelligentRunnableSQL+` RETURNING `+intelligentRecordColumns, token, id))
 	if errors.Is(err, service.ErrIntelligentTestNotFound) {
 		return nil, nil
 	}

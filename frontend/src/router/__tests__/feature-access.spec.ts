@@ -30,6 +30,8 @@ const appStore = vi.hoisted(() => ({
   },
   fetchPublicSettings: vi.fn(),
 }))
+const pelicanStore = vi.hoisted(() => ({ refresh: vi.fn() }))
+vi.mock('@/stores/pelican', () => ({ usePelicanStore: () => pelicanStore }))
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
@@ -107,6 +109,16 @@ function runGuard(meta: Record<string, unknown>, path: string) {
 }
 
 describe('feature route guard', () => {
+  it('blocks direct pelican URLs when hidden and permits them when visible', async () => {
+    pelicanStore.refresh.mockResolvedValue(false)
+    const hidden = runGuard({ requiresAuth: true }, '/pelican-test')
+    await hidden.navigation
+    expect(hidden.next).toHaveBeenCalledWith('/dashboard')
+    pelicanStore.refresh.mockResolvedValue(true)
+    const shown = runGuard({ requiresAuth: true }, '/pelican-test')
+    await shown.navigation
+    expect(shown.next).toHaveBeenCalledWith()
+  })
   beforeAll(async () => {
     await import('@/router')
   })

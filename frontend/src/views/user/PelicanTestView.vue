@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <div v-if="pelican.visible" class="space-y-6">
       <div>
         <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100 lg:hidden">{{ t('nav.pelicanTest') }}</h1>
         <p class="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500 dark:text-gray-400 lg:mt-0">{{ t('pelicanTest.subtitle') }}</p>
@@ -47,7 +47,7 @@
             </div>
             <div>
               <dt class="text-xs text-gray-400">{{ t('pelicanTest.group') }}</dt>
-              <dd class="mt-1 text-gray-800 dark:text-gray-100">{{ selected.group_name || 'GPT-PRO' }}</dd>
+              <dd class="mt-1 text-gray-800 dark:text-gray-100">{{ selected.group_name || '—' }}</dd>
             </div>
             <div>
               <dt class="text-xs text-gray-400">{{ t('pelicanTest.model') }}</dt>
@@ -69,7 +69,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { usePelicanStore } from '@/stores/pelican'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -77,10 +78,14 @@ import { pelicanTestsAPI, type PelicanTestItem } from '@/api/pelicanTests'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
+const pelican = usePelicanStore()
 const loading = ref(true)
 const error = ref('')
 const items = ref<PelicanTestItem[]>([])
 const selected = ref<PelicanTestItem | null>(null)
+watch(() => pelican.visible, visible => {
+  if (!visible) { items.value = []; selected.value = null }
+})
 
 function isIncomplete(item: PelicanTestItem) {
   return !['completed', 'success'].includes(item.status) || item.preview_issue === 'incomplete'
@@ -112,6 +117,8 @@ onMounted(async () => {
     items.value = page.items || []
     selected.value = items.value.find((item) => item.html && !isIncomplete(item)) ?? items.value[0] ?? null
   } catch (err) {
+    items.value = []; selected.value = null
+    if ((err as { response?: { status?: number }; status?: number }).response?.status === 404 || (err as { status?: number }).status === 404) pelican.setVisible(false)
     error.value = extractApiErrorMessage(err, t('pelicanTest.loadFailed'))
   } finally {
     loading.value = false

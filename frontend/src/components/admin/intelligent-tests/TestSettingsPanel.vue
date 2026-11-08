@@ -1,12 +1,12 @@
 <template>
   <div class="space-y-5">
-    <div class="rounded-xl border border-primary-200 bg-primary-50/50 p-4 text-sm leading-relaxed text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">关闭“启用测试功能”会停止新测试并隐藏用户入口和结果；关闭“用户可查看”只隐藏展示。鹈鹕自动测试需要单独开启并选择分组，管理员仍可手动测试。检测不会自动修改账号策略。</div>
+    <div class="rounded-xl border border-primary-200 bg-primary-50/50 p-4 text-sm leading-relaxed text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300">鹈鹕测试关闭“启用测试功能”会停止新测试并隐藏用户入口和结果；关闭“用户可查看”只隐藏展示。自动测试需要单独开启并选择分组，管理员仍可手动测试。其他测试的管理员可用与用户可见性独立控制。检测不会自动修改账号策略。</div>
     <form v-for="setting in drafts" :key="setting.test_type" class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-800" @submit.prevent="save(setting)">
       <fieldset :disabled="saving === setting.test_type" @input="markDirty(setting.test_type)" @change="markDirty(setting.test_type)">
       <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
         <div><h2 class="font-semibold">{{ setting.name || testName(setting.test_type) }}</h2><p class="mt-1 text-xs text-gray-500">独立的题目、模型和评分规则</p></div>
         <div class="flex flex-wrap gap-5 text-sm">
-          <label class="flex items-center gap-2"><input v-model="setting.enabled" type="checkbox" class="rounded text-primary-600" /> 启用测试功能</label>
+          <label class="flex items-center gap-2"><input v-model="setting.enabled" type="checkbox" class="rounded text-primary-600" /> {{ setting.test_type === 'pelican' ? '启用测试功能' : '管理员可用' }}</label>
           <label class="flex items-center gap-2"><input v-model="setting.user_visible" type="checkbox" class="rounded text-primary-600" /> 用户可查看</label>
         </div>
       </div>

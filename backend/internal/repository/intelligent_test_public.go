@@ -14,7 +14,8 @@ import (
 
 // This predicate is shared by list, detail, history and image reads. Visibility
 // is checked from current settings at request time, never from a cached snapshot.
-const publicIntelligentAccessSQL = `a.deleted_at IS NULL AND s.enabled AND s.user_visible
+const publicIntelligentAccessSQL = `a.deleted_at IS NULL AND s.user_visible
+ AND (s.test_type <> 'pelican' OR s.enabled)
  AND EXISTS(SELECT 1 FROM users u WHERE u.id=$1 AND u.status='active' AND u.deleted_at IS NULL
  AND EXISTS(SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
  WHERE ag.account_id=a.id AND g.deleted_at IS NULL AND g.status='active'

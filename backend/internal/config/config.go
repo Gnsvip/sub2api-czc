@@ -1027,8 +1027,11 @@ type GatewayConfig struct {
 	// 代理探测响应体读取上限（字节）
 	ProxyProbeResponseReadMaxBytes int64 `mapstructure:"proxy_probe_response_read_max_bytes"`
 	// Gemini 上游响应头调试日志开关（默认关闭，避免高频日志开销）
-	GeminiCachedContentMaxTTLSeconds int  `mapstructure:"gemini_cached_content_max_ttl_seconds"`
-	GeminiDebugResponseHeaders       bool `mapstructure:"gemini_debug_response_headers"`
+	SSEQueueMaxBytes                 int64 `mapstructure:"sse_queue_max_bytes"`
+	SSEEventMaxBytes                 int64 `mapstructure:"sse_event_max_bytes"`
+	SSEEventMaxLines                 int   `mapstructure:"sse_event_max_lines"`
+	GeminiCachedContentMaxTTLSeconds int   `mapstructure:"gemini_cached_content_max_ttl_seconds"`
+	GeminiDebugResponseHeaders       bool  `mapstructure:"gemini_debug_response_headers"`
 	// ConnectionPoolIsolation: 上游连接池隔离策略（proxy/account/account_proxy）
 	ConnectionPoolIsolation string `mapstructure:"connection_pool_isolation"`
 	// ForceCodexCLI: 强制将 OpenAI `/v1/responses` 请求按 Codex CLI 处理。

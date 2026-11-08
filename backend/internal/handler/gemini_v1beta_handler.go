@@ -374,11 +374,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if handleRequestBodyReadError(c, reqLog, err) {
-			return
-		}
-		status, message := requestBodyReadFailure(reqLog, c.Request, err)
-		googleErrorWithType(c, status, "invalid_request_error", "", message)
+		writeRequestBodyReadFailure(c, reqLog, err, func(c *gin.Context, status int, errType string, message string) {
+			googleErrorWithType(c, status, errType, "", message)
+		})
 		return
 	}
 	if len(body) == 0 {
@@ -399,8 +397,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, reqModel, body); decision != nil && !decision.AllowNextStage {
-		googleSecurityAuditError(c, decision)
+	if decision := h.checkContentModeration(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, reqModel, body); decision != nil && !decision.Allowed {
+		googleContentModerationError(c, decision)
 		return
 	}
 

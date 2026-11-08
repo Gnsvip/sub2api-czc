@@ -2672,3 +2672,14 @@ func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedMo
 	// 其他平台使用账户的模型支持检查
 	return account.IsModelSupported(requestedModel)
 }
+
+func (s *GatewayService) WithSingleAntigravityAccountGroupProbe(ctx context.Context, groupID *int64) context.Context {
+	var probeGroupID *int64
+	if groupID != nil {
+		id := *groupID
+		probeGroupID = &id
+	}
+	return WithSingleAccountRetryProbe(ctx, func(probeCtx context.Context) bool {
+		return s.isSingleAntigravityAccountGroup(probeCtx, probeGroupID)
+	})
+}

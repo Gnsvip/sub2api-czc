@@ -229,3 +229,8 @@ func setAccountModelRateLimitSnapshot(account *Account, scope string, resetAt ti
 	extra[modelRateLimitsKey] = limits
 	account.Extra = extra
 }
+
+func isAntigravityGeminiImageModel(model string) bool {
+	normalized := normalizeAntigravityModelName(model)
+	return strings.HasPrefix(normalized, "gemini-") && strings.Contains(normalized, "-image")
+}

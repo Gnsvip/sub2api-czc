@@ -407,3 +407,58 @@ func buildVertexAnthropicRequestBody(body []byte) ([]byte, error) {
 	payload["anthropic_version"] = vertexAnthropicVersion
 	return json.Marshal(payload)
 }
+
+func buildVertexGeminiAccountURL(account *Account, model, action string, stream bool) (string, error) {
+	if account.IsVertexAPIKey() && account.VertexProjectID() == "" {
+		return buildVertexGeminiExpressURL(model, action, stream)
+	}
+	return buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(model), model, action, stream)
+}
+
+func setVertexGeminiAuth(ctx context.Context, req *http.Request, account *Account, tokenProvider *GeminiTokenProvider) error {
+	if account.IsVertexAPIKey() {
+		apiKey := strings.TrimSpace(account.GetCredential("api_key"))
+		if apiKey == "" {
+			return errors.New("vertex api_key not configured")
+		}
+		req.Header.Set("x-goog-api-key", apiKey)
+		return nil
+	}
+	if tokenProvider == nil {
+		return errors.New("gemini token provider not configured")
+	}
+	accessToken, err := tokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	return nil
+}
+
+func vertexServiceAccountNotFoundError(err error) (*vertexTokenRequestError, bool) {
+	var tokenErr *vertexTokenRequestError
+	if !errors.As(err, &tokenErr) {
+		return nil, false
+	}
+	if tokenErr.StatusCode != http.StatusBadRequest || tokenErr.Code != "invalid_grant" ||
+		!strings.Contains(strings.ToLower(tokenErr.Description), "account not found") {
+		return nil, false
+	}
+	return tokenErr, true
+}
+
+func buildVertexGeminiExpressURL(model, action string, stream bool) (string, error) {
+	model = strings.TrimSpace(model)
+	action = strings.TrimSpace(action)
+	if model == "" {
+		return "", errors.New("vertex model is required")
+	}
+	if err := validateVertexGeminiAction(action); err != nil {
+		return "", err
+	}
+	u := fmt.Sprintf("https://%s/v1/publishers/google/models/%s:%s", vertexGlobalHost, url.PathEscape(model), action)
+	if stream {
+		u += "?alt=sse"
+	}
+	return u, nil
+}

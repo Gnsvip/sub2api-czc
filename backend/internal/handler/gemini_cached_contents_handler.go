@@ -66,11 +66,9 @@ func readGeminiCachedContentBody(c *gin.Context) ([]byte, bool) {
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
 		bodyLog := requestLogger(c, "handler.gemini_cached_contents")
-		if handleRequestBodyReadError(c, bodyLog, err) {
-			return nil, false
-		}
-		status, message := requestBodyReadFailure(bodyLog, c.Request, err)
-		googleErrorWithType(c, status, "invalid_request_error", "", message)
+		writeRequestBodyReadFailure(c, bodyLog, err, func(c *gin.Context, status int, errType string, message string) {
+			googleErrorWithType(c, status, errType, "", message)
+		})
 		return nil, false
 	}
 	if len(body) == 0 {
@@ -119,8 +117,8 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
 
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && !decision.AllowNextStage {
-		googleSecurityAuditError(c, decision)
+	if decision := h.checkContentModeration(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && !decision.Allowed {
+		googleContentModerationError(c, decision)
 		return
 	}
 

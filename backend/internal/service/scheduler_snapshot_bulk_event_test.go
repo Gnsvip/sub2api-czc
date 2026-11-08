@@ -92,6 +92,9 @@ func schedulerBucketsForTest(groupIDs []int64, platforms ...string) []SchedulerB
 				SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeSingle},
 				SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeForced},
 			)
+			if platform == PlatformAnthropic || platform == PlatformGemini {
+				buckets = append(buckets, SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeMixed})
+			}
 		}
 	}
 	return buckets

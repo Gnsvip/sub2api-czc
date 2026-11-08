@@ -221,6 +221,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if !requireUserModelAccess(c, apiKey, h.errorResponse, reqModel, channelMapping.MappedModel) {
 		return
 	}
+	if geminiImageGenerationRejected(c, apiKey, nil, reqModel, channelMapping.MappedModel) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", service.ImageGenerationPermissionMessage())
+		return
+	}
 
 	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.Allowed {
 		h.anthropicContentModerationError(c, decision)

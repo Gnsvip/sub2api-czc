@@ -59,9 +59,6 @@ func (r *CompositeRouteResolver) ListExactPublicModels(ctx context.Context, grou
 	}
 	models := make([]string, 0, len(routes))
 	for _, route := range routes {
-		if !isConcreteRequestPlatform(strings.TrimSpace(route.TargetPlatform)) {
-			continue
-		}
 		if route.Enabled && route.MatchType == CompositeRouteMatchExact &&
 			(endpoint == "" || normalizeCompositeRouteEndpoint(route.Endpoint) == CompositeRouteEndpointAny || normalizeCompositeRouteEndpoint(route.Endpoint) == endpoint) {
 			if model := strings.TrimSpace(route.PublicModel); model != "" {

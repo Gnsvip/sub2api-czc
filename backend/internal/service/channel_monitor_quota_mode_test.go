@@ -306,9 +306,9 @@ func TestValidateCreateParams_CheckModeMatrix(t *testing.T) {
 			wantErr: ErrChannelMonitorInvalidEndpoint,
 		},
 		{
-			name: "retired provider rejected",
+			name: "unknown provider rejected",
 			params: ChannelMonitorCreateParams{
-				Provider: "antigravity", CheckMode: MonitorCheckModeQuota,
+				Provider: "unknown-provider", CheckMode: MonitorCheckModeQuota,
 				IntervalSeconds: 60, AccountID: &accountID,
 			},
 			wantErr: ErrChannelMonitorInvalidProvider,
@@ -562,9 +562,9 @@ func TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode(t *testing.T) {
 		}
 	}
 
-	// 切到已下线 provider 直接被 provider 校验拒绝。
-	retired := "antigravity"
-	err := applyMonitorUpdate(probeKimi(), ChannelMonitorUpdateParams{Provider: &retired})
+	// 切到未知 provider 直接被 provider 校验拒绝。
+	unknown := "unknown-provider"
+	err := applyMonitorUpdate(probeKimi(), ChannelMonitorUpdateParams{Provider: &unknown})
 	require.ErrorIs(t, err, ErrChannelMonitorInvalidProvider)
 
 	// provider-only 切换到合法 provider 时复核 check_mode（probe 对 zhipu 合法）。

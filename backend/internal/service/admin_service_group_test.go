@@ -1604,7 +1604,7 @@ func TestAdminService_CreateGroup_InvalidRequestFallbackRejectsUnsupportedPlatfo
 		FallbackGroupIDOnInvalidRequest: &fallbackID,
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid request fallback only supported for anthropic groups")
+	require.Contains(t, err.Error(), "invalid request fallback only supported for anthropic or antigravity groups")
 	require.Nil(t, repo.created)
 }
 
@@ -1743,7 +1743,7 @@ func TestAdminService_UpdateGroup_InvalidRequestFallbackPlatformMismatch(t *test
 		Platform: PlatformOpenAI,
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid request fallback only supported for anthropic groups")
+	require.Contains(t, err.Error(), "invalid request fallback only supported for anthropic or antigravity groups")
 	require.Nil(t, repo.updated)
 }
 

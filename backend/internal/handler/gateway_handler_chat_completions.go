@@ -100,6 +100,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if !requireUserModelAccess(c, apiKey, h.chatCompletionsErrorResponse, reqModel, channelMapping.MappedModel) {
 		return
 	}
+	if geminiImageGenerationRejected(c, apiKey, nil, reqModel, channelMapping.MappedModel) {
+		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", service.ImageGenerationPermissionMessage())
+		return
+	}
 	forwardModel := reqModel
 	if channelMapping.Mapped && strings.TrimSpace(channelMapping.MappedModel) != "" {
 		forwardModel = strings.TrimSpace(channelMapping.MappedModel)

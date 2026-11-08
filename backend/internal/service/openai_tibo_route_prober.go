@@ -120,17 +120,20 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 			s.abortOpenAITiboProbe(state, route, nil)
 			return
 		}
-		if account != nil && openAITiboAccountSkipReason(latest, time.Now()) != "" {
+		if account == nil {
+			if hold := s.openAITiboHoldFor(s.withOpenAIQuotaAutoPauseContext(ctx), latest, time.Now()); hold.parked || !hold.until.IsZero() {
+				// Ineligible, rate-limited or disabled accounts are not sampled; keep
+				// the last definitive sparkline until they are eligible again.
+				s.abortOpenAITiboProbe(state, route, &hold)
+				return
+			}
+			account = latest
+		} else if !latest.IsOpenAIAstraProbeEnabled() {
+			// Request probes retain their original credential/routing snapshot;
+			// only the independently managed switch must be authoritative here.
 			s.abortOpenAITiboProbe(state, route, nil)
 			return
 		}
-		if hold := s.openAITiboHoldFor(s.withOpenAIQuotaAutoPauseContext(ctx), latest, time.Now()); hold.parked || !hold.until.IsZero() {
-			// Ineligible, rate-limited or disabled accounts are not sampled; keep
-			// the last definitive sparkline until they are eligible again.
-			s.abortOpenAITiboProbe(state, route, &hold)
-			return
-		}
-		account = latest
 	}
 	startedAt := time.Now()
 	sample := s.probeOpenAITiboHTTP(ctx, account)

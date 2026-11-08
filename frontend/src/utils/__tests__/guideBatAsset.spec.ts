@@ -27,6 +27,9 @@ describe('bundled AIFXO guide', () => {
     expect(guide).toContain('https://api.aifxo.com/health')
     expect(guide).toContain('| 网站、登录和控制台入口 | `https://www.aifxo.com/` |')
     expect(guide).toContain('| API 根地址（客户端要求根地址时） | `https://api.aifxo.com` |')
+    expect(guide).toContain('[AIFXO](https://www.aifxo.com/)')
+    expect(guide).not.toContain('](https://api.aifxo.com)')
+    expect(guide).not.toContain('输入登录信息或 API Key 前，确认地址属于 `api.aifxo.com`')
     expect(guide).not.toContain('/redeem-store')
     expect(guide).not.toContain('IGUZN6L4')
     expect(guide).toContain('QQ：1038539305')
@@ -42,8 +45,8 @@ describe('bundled AIFXO guide', () => {
     const viewVersion = guideViewSource.match(/^const bundledGuideVersion = '([^']+)'$/m)?.[1]
 
     // Both patterns must actually match; an absent version is a failure, not a passing match.
-    expect(documentVersion).toBe('1.10')
-    expect(viewVersion).toBe('1.10')
+    expect(documentVersion).toBe('1.11')
+    expect(viewVersion).toBe('1.11')
     expect(documentVersion).toBe(viewVersion)
     const documentDate = guide.match(/^- 更新日期：`([^`]+)`$/m)?.[1]
     const viewDate = guideViewSource.match(/^const bundledGuideUpdatedAt = '([^']+)'$/m)?.[1]

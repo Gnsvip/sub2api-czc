@@ -40,7 +40,7 @@ jobs:
         run: |
           # Standalone billing/soft-delete tests commit fixtures. Run the list
           # suite in a fresh harness database so its exact counts stay isolated.
-          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          go test -tags=integration ./internal/repository -run 'TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -51,6 +51,25 @@ jobs:
             ${{ runner.temp }}/backend-tests.jsonl
             ${{ runner.temp }}/integration-tests.jsonl
             ${{ runner.temp }}/subscription-tests.jsonl
+          retention-days: 7
+
+  native-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Native continuation, diagnostics and HTTP/2 race regression
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-race-validation
+          path: ${{ runner.temp }}/native-race.jsonl
           retention-days: 7
 
   frontend:
@@ -120,7 +139,7 @@ jobs:
           retention-days: 7
 
   build:
-    needs: [backend, frontend, migration]
+    needs: [backend, native-race, frontend, migration]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -74,13 +74,15 @@ func unavailablePelicanAssessment(threshold int, reason string) *PelicanVisualAs
 	return &PelicanVisualAssessment{State: "unavailable", Threshold: threshold, Reason: reason}
 }
 
-type limitedPelicanOutput struct{ bytes.Buffer }
+type limitedPelicanOutput struct{ buffer bytes.Buffer }
+
+func (b *limitedPelicanOutput) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *limitedPelicanOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 32<<10 {
+	if b.buffer.Len()+len(p) > 32<<10 {
 		return 0, errors.New("visual judge output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 func runAutoPelicanJudge(ctx context.Context, output string, threshold int) *PelicanVisualAssessment {

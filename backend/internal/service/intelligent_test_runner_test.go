@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -74,6 +76,15 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	result = runAutoPelicanJudge(context.Background(), svg, 70)
 	require.Equal(t, "unavailable", result.State)
 	require.Nil(t, result.Score, "transport failures must never become zero-quality scores")
+}
+
+func TestAutoPelicanOutputLimit(t *testing.T) {
+	var output limitedPelicanOutput
+	// os/exec copies child stdout through io.Copy; ReaderFrom must not bypass
+	// the limit when a child emits an unexpectedly large response.
+	_, err := io.Copy(&output, io.LimitReader(strings.NewReader(strings.Repeat("x", 33<<10)), 33<<10))
+	require.Error(t, err)
+	require.LessOrEqual(t, len(output.Bytes()), 32<<10)
 }
 
 func TestAutoPelicanScoreIsDisplayOnly(t *testing.T) {

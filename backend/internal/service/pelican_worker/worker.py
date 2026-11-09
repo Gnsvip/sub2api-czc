@@ -24,6 +24,13 @@ def checked_svg(output, extracted=False):
     svg = output if extracted else extract_svg(output)
     if not svg:
         raise ValueError("missing_svg")
+    if not extracted:
+        # The browser preview and the judge must use the same self-contained
+        # SVG. Outer styles/HTML or a second answer can change its appearance
+        # or make their extractors select different drawings. Do not score it.
+        before, _, after = output.partition(svg)
+        if re.search(r"<\s*[a-z!/?]", before + after, re.I):
+            raise ValueError("unsupported_outer_markup")
     root = ET.fromstring(svg)
     if root.tag.rsplit("}", 1)[-1].lower() != "svg":
         raise ValueError("invalid_root")
@@ -71,7 +78,7 @@ def evaluate(payload):
         first = png_bytes(render_png(checked_svg(animation.bake(0.0), extracted=True), 1024))
         sheet = png_bytes(contact_sheet(frames, times))
     except Exception:
-        result["reason"] = "画面无法按评分规则渲染，或包含不支持的脚本、外部资源；未判定画面质量"
+        result["reason"] = "画面无法按评分规则渲染，或包含脚本、外部样式/资源及多个画面；未判定画面质量"
         return result
     try:
         cfg = JudgeConfig.from_env()

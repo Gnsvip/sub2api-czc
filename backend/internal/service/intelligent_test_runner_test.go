@@ -66,7 +66,13 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.InDelta(t, 80, *result.Score, 0.01)
 	require.EqualValues(t, 3, requests.Load())
 	require.Len(t, result.FrameTimes, 6)
-	for _, unsafe := range []string{svg + `<script>draw()</script>`, `<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`, `<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`} {
+	for _, unsafe := range []string{
+		svg + `<script>draw()</script>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,
+		`<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`,
+		`<style>circle { fill: red; }</style>` + svg,
+		"```svg\n" + svg + "\n```\n```svg\n" + svg + "\n```",
+	} {
 		result = runAutoPelicanJudge(context.Background(), unsafe, 70)
 		require.Equal(t, "unavailable", result.State)
 		require.Nil(t, result.Score)

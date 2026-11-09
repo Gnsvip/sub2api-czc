@@ -44,17 +44,18 @@ describe('auto-pelican visual scores', () => {
     wrapper.unmount()
   })
 
-  it('saves a fixed pelican task and configurable pass score separately from Astra', async () => {
+  it('preserves the editable prompt when enabling visual scores separately from Astra', async () => {
     vi.mocked(intelligentTestsAPI.saveSetting).mockImplementationOnce(async setting => setting)
     const initial = structuredClone(settings[0])
     initial.visual_judge_ready = true
     const wrapper = mount(TestSettingsPanel, { props: { settings: [initial] } })
     await wrapper.get('[data-testid="pelican-visual-judge"]').setValue(true)
+    expect(wrapper.get('textarea').attributes('readonly')).toBeUndefined()
     await wrapper.get('[data-testid="pelican-pass-score"]').setValue('80')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(intelligentTestsAPI.saveSetting).toHaveBeenLastCalledWith(expect.objectContaining({ config: expect.objectContaining({
-      visual_judge_enabled: true, visual_pass_score: 80, evaluator: 'svg_structure', prompt: expect.stringContaining('Do not use JavaScript')
+      visual_judge_enabled: true, visual_pass_score: 80, evaluator: 'svg_structure', prompt: initial.config.prompt
     }) }))
     expect(wrapper.text()).toContain('Astra 自动换组仍依据原来的 Astra 检测')
     wrapper.unmount()

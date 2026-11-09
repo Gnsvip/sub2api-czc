@@ -117,3 +117,14 @@ func TestPelicanNextBoundaryAlignsToThirtyMinutes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "2026-09-20T08:30:00+08:00", pelicanNextBoundary(inside).Format(time.RFC3339))
 }
+
+func TestVisualJudgeUsesRequestedAnimal(t *testing.T) {
+	for _, animal := range []string{"豆娘", "海豚", "鹈鹕", "大王酸浆鱿"} {
+		prompt := intelligentAnimalHTMLPrompt(animal)
+		require.Contains(t, prompt, "创建一个HTML，内容是SVG绘制一个"+animal+"骑自行车")
+		require.Contains(t, prompt, "不使用 JavaScript")
+		require.Equal(t, animal, intelligentJudgeAnimal(prompt))
+	}
+	require.Equal(t, "鹈鹕", intelligentJudgeAnimal("Generate a pelican riding a bicycle."))
+	require.Empty(t, intelligentJudgeAnimal("unrelated custom task"))
+}

@@ -36,7 +36,7 @@
           <span class="mt-1 block text-xs text-gray-500">OpenAI 测试推理强度固定为 {{ setting.test_type === 'tibo' ? 'xhigh' : 'low' }}。</span>
         </label>
         <label class="block text-sm">超时（秒）<input v-model.number="setting.config.timeout_seconds" type="number" class="input mt-2" min="30" max="600" required /></label>
-        <label class="block text-sm sm:col-span-2">测试题目<textarea v-model="setting.config.prompt" class="input mt-2 min-h-32" maxlength="16000" required :readonly="setting.config.visual_judge_enabled" /></label>
+        <label class="block text-sm sm:col-span-2">测试题目<textarea v-model="setting.config.prompt" class="input mt-2 min-h-32" maxlength="16000" required /></label>
         <label class="block text-sm">评分规则<select v-model="setting.config.evaluator" class="input mt-2" :disabled="setting.config.visual_judge_enabled"><option value="svg_structure">SVG 结构校验</option><option value="exact_answer">标准答案校验</option><option value="tibo_answer">tibo True/False</option></select></label>
         <template v-if="setting.config.evaluator === 'exact_answer'">
           <label class="block text-sm">标准答案<input v-model="setting.config.expected_answer" class="input mt-2" maxlength="200" required /></label>
@@ -88,11 +88,6 @@ function configureVisualJudge(setting: TestSetting) {
   if (!setting.config.visual_judge_enabled) return
   setting.config.evaluator = 'svg_structure'
   setting.config.visual_pass_score ||= 70
-  setting.config.prompt = `Generate a 2D animated SVG of a pelican riding a bicycle.
-Animate with SMIL or CSS animations inside the SVG itself. Do not use JavaScript.
-Produce the SVG in a single pass. Do not test or execute it, open a browser,
-perform visual validation, use tools or skills, or refine or regenerate it.
-Return the generated SVG code as the final answer immediately.`
 }
 watch(() => props.settings, value => {
   drafts.value = value.map(item => {

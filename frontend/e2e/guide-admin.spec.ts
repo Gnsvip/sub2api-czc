@@ -206,8 +206,8 @@ test('管理员可以预览并发布使用教程', async ({ page }, testInfo) =>
 // The existing desktop/mobile browser job also protects the lightweight result view.
 test('animal test shows one animation with collapsed scoring details', async ({ page }, testInfo) => {
   await prepareAdminGuide(page)
-  await page.route('**/api/v1/pelican-tests/visibility', route => json(route, { visible: true }))
-  await page.route('**/api/v1/pelican-tests?*', route => json(route, {
+  await page.route(url => url.pathname === '/api/v1/pelican-tests/visibility', route => json(route, { visible: true }))
+  await page.route(url => url.pathname === '/api/v1/pelican-tests', route => json(route, {
     items: [2, 1].map(id => ({
       id, status: 'completed', model: 'gpt-6-astra', group_name: 'Test group', reasoning_effort: 'low',
       prompt: '创建一个HTML，内容是SVG绘制一个豆娘骑自行车的2D动画',
@@ -217,7 +217,9 @@ test('animal test shows one animation with collapsed scoring details', async ({ 
         reason: '只在详情中出现的完整评分说明', judge_model: 'fixture-vision', sample_count: 3 }
     })), total: 2, page: 1, page_size: 32
   }))
+  await page.route(url => url.pathname === '/setup/status', route => json(route, { needs_setup: false }))
   await page.goto('/pelican-test')
+  await expect(page).toHaveURL(/\/pelican-test$/)
   await expect(page.locator('iframe')).toHaveCount(1)
   await expect(page.locator('[data-testid="pelican-ribbon"]')).toHaveText('通过')
   await expect(page.getByText('只在详情中出现的完整评分说明')).not.toBeVisible()

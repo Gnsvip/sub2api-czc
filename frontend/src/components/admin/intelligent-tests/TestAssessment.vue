@@ -1,5 +1,6 @@
 <template>
   <div class="space-y-2 empty:hidden" data-testid="test-assessment">
+    <PelicanVisualAssessment v-if="assessment?.visual_judgement" :assessment="assessment.visual_judgement" :compact="compact" />
     <template v-if="assessment && isModernAssessment(assessment.evaluator_version)">
       <div v-if="showAnswer || showFormat" class="flex flex-wrap gap-2 text-xs">
         <span v-if="showAnswer" class="rounded-md px-2 py-1" :class="answerTone" data-testid="answer-verdict">{{ answerLabels[assessment.answer_verdict!] }}</span>
@@ -12,6 +13,7 @@
 </template>
 <script setup lang="ts">
 import { computed } from 'vue'
+import PelicanVisualAssessment from '@/components/common/PelicanVisualAssessment.vue'
 import type { TestAssessment, TestStatus } from '@/api/intelligentTests'
 import { answerLabels, formatLabels, isPending, isModernAssessment, currentEvaluatorVersion } from './display'
 const props = defineProps<{ assessment?: TestAssessment; status?: TestStatus; compact?: boolean; publicView?: boolean }>()

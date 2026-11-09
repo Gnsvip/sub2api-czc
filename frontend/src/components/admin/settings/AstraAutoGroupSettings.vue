@@ -11,12 +11,25 @@
         {{ t('admin.settings.astraAutoGroup.enabled') }}
       </label>
       <div class="grid gap-4 sm:grid-cols-2">
-        <label v-for="field in fields" :key="field.key" class="block text-sm">
-          {{ t(`admin.settings.astraAutoGroup.${field.label}`) }}
-          <select v-model.number="draft[field.key]" :data-testid="`astra-auto-group-${field.label}`" class="input mt-2" @change="saved = false">
+        <div class="text-sm">
+          <p>{{ t('admin.settings.astraAutoGroup.healthy') }} <span class="text-gray-500">({{ draft.healthy_group_ids.length }})</span></p>
+          <div class="mt-2 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="astra-auto-group-healthy">
+            <label v-for="group in groups" :key="group.id" class="flex items-center gap-2">
+              <input v-model="draft.healthy_group_ids" type="checkbox" :value="group.id" :data-testid="`astra-normal-${group.id}`" class="rounded text-primary-600" @change="saved = false" />
+              {{ group.name }}
+            </label>
+            <label v-for="id in unavailableNormalIDs" :key="id" class="flex items-center gap-2 text-amber-600">
+              <input v-model="draft.healthy_group_ids" type="checkbox" :value="id" @change="saved = false" />
+              #{{ id }} · {{ t('admin.settings.astraAutoGroup.unavailable') }}
+            </label>
+          </div>
+        </div>
+        <label class="block text-sm">
+          {{ t('admin.settings.astraAutoGroup.degraded') }}
+          <select v-model.number="draft.degraded_group_id" data-testid="astra-auto-group-degraded" class="input mt-2" @change="saved = false">
             <option :value="0">{{ t('admin.settings.astraAutoGroup.choose') }}</option>
             <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-            <option v-if="draft[field.key] && !groups.some(group => group.id === draft[field.key])" :value="draft[field.key]" disabled>{{ t('admin.settings.astraAutoGroup.unavailable') }}</option>
+            <option v-if="draft.degraded_group_id && !groups.some(group => group.id === draft.degraded_group_id)" :value="draft.degraded_group_id" disabled>{{ t('admin.settings.astraAutoGroup.unavailable') }}</option>
           </select>
         </label>
       </div>
@@ -43,12 +56,12 @@ import type { AdminGroup } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
-const draft = reactive<AstraAutoGroupSettings>({ enabled: false, healthy_group_id: 0, degraded_group_id: 0 })
-const fields = [{ key: 'healthy_group_id', label: 'healthy' }, { key: 'degraded_group_id', label: 'degraded' }] as const
+const draft = reactive<AstraAutoGroupSettings & { healthy_group_ids: number[] }>({ enabled: false, healthy_group_id: 0, healthy_group_ids: [], degraded_group_id: 0 })
 const groups = ref<AdminGroup[]>([])
 const loading = ref(true), loaded = ref(false), saving = ref(false), saved = ref(false), error = ref('')
-const validTargets = computed(() => draft.healthy_group_id !== draft.degraded_group_id &&
-  [draft.healthy_group_id, draft.degraded_group_id].every(id => groups.value.some(group => group.id === id)))
+const unavailableNormalIDs = computed(() => draft.healthy_group_ids.filter(id => !groups.value.some(group => group.id === id)))
+const validTargets = computed(() => draft.healthy_group_ids.length > 0 && !draft.healthy_group_ids.includes(draft.degraded_group_id) &&
+  [...draft.healthy_group_ids, draft.degraded_group_id].every(id => groups.value.some(group => group.id === id)))
 
 async function load() {
   loading.value = true
@@ -58,6 +71,8 @@ async function load() {
       adminAPI.settings.getAstraAutoGroupSettings(), adminAPI.groups.getAll('openai'),
     ])
     Object.assign(draft, settings)
+    draft.healthy_group_ids = [...(settings.healthy_group_ids ?? (settings.healthy_group_id ? [settings.healthy_group_id] : []))]
+    draft.healthy_group_id = 0
     groups.value = availableGroups.filter(group => group.platform === 'openai' && group.status === 'active')
     loaded.value = true
   } catch (err) {
@@ -73,7 +88,7 @@ async function save() {
   saved.value = false
   error.value = ''
   try {
-    const result = await adminAPI.settings.updateAstraAutoGroupSettings({ ...draft })
+    const result = await adminAPI.settings.updateAstraAutoGroupSettings({ ...draft, healthy_group_ids: [...draft.healthy_group_ids] })
     Object.assign(draft, result)
     saved.value = true
   } catch (err) {

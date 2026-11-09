@@ -20,6 +20,15 @@
           </select>
         </label>
         <p class="text-xs leading-relaxed text-gray-500">开启后，北京时间每天 08:00–24:00 每 30 分钟从所选分组抽取可用的 OpenAI OAuth / Setup Token 账号生成动画，会消耗上游额度。用户页也只展示该分组的结果。关闭自动测试不影响手动测试，已在运行的请求会完成。</p>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="setting.config.visual_judge_enabled" type="checkbox" data-testid="pelican-visual-judge" class="rounded text-primary-600" :disabled="!setting.visual_judge_ready && !setting.config.visual_judge_enabled" @change="configureVisualJudge(setting)" />
+          auto-pelican 多帧视觉评分
+        </label>
+        <p v-if="!setting.visual_judge_ready" class="text-xs text-amber-700">评分组件尚未配置，请先在服务器配置 Python 环境和支持图片的评审模型；已有评分仍可查看。</p>
+        <template v-if="setting.config.visual_judge_enabled">
+          <label class="block text-sm">画面通过分数（满分 100）<input v-model.number="setting.config.visual_pass_score" type="number" min="1" max="100" required class="input mt-2 max-w-40" data-testid="pelican-pass-score" /></label>
+          <p class="text-xs leading-relaxed text-gray-500">统一测试“鹈鹕骑自行车”，使用 SVG 内的 CSS / SMIL 动画。按时间截取 6 帧，由独立视觉模型评分，会额外消耗评审额度。分数仅展示，Astra 自动换组仍依据原来的 Astra 检测；渲染或评审失败不算画面异常。</p>
+        </template>
       </div>
       <div class="mt-4 grid gap-4 sm:grid-cols-2">
         <label class="block text-sm">模型<input v-model.trim="setting.config.model" class="input mt-2" :list="`intelligent-models-${setting.test_type}`" placeholder="留空：ChatGPT OAuth 使用 gpt-6-astra" maxlength="200" />
@@ -27,8 +36,8 @@
           <span class="mt-1 block text-xs text-gray-500">OpenAI 测试推理强度固定为 {{ setting.test_type === 'tibo' ? 'xhigh' : 'low' }}。</span>
         </label>
         <label class="block text-sm">超时（秒）<input v-model.number="setting.config.timeout_seconds" type="number" class="input mt-2" min="30" max="600" required /></label>
-        <label class="block text-sm sm:col-span-2">测试题目<textarea v-model="setting.config.prompt" class="input mt-2 min-h-32" maxlength="16000" required /></label>
-        <label class="block text-sm">评分规则<select v-model="setting.config.evaluator" class="input mt-2"><option value="svg_structure">SVG 结构校验</option><option value="exact_answer">标准答案校验</option><option value="tibo_answer">tibo True/False</option></select></label>
+        <label class="block text-sm sm:col-span-2">测试题目<textarea v-model="setting.config.prompt" class="input mt-2 min-h-32" maxlength="16000" required :readonly="setting.config.visual_judge_enabled" /></label>
+        <label class="block text-sm">评分规则<select v-model="setting.config.evaluator" class="input mt-2" :disabled="setting.config.visual_judge_enabled"><option value="svg_structure">SVG 结构校验</option><option value="exact_answer">标准答案校验</option><option value="tibo_answer">tibo True/False</option></select></label>
         <template v-if="setting.config.evaluator === 'exact_answer'">
           <label class="block text-sm">标准答案<input v-model="setting.config.expected_answer" class="input mt-2" maxlength="200" required /></label>
           <label class="block text-sm">答案类型<select v-model="setting.config.answer_type" class="input mt-2"><option value="auto">自动识别数值或文本</option><option value="number">数值等价比较</option><option value="text">文本比较</option></select></label>
@@ -75,6 +84,16 @@ const trialOutputs = ref<Record<string, string>>({}), previews = ref<Record<stri
 function markDirty(type: string) { dirty.add(type); saved.value = ''; previews.value[type] = undefined }
 // Suggestions remain editable; explicit choices are preserved by the runner.
 const modelSuggestions = ['gpt-6-astra', 'gpt-5.2', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.5', 'claude-sonnet-4-5-20250929', 'gemini-2.0-flash']
+function configureVisualJudge(setting: TestSetting) {
+  if (!setting.config.visual_judge_enabled) return
+  setting.config.evaluator = 'svg_structure'
+  setting.config.visual_pass_score ||= 70
+  setting.config.prompt = `Generate a 2D animated SVG of a pelican riding a bicycle.
+Animate with SMIL or CSS animations inside the SVG itself. Do not use JavaScript.
+Produce the SVG in a single pass. Do not test or execute it, open a browser,
+perform visual validation, use tools or skills, or refine or regenerate it.
+Return the generated SVG code as the final answer immediately.`
+}
 watch(() => props.settings, value => {
   drafts.value = value.map(item => {
     const existing = drafts.value.find(draft => draft.test_type === item.test_type)

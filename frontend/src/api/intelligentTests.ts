@@ -1,7 +1,19 @@
 import { apiClient } from './client'
 
 export type TestStatus = 'waiting' | 'queued' | 'running' | 'completed' | 'cancelled' | 'success' | 'failed' | 'rate_limited' | 'account_error' | 'model_error' | 'request_error' | 'network_error' | 'suspected_degradation'
+export interface PelicanVisualJudgement {
+  state: 'passed' | 'anomalous' | 'unavailable'
+  score?: number
+  threshold: number
+  reason: string
+  rubric?: string
+  judge_model?: string
+  sample_count?: number
+  dimensions?: Record<string, { score: number; reason: string }>
+  frame_times?: number[]
+}
 export interface TestAssessment {
+  visual_judgement?: PelicanVisualJudgement
   evaluator_version?: number
   answer_verdict?: 'correct' | 'incorrect' | 'undetermined' | 'not_evaluated'
   format_verdict?: 'compliant' | 'non_compliant' | 'not_required' | 'not_evaluated'
@@ -37,6 +49,8 @@ export interface TestOverview {
 }
 export interface TestPage<T> { items: T[]; total: number; page: number; page_size: number }
 export interface TestConfig {
+  visual_judge_enabled?: boolean
+  visual_pass_score?: number
   schedule_enabled?: boolean
   group_id?: number
   answer_type?: 'auto' | 'number' | 'text'
@@ -47,6 +61,7 @@ export interface TestConfig {
   expected_answer?: string; timeout_seconds: number
 }
 export interface TestSetting {
+  visual_judge_ready?: boolean
   test_type: string; name?: string; enabled: boolean; user_visible: boolean
   config: TestConfig; updated_at?: string
 }

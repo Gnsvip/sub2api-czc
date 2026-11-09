@@ -315,6 +315,9 @@ func PublicIntelligentAssessment(evaluation map[string]any) map[string]any {
 		return nil
 	}
 	out := map[string]any{"evaluator_version": version, "capability_verdict": "insufficient_evidence"}
+	if visual := publicPelicanVisualAssessment(evaluation); visual != nil {
+		out["visual_judgement"] = visual
+	}
 	for _, key := range []string{"answer_verdict", "format_verdict", "image_state", "execution_status"} {
 		if value, ok := evaluation[key].(string); ok {
 			out[key] = value

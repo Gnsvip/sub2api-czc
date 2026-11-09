@@ -71,7 +71,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.InDelta(t, 80, *result.Score, 0.01)
 	require.EqualValues(t, 3, requests.Load())
 	require.Len(t, result.FrameTimes, 6)
-	result = runAutoPelicanJudge(context.Background(), `<!DOCTYPE html><html><head><meta charset="utf-8"><title>动画</title></head><body>`+svg+`</body></html>`, intelligentAnimalHTMLPrompt("豆娘"), 70)
+	result = runAutoPelicanJudge(context.Background(), "将以下内容保存为 HTML。\n```html\n"+`<!DOCTYPE html><html><head><meta charset="utf-8"><title>动画</title></head><body>`+svg+"</body></html>\n```\n可直接打开。", intelligentAnimalHTMLPrompt("豆娘"), 70)
 	require.Equal(t, "passed", result.State, result.Reason)
 	require.Equal(t, "animal-judge-v1", result.Rubric)
 	require.EqualValues(t, 3, animalRequests.Load(), "every review must judge the requested species")

@@ -31,14 +31,15 @@ func intelligentTestBad(message string) error {
 }
 
 type IntelligentTestService struct {
-	repo       IntelligentTestRepository
-	runner     IntelligentTestRunner
-	evaluators map[string]IntelligentTestEvaluator
-	cancel     context.CancelFunc
-	runCtx     context.Context
-	lastAnimal string
-	mu         sync.Mutex
-	wg         sync.WaitGroup
+	repo        IntelligentTestRepository
+	runner      IntelligentTestRunner
+	evaluators  map[string]IntelligentTestEvaluator
+	visualJudge func(context.Context, string, int) *PelicanVisualAssessment
+	cancel      context.CancelFunc
+	runCtx      context.Context
+	lastAnimal  string
+	mu          sync.Mutex
+	wg          sync.WaitGroup
 }
 
 func NewIntelligentTestService(repo IntelligentTestRepository, runner *AccountTestService) *IntelligentTestService {
@@ -92,7 +93,13 @@ func (s *IntelligentTestService) Settings(ctx context.Context, actor int64) ([]I
 	if err := s.authorize(ctx, actor); err != nil {
 		return nil, err
 	}
-	return s.repo.Settings(ctx)
+	settings, err := s.repo.Settings(ctx)
+	for i := range settings {
+		if settings[i].TestType == "pelican" {
+			settings[i].VisualJudgeReady = pelicanJudgeConfigured()
+		}
+	}
+	return settings, err
 }
 func (s *IntelligentTestService) UpdateSetting(ctx context.Context, actor int64, setting *IntelligentTestSetting) error {
 	if err := s.authorize(ctx, actor); err != nil {
@@ -102,8 +109,21 @@ func (s *IntelligentTestService) UpdateSetting(ctx context.Context, actor int64,
 		return intelligentTestBad("invalid test type")
 	}
 	cfg := &setting.Config
-	cfg.Execution = nil // Only a runner may produce an execution snapshot.
-	cfg.Source = ""     // Only the scheduler may mark an automatically created run.
+	cfg.Execution = nil              // Only a runner may produce an execution snapshot.
+	cfg.Source = ""                  // Only the scheduler may mark an automatically created run.
+	setting.VisualJudgeReady = false // Runtime information is never client-owned.
+	if cfg.VisualJudgeEnabled {
+		if setting.TestType != "pelican" || cfg.Evaluator != "svg_structure" {
+			return intelligentTestBad("auto-pelican 评分仅适用于鹈鹕 SVG 测试")
+		}
+		if !pelicanJudgeConfigured() {
+			return intelligentTestBad("请先配置服务器的 auto-pelican Python 环境和视觉评审模型")
+		}
+		cfg.Prompt = AutoPelicanGenerationPrompt
+		if cfg.VisualPassScore == 0 {
+			cfg.VisualPassScore = 70
+		}
+	}
 	if cfg.GroupID < 0 || (setting.TestType == "pelican" && setting.Enabled && cfg.ScheduleEnabled && cfg.GroupID == 0) {
 		return intelligentTestBad("请选择自动测试使用的分组")
 	}
@@ -114,6 +134,9 @@ func (s *IntelligentTestService) UpdateSetting(ctx context.Context, actor int64,
 }
 
 func validateIntelligentTestConfig(cfg *IntelligentTestConfig, evaluators map[string]IntelligentTestEvaluator) error {
+	if cfg.VisualPassScore < 0 || cfg.VisualPassScore > 100 {
+		return intelligentTestBad("画面通过分数须为 1–100")
+	}
 	if err := validateIntelligentTextModel(cfg.Model); err != nil {
 		return intelligentTestBad(err.Error())
 	}
@@ -771,6 +794,7 @@ func (s *IntelligentTestService) run(ctx context.Context, r *IntelligentTestReco
 			r.Score = evaluated.Score
 			r.ResultImage = evaluated.Image
 			r.Evaluation = evaluated.Detail
+			s.scorePelican(ctx, r)
 			return
 		}
 		if errors.Is(err, ErrIntelligentAccountBusy) {
@@ -823,6 +847,9 @@ func (s *IntelligentTestService) PreviewEvaluation(ctx context.Context, actor in
 		return nil, err
 	}
 	e := s.evaluators[cfg.Evaluator].Evaluate(output, cfg)
+	if cfg.VisualJudgeEnabled {
+		e.Detail["visual_judgement"] = unavailablePelicanAssessment(pelicanPassScore(cfg), "本地试判不调用评审模型，请运行一次完整测试获取视觉评分")
+	}
 	return &IntelligentTestRecord{Status: e.Status, Score: e.Score, Result: output, ResultImage: e.Image, Evaluation: e.Detail}, nil
 }
 
@@ -838,6 +865,9 @@ func (s *IntelligentTestService) Reevaluate(ctx context.Context, actor, id int64
 		return nil, err
 	}
 	return s.repo.Reevaluate(ctx, actor, id, func(r *IntelligentTestRecord) error {
+		if r.ConfigSnapshot != nil && r.ConfigSnapshot.VisualJudgeEnabled {
+			return intelligentTestBad("视觉评分需要调用模型，请重新运行测试；本地重评不会覆盖已有视觉评分")
+		}
 		if r.ConfigSnapshot == nil || r.RawTruncated || strings.TrimSpace(r.Result) == "" {
 			return intelligentTestBad("原始答复或配置不完整，无法自动重评")
 		}

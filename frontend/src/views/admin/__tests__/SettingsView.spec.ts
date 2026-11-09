@@ -2133,11 +2133,11 @@ describe("Astra automatic group settings", () => {
     await wrapper.get('[data-testid="astra-auto-group-enabled"]').setValue(true);
     const save = wrapper.get('[data-testid="astra-auto-group-save"]');
     expect(save.attributes("disabled")).toBeDefined();
-    await wrapper.get('[data-testid="astra-auto-group-healthy"]').setValue("11");
+    await wrapper.get('[data-testid="astra-normal-11"]').setValue(true);
     await wrapper.get('[data-testid="astra-auto-group-degraded"]').setValue("11");
     expect(save.attributes("disabled")).toBeDefined();
     await wrapper.get('[data-testid="astra-auto-group-degraded"]').setValue("12");
-    const selected = { enabled: true, healthy_group_id: 11, degraded_group_id: 12 };
+    const selected = { enabled: true, healthy_group_id: 0, healthy_group_ids: [11], degraded_group_id: 12 };
     let finish!: (value: typeof selected) => void;
     updateAstraAutoGroupSettings.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     await save.trigger("click");
@@ -2153,7 +2153,7 @@ describe("Astra automatic group settings", () => {
     const reloaded = mount(AstraAutoGroupSettings);
     await flushPromises();
     expect((reloaded.get('[data-testid="astra-auto-group-enabled"]').element as HTMLInputElement).checked).toBe(true);
-    expect((reloaded.get('[data-testid="astra-auto-group-healthy"]').element as HTMLSelectElement).value).toBe("11");
+    expect((reloaded.get('[data-testid="astra-normal-11"]').element as HTMLInputElement).checked).toBe(true);
     reloaded.unmount();
   });
 
@@ -2170,8 +2170,26 @@ describe("Astra automatic group settings", () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
     await wrapper.get('[data-testid="astra-auto-group-save"]').trigger("click");
     await flushPromises();
-    expect(updateAstraAutoGroupSettings).toHaveBeenLastCalledWith({ enabled: false, healthy_group_id: 11, degraded_group_id: 99 });
+    expect(updateAstraAutoGroupSettings).toHaveBeenLastCalledWith({ enabled: false, healthy_group_id: 0, healthy_group_ids: [11], degraded_group_id: 99 });
     expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("saves multiple normal groups and one degraded target", async () => {
+    getGroups.mockResolvedValueOnce([
+      { id: 11, name: "Normal A", platform: "openai", status: "active" },
+      { id: 12, name: "Normal B", platform: "openai", status: "active" },
+      { id: 15, name: "Quarantine", platform: "openai", status: "active" },
+    ]);
+    const wrapper = mount(AstraAutoGroupSettings);
+    await flushPromises();
+    await wrapper.get('[data-testid="astra-auto-group-enabled"]').setValue(true);
+    await wrapper.get('[data-testid="astra-normal-11"]').setValue(true);
+    await wrapper.get('[data-testid="astra-normal-12"]').setValue(true);
+    await wrapper.get('[data-testid="astra-auto-group-degraded"]').setValue("15");
+    await wrapper.get('[data-testid="astra-auto-group-save"]').trigger("click");
+    await flushPromises();
+    expect(updateAstraAutoGroupSettings).toHaveBeenLastCalledWith({ enabled: true, healthy_group_id: 0, healthy_group_ids: [11, 12], degraded_group_id: 15 });
     wrapper.unmount();
   });
 

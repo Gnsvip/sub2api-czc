@@ -3,10 +3,98 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
+	python := os.Getenv("SUB2API_PELICAN_TEST_PYTHON")
+	if python == "" {
+		t.Skip("auto-pelican runtime is installed in GitHub Actions")
+	}
+	var requests atomic.Int64
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if fail.Load() {
+			http.Error(w, "mock judge failure", http.StatusServiceUnavailable)
+			return
+		}
+		var request struct {
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil || len(request.Messages) != 2 {
+			t.Error("missing blind visual judge request")
+			http.Error(w, "bad request", 400)
+			return
+		}
+		var parts []map[string]any
+		if json.Unmarshal(request.Messages[1].Content, &parts) != nil || len(parts) != 3 {
+			t.Error("judge must receive first frame and six-frame montage")
+		}
+		checks := map[string]bool{}
+		for _, key := range []string{"pelican_identifiable", "pelican_long_bill", "pelican_throat_pouch", "pelican_eye", "pelican_wing", "pelican_legs_or_feet", "bicycle_identifiable", "bicycle_two_wheels", "bicycle_frame_connects_wheels", "bicycle_handlebars", "bicycle_saddle", "bicycle_pedals_or_crank", "bicycle_chain_or_chainring", "pelican_mounted", "feet_on_pedals", "wing_on_handlebars", "plausible_scale", "subjects_fully_in_frame", "no_detached_parts", "no_major_artifacts", "motion_visible", "wheels_rotate", "legs_pedal", "parts_stay_attached_in_motion"} {
+			checks[key] = true
+		}
+		scores := map[string]any{}
+		for _, key := range []string{"prompt_fidelity", "pelican_quality", "bicycle_quality", "interaction_spatial_correctness", "animation_quality", "visual_coherence", "aesthetic_quality"} {
+			scores[key] = map[string]any{"score": 4, "reason": "mock visual evidence"}
+		}
+		judgement, _ := json.Marshal(map[string]any{"checklist": checks, "scores": scores, "observations": "mock six-frame inspection"})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "object": "chat.completion", "created": 1, "model": "mock-vision", "choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": string(judgement)}}}})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("SUB2API_PELICAN_PYTHON", python)
+	t.Setenv("JUDGE_BASE_URL", server.URL+"/v1")
+	t.Setenv("JUDGE_MODEL", "mock-vision")
+	t.Setenv("JUDGE_API_KEY", "fixture-only")
+	t.Setenv("JUDGE_PROTOCOL", "chat_completions")
+	t.Setenv("JUDGE_SAMPLES", "3")
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="50" r="10"><animate attributeName="cx" values="20;80;20" dur="2s" repeatCount="indefinite"/></circle></svg>`
+	result := runAutoPelicanJudge(context.Background(), svg, 70)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.InDelta(t, 80, *result.Score, 0.01)
+	require.EqualValues(t, 3, requests.Load())
+	require.Len(t, result.FrameTimes, 6)
+	for _, unsafe := range []string{svg + `<script>draw()</script>`, `<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`, `<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`} {
+		result = runAutoPelicanJudge(context.Background(), unsafe, 70)
+		require.Equal(t, "unavailable", result.State)
+		require.Nil(t, result.Score)
+	}
+	require.EqualValues(t, 3, requests.Load(), "unsupported renders must never call a judge")
+	fail.Store(true)
+	result = runAutoPelicanJudge(context.Background(), svg, 70)
+	require.Equal(t, "unavailable", result.State)
+	require.Nil(t, result.Score, "transport failures must never become zero-quality scores")
+}
+
+func TestAutoPelicanScoreIsDisplayOnly(t *testing.T) {
+	score := 35.0
+	svc := &IntelligentTestService{visualJudge: func(context.Context, string, int) *PelicanVisualAssessment {
+		return &PelicanVisualAssessment{State: "anomalous", Score: &score, Threshold: 70}
+	}}
+	record := &IntelligentTestRecord{TestType: "pelican", Status: "completed", ConfigSnapshot: &IntelligentTestConfig{VisualJudgeEnabled: true}}
+	// No repository is provided: scoring cannot reach account/group writes.
+	svc.scorePelican(context.Background(), record)
+	require.Equal(t, "completed", record.Status)
+	require.Equal(t, 35.0, *record.Score)
+	public := PublicIntelligentAssessment(record.Evaluation)
+	require.Equal(t, "anomalous", public["visual_judgement"].(*PelicanVisualAssessment).State)
+	require.Equal(t, "insufficient_evidence", public["capability_verdict"])
+	malformed := decodePelicanVisualAssessment([]byte(`{"state":"passed","score":0}`), 70)
+	require.Equal(t, "unavailable", malformed.State)
+	require.Nil(t, malformed.Score)
+	failed := decodePelicanVisualAssessment([]byte(`{"state":"unavailable","score":0,"reason":"offline"}`), 70)
+	require.Nil(t, failed.Score)
+}
 
 func TestResolveIntelligentTestModelDefaultsChatGPTToGpt6Astra(t *testing.T) {
 	t.Parallel()

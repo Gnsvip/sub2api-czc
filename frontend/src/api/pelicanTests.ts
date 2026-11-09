@@ -1,6 +1,8 @@
 import { apiClient } from './client'
+import type { PelicanVisualJudgement } from './intelligentTests'
 
 export interface PelicanTestItem {
+  visual_judgement?: PelicanVisualJudgement
   id: number
   status: string
   html: string

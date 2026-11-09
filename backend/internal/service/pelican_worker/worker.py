@@ -42,7 +42,9 @@ class CanvasWrapper(HTMLParser):
             raise ValueError("incomplete_wrapper")
 
     def handle_data(self, data):
-        if data.strip() and (not self.stack or self.stack[-1] != "title"):
+        # The preview extracts the HTML document, so prose before/after its
+        # root is not visible. Text within its body still changes the canvas.
+        if data.strip() and self.stack and self.stack[-1] != "title":
             raise ValueError("unsupported_outer_content")
 
     def handle_decl(self, decl):

@@ -202,3 +202,32 @@ test('管理员可以预览并发布使用教程', async ({ page }, testInfo) =>
     fullPage: true,
   })
 })
+
+// The existing desktop/mobile browser job also protects the lightweight result view.
+test('animal test shows one animation with collapsed scoring details', async ({ page }, testInfo) => {
+  await prepareAdminGuide(page)
+  await page.route('**/api/v1/pelican-tests/visibility', route => json(route, { visible: true }))
+  await page.route('**/api/v1/pelican-tests?*', route => json(route, {
+    items: [2, 1].map(id => ({
+      id, status: 'completed', model: 'gpt-6-astra', group_name: 'Test group', reasoning_effort: 'low',
+      prompt: '创建一个HTML，内容是SVG绘制一个豆娘骑自行车的2D动画',
+      created_at: `2026-11-09T0${id}:00:00Z`, duration_ms: 1000,
+      html: `<html><body style="margin:0"><svg id="drawing-${id}" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="400" height="300" fill="#bce9f4"/><circle cx="130" cy="210" r="40" fill="none" stroke="#35695b" stroke-width="5"/><circle cx="280" cy="210" r="40" fill="none" stroke="#35695b" stroke-width="5"/><path d="M130 210 L180 145 L230 210 Z M180 145 L280 210" fill="none" stroke="#d87642" stroke-width="6"/><ellipse cx="195" cy="100" rx="40" ry="12" fill="#7aa868"/></svg></body></html>`,
+      visual_judgement: { state: id === 2 ? 'passed' : 'anomalous', score: id === 2 ? 88 : 20, threshold: 70,
+        reason: '只在详情中出现的完整评分说明', judge_model: 'fixture-vision', sample_count: 3 }
+    })), total: 2, page: 1, page_size: 32
+  }))
+  await page.goto('/pelican-test')
+  await expect(page.locator('iframe')).toHaveCount(1)
+  await expect(page.locator('[data-testid="pelican-ribbon"]')).toHaveText('通过')
+  await expect(page.getByText('只在详情中出现的完整评分说明')).not.toBeVisible()
+  await expect(page.locator('pre').filter({ hasText: '豆娘' })).not.toBeVisible()
+  await expect(page.locator('[data-testid="pelican-details"]')).not.toHaveAttribute('open', '')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('animal-single-preview.png'), fullPage: true })
+  await page.getByRole('button', { name: /11-09.*异常/ }).click()
+  await expect(page.locator('iframe')).toHaveCount(1)
+  await expect(page.locator('iframe')).toHaveAttribute('srcdoc', /drawing-1/)
+  await page.getByText('评分与测试详情', { exact: true }).click()
+  await expect(page.getByText('只在详情中出现的完整评分说明')).toBeVisible()
+})

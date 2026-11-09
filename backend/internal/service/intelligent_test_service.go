@@ -34,7 +34,7 @@ type IntelligentTestService struct {
 	repo        IntelligentTestRepository
 	runner      IntelligentTestRunner
 	evaluators  map[string]IntelligentTestEvaluator
-	visualJudge func(context.Context, string, int) *PelicanVisualAssessment
+	visualJudge func(context.Context, string, string, int) *PelicanVisualAssessment
 	cancel      context.CancelFunc
 	runCtx      context.Context
 	lastAnimal  string
@@ -119,7 +119,6 @@ func (s *IntelligentTestService) UpdateSetting(ctx context.Context, actor int64,
 		if !pelicanJudgeConfigured() {
 			return intelligentTestBad("请先配置服务器的 auto-pelican Python 环境和视觉评审模型")
 		}
-		cfg.Prompt = AutoPelicanGenerationPrompt
 		if cfg.VisualPassScore == 0 {
 			cfg.VisualPassScore = 70
 		}

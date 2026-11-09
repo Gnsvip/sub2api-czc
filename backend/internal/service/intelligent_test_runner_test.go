@@ -71,7 +71,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.InDelta(t, 80, *result.Score, 0.01)
 	require.EqualValues(t, 3, requests.Load())
 	require.Len(t, result.FrameTimes, 6)
-	result = runAutoPelicanJudge(context.Background(), "将以下内容保存为 HTML。\n```html\n"+`<!DOCTYPE html><html><head><meta charset="utf-8"><title>动画</title></head><body>`+svg+"</body></html>\n```\n可直接打开。", intelligentAnimalHTMLPrompt("豆娘"), 70)
+	result = runAutoPelicanJudge(context.Background(), "将以下内容保存为 HTML。\n```html\n"+`<!DOCTYPE html><html style="padding:0"><head><meta charset="utf-8"><title>动画</title></head><body style="margin: 0px 0; padding:0">`+svg+"</body></html>\n```\n可直接打开。", intelligentAnimalHTMLPrompt("豆娘"), 70)
 	require.Equal(t, "passed", result.State, result.Reason)
 	require.Equal(t, "animal-judge-v1", result.Rubric)
 	require.EqualValues(t, 3, animalRequests.Load(), "every review must judge the requested species")
@@ -79,6 +79,8 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
 		`<html><body style="opacity:0">` + svg + `</body></html>`,
+		`<html><body style="margin:0;background: red">` + svg + `</body></html>`,
+		`<html><body style="margin:0;display:none">` + svg + `</body></html>`,
 		`<html><body>` + svg + `<p>another visible object</p></body></html>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,
 		`<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`,

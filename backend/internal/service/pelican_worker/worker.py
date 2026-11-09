@@ -25,10 +25,17 @@ class CanvasWrapper(HTMLParser):
         self.stack = []
 
     def handle_starttag(self, tag, attrs):
-        allowed = {"html": {"lang"}, "head": set(), "body": set(),
+        allowed = {"html": {"lang", "style"}, "head": set(), "body": {"style"},
                    "title": set(), "meta": {"charset", "name", "content"}}
         if tag not in allowed or any(name not in allowed[tag] for name, _ in attrs):
             raise ValueError("unsupported_outer_markup")
+        # Zero outer spacing only positions the canvas. Other declarations can
+        # change its visible content and must remain inside the scored SVG.
+        for name, value in attrs:
+            if name == "style":
+                declarations = [d.strip() for d in (value or "").split(";") if d.strip()]
+                if any(not re.fullmatch(r"(?:margin|padding)(?:-(?:top|right|bottom|left))?\s*:\s*0(?:px)?(?:\s+0(?:px)?){0,3}", d, re.I) for d in declarations):
+                    raise ValueError("unsupported_outer_style")
         if tag != "meta":
             self.stack.append(tag)
 

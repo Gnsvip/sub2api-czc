@@ -30,7 +30,7 @@ const tone = computed(() => !judged.value ? 'bg-gray-100 text-gray-600 dark:bg-d
   : props.assessment?.state === 'passed' ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
     : 'bg-rose-50 text-rose-800 dark:bg-rose-900/20 dark:text-rose-300')
 const dimensionNames: Record<string, string> = {
-  prompt_fidelity: '题目符合程度', object_quality: '鹈鹕和自行车', interaction_spatial_correctness: '骑行姿势与空间关系',
+  prompt_fidelity: '题目符合程度', object_quality: '动物和自行车', interaction_spatial_correctness: '骑行姿势与空间关系',
   animation_quality: '动画动作', visual_coherence: '画面连贯性', aesthetic_quality: '美观程度'
 }
 </script>

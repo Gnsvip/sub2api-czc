@@ -18,13 +18,6 @@ import (
 //go:embed pelican_worker/worker.py pelican_worker/pelican_eval/*.py pelican_worker/LICENSE
 var pelicanWorkerFiles embed.FS
 
-// The fixed task is required by auto-pelican's pelican-specific checklist.
-const AutoPelicanGenerationPrompt = `Generate a 2D animated SVG of a pelican riding a bicycle.
-Animate with SMIL or CSS animations inside the SVG itself. Do not use JavaScript.
-Produce the SVG in a single pass. Do not test or execute it, open a browser,
-perform visual validation, use tools or skills, or refine or regenerate it.
-Return the generated SVG code as the final answer immediately.`
-
 type PelicanVisualDimension struct {
 	Score  float64 `json:"score"`
 	Reason string  `json:"reason"`
@@ -85,8 +78,12 @@ func (b *limitedPelicanOutput) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 
-func runAutoPelicanJudge(ctx context.Context, output string, threshold int) *PelicanVisualAssessment {
+func runAutoPelicanJudge(ctx context.Context, output, prompt string, threshold int) *PelicanVisualAssessment {
 	fallback := unavailablePelicanAssessment(threshold, "视觉评分未完成，未判定画面质量")
+	animal := intelligentJudgeAnimal(prompt)
+	if animal == "" {
+		return unavailablePelicanAssessment(threshold, "未识别测试题目中的动物，未判定画面质量")
+	}
 	if !pelicanJudgeConfigured() || len(output) > 256<<10 {
 		return fallback
 	}
@@ -125,7 +122,7 @@ func runAutoPelicanJudge(ctx context.Context, output string, threshold int) *Pel
 	if err != nil {
 		return fallback
 	}
-	payload, err := json.Marshal(map[string]any{"output": output, "threshold": threshold})
+	payload, err := json.Marshal(map[string]any{"output": output, "threshold": threshold, "subject": animal})
 	if err != nil {
 		return fallback
 	}
@@ -164,7 +161,7 @@ func decodePelicanVisualAssessment(raw []byte, threshold int) *PelicanVisualAsse
 	if result.State != "passed" && result.State != "anomalous" || result.Score == nil || math.IsNaN(*result.Score) || math.IsInf(*result.Score, 0) || *result.Score < 0 || *result.Score > 100 {
 		return fallback
 	}
-	if result.SampleCount < 1 || result.SampleCount > 3 || len(result.FrameTimes) != 6 || result.Rubric != "pelican-judge-v1" {
+	if result.SampleCount < 1 || result.SampleCount > 3 || len(result.FrameTimes) != 6 || (result.Rubric != "pelican-judge-v1" && result.Rubric != "animal-judge-v1") {
 		return fallback
 	}
 	for _, key := range []string{"prompt_fidelity", "object_quality", "interaction_spatial_correctness", "animation_quality", "visual_coherence", "aesthetic_quality"} {
@@ -191,7 +188,7 @@ func (s *IntelligentTestService) scorePelican(ctx context.Context, r *Intelligen
 	if judge == nil {
 		judge = runAutoPelicanJudge
 	}
-	result := judge(ctx, r.Result, pelicanPassScore(*r.ConfigSnapshot))
+	result := judge(ctx, r.Result, r.ConfigSnapshot.Prompt, pelicanPassScore(*r.ConfigSnapshot))
 	r.Evaluation["visual_judgement"] = result
 	r.Score = result.Score
 	// This observation never changes execution status or invokes account

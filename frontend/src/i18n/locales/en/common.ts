@@ -505,7 +505,11 @@ export default {
   },
 
   pelicanTest: {
-    subtitle: 'When enabled by an administrator, an available account from the selected group generates an animal riding a bicycle every 30 minutes between 08:00 and 24:00 Beijing time. Results from that group are kept for 24 hours. Select a time on the left to view a result. This page cannot start tests.',
+    subtitle: 'Automatic tests 08:00–24:00 Beijing · Every 30 minutes · Last 24 hours',
+    passed: 'Passed',
+    anomalous: 'Anomalous',
+    unscored: 'Unscored',
+    details: 'Score and test details',
     empty: 'No results in the last 24 hours. Wait for the next automatic run.',
     time: 'Test time',
     group: 'Group',

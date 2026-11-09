@@ -20,7 +20,7 @@ const messages = {
   zh: {
     nav: { pelicanTest: '鹈鹕测试' },
     pelicanTest: {
-      subtitle: '每小时自动',
+      subtitle: '每半小时自动', passed: '通过', anomalous: '异常', unscored: '未评分', details: '评分与测试详情',
       empty: '暂无测试结果',
       time: '测试时间',
       group: '测试分组',
@@ -153,6 +153,8 @@ describe('PelicanTestView', () => {
     expect(wrapper.findAll('h1')).toHaveLength(1)
     expect(wrapper.get('h1').classes()).toContain('lg:hidden')
     expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="pelican-details"]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-testid="pelican-details"]').find('pre').exists()).toBe(true)
     expect(wrapper.find('iframe').attributes('srcdoc')).toContain('id="latest"')
     expect(wrapper.text()).toContain('火烈鸟')
     const buttons = wrapper.findAll('button')

@@ -21,6 +21,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	}
 	var requests atomic.Int64
 	var fail atomic.Bool
+	var animalRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		if fail.Load() {
@@ -36,6 +37,10 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 			t.Error("missing blind visual judge request")
 			http.Error(w, "bad request", 400)
 			return
+		}
+		if strings.Contains(string(request.Messages[0].Content), "豆娘") {
+			animalRequests.Add(1)
+			require.Contains(t, string(request.Messages[0].Content), "Do not require a beak")
 		}
 		var parts []map[string]any
 		if json.Unmarshal(request.Messages[1].Content, &parts) != nil || len(parts) != 3 {
@@ -61,25 +66,32 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	t.Setenv("JUDGE_PROTOCOL", "chat_completions")
 	t.Setenv("JUDGE_SAMPLES", "3")
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="50" r="10"><animate attributeName="cx" values="20;80;20" dur="2s" repeatCount="indefinite"/></circle></svg>`
-	result := runAutoPelicanJudge(context.Background(), svg, 70)
+	result := runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 	require.Equal(t, "passed", result.State, result.Reason)
 	require.InDelta(t, 80, *result.Score, 0.01)
 	require.EqualValues(t, 3, requests.Load())
 	require.Len(t, result.FrameTimes, 6)
+	result = runAutoPelicanJudge(context.Background(), `<!DOCTYPE html><html><head><meta charset="utf-8"><title>动画</title></head><body>`+svg+`</body></html>`, intelligentAnimalHTMLPrompt("豆娘"), 70)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.Equal(t, "animal-judge-v1", result.Rubric)
+	require.EqualValues(t, 3, animalRequests.Load(), "every review must judge the requested species")
+	require.EqualValues(t, 6, requests.Load())
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
+		`<html><body style="opacity:0">` + svg + `</body></html>`,
+		`<html><body>` + svg + `<p>another visible object</p></body></html>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,
 		`<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`,
 		`<style>circle { fill: red; }</style>` + svg,
 		"```svg\n" + svg + "\n```\n```svg\n" + svg + "\n```",
 	} {
-		result = runAutoPelicanJudge(context.Background(), unsafe, 70)
+		result = runAutoPelicanJudge(context.Background(), unsafe, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 		require.Equal(t, "unavailable", result.State)
 		require.Nil(t, result.Score)
 	}
-	require.EqualValues(t, 3, requests.Load(), "unsupported renders must never call a judge")
+	require.EqualValues(t, 6, requests.Load(), "unsupported renders must never call a judge")
 	fail.Store(true)
-	result = runAutoPelicanJudge(context.Background(), svg, 70)
+	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 	require.Equal(t, "unavailable", result.State)
 	require.Nil(t, result.Score, "transport failures must never become zero-quality scores")
 }
@@ -95,7 +107,7 @@ func TestAutoPelicanOutputLimit(t *testing.T) {
 
 func TestAutoPelicanScoreIsDisplayOnly(t *testing.T) {
 	score := 35.0
-	svc := &IntelligentTestService{visualJudge: func(context.Context, string, int) *PelicanVisualAssessment {
+	svc := &IntelligentTestService{visualJudge: func(context.Context, string, string, int) *PelicanVisualAssessment {
 		return &PelicanVisualAssessment{State: "anomalous", Score: &score, Threshold: 70}
 	}}
 	record := &IntelligentTestRecord{TestType: "pelican", Status: "completed", ConfigSnapshot: &IntelligentTestConfig{VisualJudgeEnabled: true}}

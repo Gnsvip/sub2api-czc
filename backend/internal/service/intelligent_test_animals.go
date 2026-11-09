@@ -15,6 +15,8 @@ func randIntN(n int) int {
 
 const intelligentAnimalHTMLPromptTmpl = "创建一个HTML，内容是SVG绘制一个%s骑自行车的2D动画，你不需要任何测试，只靠你自己完成，不要使用任何skill，不要依赖我本地的AGENTS.md"
 
+const IntelligentAnimalAnimationRequirement = "动画和样式都写在 SVG 内，使用 CSS 或 SMIL，不使用 JavaScript；只绘制一个完整的 SVG 画面，HTML 外层只用于容纳这个 SVG。"
+
 // Rotating subjects for the user-facing HTML animation probe. One animal is
 // chosen at random every 30 minutes during 08:00–24:00 Beijing time.
 var intelligentTestAnimals = []string{
@@ -49,7 +51,21 @@ func intelligentAnimalHTMLPrompt(animal string) string {
 	if animal == "" {
 		animal = "鹈鹕"
 	}
-	return fmt.Sprintf(intelligentAnimalHTMLPromptTmpl, animal)
+	return fmt.Sprintf(intelligentAnimalHTMLPromptTmpl, animal) + "\n" + IntelligentAnimalAnimationRequirement
+}
+
+// Use the requested animal, never infer the task from the generated drawing.
+func intelligentJudgeAnimal(prompt string) string {
+	matched := ""
+	for _, animal := range intelligentTestAnimals {
+		if len(animal) > len(matched) && strings.Contains(prompt, animal+"骑自行车") {
+			matched = animal
+		}
+	}
+	if matched == "" && strings.Contains(strings.ToLower(prompt), "pelican riding a bicycle") {
+		return "鹈鹕"
+	}
+	return matched
 }
 
 func pickIntelligentTestAnimal(exclude string) string {

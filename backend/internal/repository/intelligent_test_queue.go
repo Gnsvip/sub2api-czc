@@ -137,6 +137,9 @@ func (r *intelligentTestRepository) Enqueue(ctx context.Context, actor int64, re
 			if override := service.IntelligentTestPromptOverride(req, id, kind); override != "" {
 				cfg.Prompt = override
 			}
+			if kind == "pelican" && cfg.VisualJudgeEnabled {
+				cfg.Prompt = service.AutoPelicanGenerationPrompt
+			}
 			if source := strings.TrimSpace(req.Source); source != "" {
 				cfg.Source = source
 			}

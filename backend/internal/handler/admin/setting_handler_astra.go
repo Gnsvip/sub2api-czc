@@ -17,15 +17,19 @@ func (h *SettingHandler) GetAstraAutoGroupSettings(c *gin.Context) {
 
 func (h *SettingHandler) UpdateAstraAutoGroupSettings(c *gin.Context) {
 	var req struct {
-		Enabled         *bool `json:"enabled" binding:"required"`
-		HealthyGroupID  int64 `json:"healthy_group_id"`
-		DegradedGroupID int64 `json:"degraded_group_id"`
+		Enabled         *bool   `json:"enabled" binding:"required"`
+		HealthyGroupID  int64   `json:"healthy_group_id"`
+		HealthyGroupIDs []int64 `json:"healthy_group_ids"`
+		DegradedGroupID int64   `json:"degraded_group_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	settings := service.AstraAutoGroupSettings{Enabled: *req.Enabled, HealthyGroupID: req.HealthyGroupID, DegradedGroupID: req.DegradedGroupID}
+	settings := service.AstraAutoGroupSettings{Enabled: *req.Enabled, HealthyGroupID: req.HealthyGroupID, HealthyGroupIDs: req.HealthyGroupIDs, DegradedGroupID: req.DegradedGroupID}
+	if req.HealthyGroupIDs != nil {
+		settings.HealthyGroupID = 0
+	}
 	if err := h.settingService.UpdateAstraAutoGroupSettings(c.Request.Context(), settings); err != nil {
 		response.ErrorFrom(c, err)
 		return

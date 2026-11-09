@@ -63,6 +63,63 @@ func (f *tiboGroupFixture) configure(enabled bool, healthy, degraded int64, upda
 	require.NoError(f.t, err)
 }
 
+func (f *tiboGroupFixture) configureMany(normal ...int64) {
+	f.t.Helper()
+	raw, err := json.Marshal(service.AstraAutoGroupSettings{Enabled: true, HealthyGroupIDs: normal, DegradedGroupID: f.welfare})
+	require.NoError(f.t, err)
+	_, err = integrationDB.ExecContext(f.ctx, `UPDATE settings SET value=$1,updated_at=$2 WHERE key=$3`, string(raw), time.Now().Add(-time.Hour), service.SettingKeyAstraAutoGroup)
+	require.NoError(f.t, err)
+}
+
+func TestTiboAutoGroupMultipleSourcesAndExactRecovery(t *testing.T) {
+	f := newTiboGroupFixture(t)
+	third := mustCreateGroup(t, f.client, &service.Group{Name: "third-normal-" + t.Name(), Platform: service.PlatformOpenAI})
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(f.ctx, "DELETE FROM groups WHERE id=$1", third.ID)
+		require.NoError(t, err)
+	})
+	f.configureMany(f.healthy, f.other, third.ID)
+	// Exercise the owner's three-group case and a partial membership.
+	for _, groups := range [][]int64{{f.healthy, f.other, third.ID}, {f.healthy}} {
+		a := f.account(service.AccountTypeOAuth, service.PlatformOpenAI, groups...)
+		before := f.memberships(a.ID)
+		f.sample(a.ID, "degraded")
+		after := f.memberships(a.ID)
+		require.Len(t, after, 1, "no selected normal group may remain schedulable")
+		require.Contains(t, after, f.welfare)
+		require.ElementsMatch(t, []int64{f.welfare}, f.cache.accounts[a.ID].GroupIDs)
+		f.sample(a.ID, "degraded")
+		require.Equal(t, after, f.memberships(a.ID), "repeat probes preserve restoration history")
+		f.sample(a.ID, "healthy")
+		require.Equal(t, before, f.memberships(a.ID), "restore original groups, priority and creation time only")
+		require.ElementsMatch(t, groups, f.cache.accounts[a.ID].GroupIDs)
+	}
+	legacy := f.account(service.AccountTypeOAuth, service.PlatformOpenAI, f.welfare)
+	f.sample(legacy.ID, "healthy")
+	require.Contains(t, f.memberships(legacy.ID), f.welfare, "unknown origins must not enroll an account in all normal groups")
+}
+
+func TestTiboAutoGroupMultipleSourcesAtomicityAndChangedConfig(t *testing.T) {
+	f := newTiboGroupFixture(t)
+	f.configureMany(f.healthy, f.other)
+	a := f.account(service.AccountTypeOAuth, service.PlatformOpenAI, f.healthy, f.other)
+	before := f.memberships(a.ID)
+	_, err := f.client.Group.UpdateOneID(f.welfare).SetStatus(service.StatusDisabled).Save(f.ctx)
+	require.NoError(t, err)
+	f.sample(a.ID, "degraded")
+	require.Equal(t, before, f.memberships(a.ID))
+	_, err = f.client.Group.UpdateOneID(f.welfare).SetStatus(service.StatusActive).Save(f.ctx)
+	require.NoError(t, err)
+	f.sample(a.ID, "degraded")
+	f.configureMany(f.healthy)
+	f.sample(a.ID, "healthy")
+	require.Len(t, f.memberships(a.ID), 1, "a changed rule cannot silently restore only part of the original memberships")
+	require.Contains(t, f.memberships(a.ID), f.welfare)
+	f.configureMany(f.healthy, f.other)
+	f.sample(a.ID, "healthy")
+	require.Equal(t, before, f.memberships(a.ID))
+}
+
 func (f *tiboGroupFixture) account(kind, platform string, groups ...int64) *service.Account {
 	f.t.Helper()
 	a := mustCreateAccount(f.t, f.client, &service.Account{Name: "tibo-test", Platform: platform, Type: kind,

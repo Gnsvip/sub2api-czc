@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -13,9 +14,37 @@ import (
 const SettingKeyAstraAutoGroup = "astra_auto_group"
 
 type AstraAutoGroupSettings struct {
-	Enabled         bool  `json:"enabled"`
-	HealthyGroupID  int64 `json:"healthy_group_id"`
-	DegradedGroupID int64 `json:"degraded_group_id"`
+	Enabled         bool    `json:"enabled"`
+	HealthyGroupID  int64   `json:"healthy_group_id"`
+	HealthyGroupIDs []int64 `json:"healthy_group_ids,omitempty"`
+	DegradedGroupID int64   `json:"degraded_group_id"`
+}
+
+// NormalGroupIDs accepts existing single-group settings until they are saved
+// through the multi-select UI. An explicitly supplied list takes precedence.
+func (s AstraAutoGroupSettings) NormalGroupIDs() []int64 {
+	if s.HealthyGroupIDs != nil {
+		return slices.Clone(s.HealthyGroupIDs)
+	}
+	if s.HealthyGroupID > 0 {
+		return []int64{s.HealthyGroupID}
+	}
+	return nil
+}
+
+func (s AstraAutoGroupSettings) ValidTargets() bool {
+	ids := s.NormalGroupIDs()
+	if len(ids) == 0 || len(ids) > 100 || s.DegradedGroupID <= 0 {
+		return false
+	}
+	seen := map[int64]bool{s.DegradedGroupID: true}
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
 }
 
 func (s *SettingService) GetAstraAutoGroupSettings(ctx context.Context) (*AstraAutoGroupSettings, error) {
@@ -34,18 +63,18 @@ func (s *SettingService) GetAstraAutoGroupSettings(ctx context.Context) (*AstraA
 }
 
 func (s *SettingService) UpdateAstraAutoGroupSettings(ctx context.Context, settings AstraAutoGroupSettings) error {
-	invalid := infraerrors.BadRequest("ASTRA_AUTO_GROUP_INVALID", "Select two different active OpenAI groups before enabling automatic group switching")
+	invalid := infraerrors.BadRequest("ASTRA_AUTO_GROUP_INVALID", "请选择至少一个正常分组和一个不同的降级分组，分组必须是有效的 OpenAI 分组")
 	if settings.HealthyGroupID < 0 || settings.DegradedGroupID < 0 {
 		return invalid
 	}
 	if settings.Enabled {
-		if settings.HealthyGroupID == 0 || settings.DegradedGroupID == 0 || settings.HealthyGroupID == settings.DegradedGroupID {
+		if !settings.ValidTargets() {
 			return invalid
 		}
 		if s.defaultSubGroupReader == nil {
 			return fmt.Errorf("Astra auto-group group reader unavailable")
 		}
-		for _, id := range []int64{settings.HealthyGroupID, settings.DegradedGroupID} {
+		for _, id := range append(settings.NormalGroupIDs(), settings.DegradedGroupID) {
 			group, err := s.defaultSubGroupReader.GetByID(ctx, id)
 			if errors.Is(err, ErrGroupNotFound) {
 				return invalid
@@ -58,7 +87,7 @@ func (s *SettingService) UpdateAstraAutoGroupSettings(ctx context.Context, setti
 			}
 		}
 	}
-	// A single setting row keeps the switch and both targets atomic. Disabling
+	// A single setting row keeps the switch and all targets atomic. Disabling
 	// remains possible after a selected group is deleted or made inactive.
 	raw, err := json.Marshal(settings)
 	if err != nil {

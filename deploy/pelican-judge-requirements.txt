@@ -1,0 +1,6 @@
+# Runtime for the vendored auto-pelican commit 8f152aaeff6913a018d3edd5a696b438c47853ee.
+anthropic==1.8.0
+openai==3.19.0
+pillow==12.3.0
+resvg-py==0.5.0
+svgelements==1.9.6

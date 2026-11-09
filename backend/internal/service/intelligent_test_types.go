@@ -6,29 +6,32 @@ import (
 )
 
 type IntelligentTestConfig struct {
-	ScheduleEnabled bool                         `json:"schedule_enabled,omitempty"`
-	GroupID         int64                        `json:"group_id,omitempty"`
-	AnswerType      string                       `json:"answer_type,omitempty"`
-	AnswerUnit      string                       `json:"answer_unit,omitempty"`
-	AnswerUnitMode  string                       `json:"answer_unit_mode,omitempty"`
-	AnswerFormat    string                       `json:"answer_format,omitempty"`
-	Execution       *IntelligentTestRuntimeState `json:"execution,omitempty"`
-	Prompt          string                       `json:"prompt"`
-	Model           string                       `json:"model"`
-	Evaluator       string                       `json:"evaluator"`
-	ExpectedAnswer  string                       `json:"expected_answer"`
-	TimeoutSeconds  int                          `json:"timeout_seconds"`
+	VisualJudgeEnabled bool                         `json:"visual_judge_enabled,omitempty"`
+	VisualPassScore    int                          `json:"visual_pass_score,omitempty"`
+	ScheduleEnabled    bool                         `json:"schedule_enabled,omitempty"`
+	GroupID            int64                        `json:"group_id,omitempty"`
+	AnswerType         string                       `json:"answer_type,omitempty"`
+	AnswerUnit         string                       `json:"answer_unit,omitempty"`
+	AnswerUnitMode     string                       `json:"answer_unit_mode,omitempty"`
+	AnswerFormat       string                       `json:"answer_format,omitempty"`
+	Execution          *IntelligentTestRuntimeState `json:"execution,omitempty"`
+	Prompt             string                       `json:"prompt"`
+	Model              string                       `json:"model"`
+	Evaluator          string                       `json:"evaluator"`
+	ExpectedAnswer     string                       `json:"expected_answer"`
+	TimeoutSeconds     int                          `json:"timeout_seconds"`
 	// Source marks how the run was created. "pelican-schedule" is the user-page
 	// timer and is hidden from the admin intelligent-test console.
 	Source string `json:"source,omitempty"`
 }
 type IntelligentTestSetting struct {
-	TestType    string                `json:"test_type"`
-	Name        string                `json:"name"`
-	Enabled     bool                  `json:"enabled"`
-	UserVisible bool                  `json:"user_visible"`
-	Config      IntelligentTestConfig `json:"config"`
-	UpdatedAt   time.Time             `json:"updated_at"`
+	VisualJudgeReady bool                  `json:"visual_judge_ready,omitempty"`
+	TestType         string                `json:"test_type"`
+	Name             string                `json:"name"`
+	Enabled          bool                  `json:"enabled"`
+	UserVisible      bool                  `json:"user_visible"`
+	Config           IntelligentTestConfig `json:"config"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 type IntelligentTestRecord struct {
 	AvailableAt     *time.Time             `json:"available_at,omitempty"`
@@ -151,17 +154,18 @@ type PublicAccountTests struct {
 }
 
 type UserPelicanTest struct {
-	ID              int64      `json:"id"`
-	Status          string     `json:"status"`
-	HTML            string     `json:"html"`
-	PreviewIssue    string     `json:"preview_issue,omitempty"`
-	Prompt          string     `json:"prompt"`
-	Model           string     `json:"model"`
-	GroupName       string     `json:"group_name"`
-	ReasoningEffort string     `json:"reasoning_effort"`
-	CreatedAt       time.Time  `json:"created_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	DurationMS      int64      `json:"duration_ms"`
+	VisualJudgement *PelicanVisualAssessment `json:"visual_judgement,omitempty"`
+	ID              int64                    `json:"id"`
+	Status          string                   `json:"status"`
+	HTML            string                   `json:"html"`
+	PreviewIssue    string                   `json:"preview_issue,omitempty"`
+	Prompt          string                   `json:"prompt"`
+	Model           string                   `json:"model"`
+	GroupName       string                   `json:"group_name"`
+	ReasoningEffort string                   `json:"reasoning_effort"`
+	CreatedAt       time.Time                `json:"created_at"`
+	FinishedAt      *time.Time               `json:"finished_at,omitempty"`
+	DurationMS      int64                    `json:"duration_ms"`
 }
 
 type UserPelicanTests struct {

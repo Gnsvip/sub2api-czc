@@ -83,18 +83,21 @@ func (r *accountRepository) persistTiboProbeResult(ctx context.Context, id int64
 		return r.syncSchedulerAccountSnapshot(ctx, id)
 	}
 	changed := false
-	var fromID, toID int64
+	var changedGroups []int64
 	reason := "ineligible_account"
 	if platform == service.PlatformOpenAI && credentialType == service.AccountTypeOAuth && status == service.StatusActive && extra[service.OpenAIAstraProbeEnabledExtraKey] != false {
-		fromID, toID, changed, reason, err = moveTiboAccountGroup(ctx, client, id, sample)
+		changedGroups, changed, reason, err = moveTiboAccountGroup(ctx, client, id, sample, extra)
 		if err != nil {
 			return err
 		}
 	}
 	// Copy the caller's update; no shared probe state is mutated.
-	write := make(map[string]any, len(updates)+1)
+	write := make(map[string]any, len(updates)+2)
 	for key, value := range updates {
 		write[key] = value
+	}
+	if restore, ok := extra[tiboAutoGroupRestoreKey]; ok {
+		write[tiboAutoGroupRestoreKey] = restore
 	}
 	// Business skips consume this probe too. Restoring a group or manually
 	// enrolling an account must not make a historical retry move it later.
@@ -107,7 +110,7 @@ func (r *accountRepository) persistTiboProbeResult(ctx context.Context, id int64
 	}
 	if changed {
 		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountGroupsChanged,
-			&id, nil, buildSchedulerGroupPayload([]int64{fromID, toID})); err != nil {
+			&id, nil, buildSchedulerGroupPayload(changedGroups)); err != nil {
 			return err
 		}
 	}
@@ -115,14 +118,14 @@ func (r *accountRepository) persistTiboProbeResult(ctx context.Context, id int64
 		return err
 	}
 	if changed {
-		logger.LegacyPrintf("repository.account", "[TiboAutoGroup] account=%d verdict=%s from=%d to=%d", id, sample.Verdict, fromID, toID)
+		logger.LegacyPrintf("repository.account", "[TiboAutoGroup] account=%d verdict=%s groups=%v", id, sample.Verdict, changedGroups)
 	} else if reason == "target_unavailable" {
 		logger.LegacyPrintf("repository.account", "[TiboAutoGroup] account=%d skipped=%s", id, reason)
 	}
 	return r.syncSchedulerAccountSnapshot(ctx, id)
 }
 
-func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, sample service.TiboAutoGroupSample) (from, to int64, changed bool, reason string, err error) {
+func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, sample service.TiboAutoGroupSample, extra map[string]any) (groups []int64, changed bool, reason string, err error) {
 	// Read the current configuration under the same transaction as the move.
 	// A concurrent disable waits for this transaction, so no move can commit
 	// after that settings save returns. Missing configuration defaults to off.
@@ -131,25 +134,28 @@ func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, s
 	err = scanSingleRow(ctx, client, `SELECT value,updated_at FROM settings WHERE key=$1 FOR SHARE`,
 		[]any{service.SettingKeyAstraAutoGroup}, &raw, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, 0, false, "auto_group_disabled", nil
+		return nil, false, "auto_group_disabled", nil
 	}
 	if err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	var settings service.AstraAutoGroupSettings
 	if err = json.Unmarshal([]byte(raw), &settings); err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	if !settings.Enabled {
-		return 0, 0, false, "auto_group_disabled", nil
+		return nil, false, "auto_group_disabled", nil
 	}
 	if sample.StartedAt.Before(updatedAt) {
-		return 0, 0, false, "settings_changed_during_probe", nil
+		return nil, false, "settings_changed_during_probe", nil
 	}
-	if settings.HealthyGroupID <= 0 || settings.DegradedGroupID <= 0 || settings.HealthyGroupID == settings.DegradedGroupID {
-		return 0, 0, false, "target_unavailable", nil
+	if !settings.ValidTargets() {
+		return nil, false, "target_unavailable", nil
 	}
-	from, to = settings.HealthyGroupID, settings.DegradedGroupID
+	if settings.HealthyGroupIDs != nil {
+		return moveMultiTiboAccountGroups(ctx, client, id, sample, settings, extra)
+	}
+	from, to := settings.HealthyGroupID, settings.DegradedGroupID
 	if sample.Verdict == "healthy" {
 		from, to = to, from
 	}
@@ -157,7 +163,7 @@ func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, s
 		AND platform='openai' AND status='active' AND deleted_at IS NULL ORDER BY id FOR SHARE`,
 		from, to)
 	if err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	count := 0
 	for rows.Next() {
@@ -165,28 +171,28 @@ func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, s
 		var groupID int64
 		if err = rows.Scan(&groupID); err != nil {
 			rows.Close()
-			return 0, 0, false, "", err
+			return nil, false, "", err
 		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	if count != 2 {
-		return 0, 0, false, "target_unavailable", nil
+		return nil, false, "target_unavailable", nil
 	}
 	rows, err = client.QueryContext(ctx, `SELECT group_id FROM account_groups
 		WHERE account_id=$1 AND group_id IN ($2,$3) ORDER BY group_id FOR UPDATE`, id, from, to)
 	if err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	hasSource, hasTarget := false, false
 	for rows.Next() {
 		var groupID int64
 		if err = rows.Scan(&groupID); err != nil {
 			rows.Close()
-			return 0, 0, false, "", err
+			return nil, false, "", err
 		}
 		hasSource = hasSource || groupID == from
 		hasTarget = hasTarget || groupID == to
@@ -194,13 +200,13 @@ func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, s
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return 0, 0, false, "", err
+		return nil, false, "", err
 	}
 	if !hasSource {
 		if hasTarget {
-			return from, to, false, "already_target", nil
+			return []int64{from, to}, false, "already_target", nil
 		}
-		return from, to, false, "outside_target_groups", nil
+		return []int64{from, to}, false, "outside_target_groups", nil
 	}
 	// UPDATE the existing source link instead of deleting and recreating it.
 	// Concurrent manual DELETE/BindGroups uses the same row lock: if the source
@@ -213,14 +219,14 @@ func moveTiboAccountGroup(ctx context.Context, client *dbent.Client, id int64, s
 	}
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
-		return from, to, false, "", err
+		return []int64{from, to}, false, "", err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return from, to, false, "", err
+		return []int64{from, to}, false, "", err
 	}
 	if affected == 0 {
-		return from, to, false, "outside_target_groups", nil
+		return []int64{from, to}, false, "outside_target_groups", nil
 	}
-	return from, to, true, "moved", nil
+	return []int64{from, to}, true, "moved", nil
 }

@@ -79,7 +79,7 @@ func TestSettingsAuditTracksOAuthRateValueNotPointer(t *testing.T) {
 type astraSettingsGroupReader struct{}
 
 func (astraSettingsGroupReader) GetByID(_ context.Context, id int64) (*service.Group, error) {
-	if id != 11 && id != 12 {
+	if id != 11 && id != 12 && id != 15 {
 		return nil, service.ErrGroupNotFound
 	}
 	return &service.Group{ID: id, Platform: service.PlatformOpenAI, Status: service.StatusActive}, nil
@@ -93,6 +93,9 @@ func TestSettingHandler_AstraAutoGroup(t *testing.T) {
 	}{
 		{`{"enabled":true,"healthy_group_id":11,"degraded_group_id":12}`, http.StatusOK},
 		{`{"enabled":false,"healthy_group_id":11,"degraded_group_id":99}`, http.StatusOK},
+		{`{"enabled":true,"healthy_group_ids":[11,15],"degraded_group_id":12}`, http.StatusOK},
+		{`{"enabled":true,"healthy_group_ids":[11,12],"degraded_group_id":12}`, http.StatusBadRequest},
+		{`{"enabled":true,"healthy_group_ids":[],"degraded_group_id":12}`, http.StatusBadRequest},
 		{`{}`, http.StatusBadRequest},
 		{`{"enabled":null}`, http.StatusBadRequest},
 		{`{"enabled":"true"}`, http.StatusBadRequest},

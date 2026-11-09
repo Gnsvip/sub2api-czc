@@ -182,6 +182,7 @@ func TestSettingService_AstraAutoGroupSettings(t *testing.T) {
 		12: {ID: 12, Name: "My Backup", Platform: PlatformOpenAI, Status: StatusActive},
 		13: {ID: 13, Platform: PlatformAnthropic, Status: StatusActive},
 		14: {ID: 14, Platform: PlatformOpenAI, Status: StatusDisabled},
+		15: {ID: 15, Platform: PlatformOpenAI, Status: StatusActive},
 	}})
 	got, err := svc.GetAstraAutoGroupSettings(context.Background())
 	require.NoError(t, err)
@@ -198,6 +199,10 @@ func TestSettingService_AstraAutoGroupSettings(t *testing.T) {
 		{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 14},
 		{Enabled: true, HealthyGroupID: 11, DegradedGroupID: 99},
 		{HealthyGroupID: -1},
+		{Enabled: true, HealthyGroupIDs: []int64{11, 11}, DegradedGroupID: 12},
+		{Enabled: true, HealthyGroupIDs: []int64{11, 12}, DegradedGroupID: 12},
+		{Enabled: true, HealthyGroupIDs: []int64{11, 99}, DegradedGroupID: 12},
+		{Enabled: true, HealthyGroupIDs: []int64{}, HealthyGroupID: 11, DegradedGroupID: 12},
 	} {
 		require.Error(t, svc.UpdateAstraAutoGroupSettings(context.Background(), invalid))
 		require.Equal(t, saved, repo.value, "invalid configuration must not overwrite a saved setting")
@@ -212,6 +217,11 @@ func TestSettingService_AstraAutoGroupSettings(t *testing.T) {
 	got, err = svc.GetAstraAutoGroupSettings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, &disabled, got)
+	multiple := AstraAutoGroupSettings{Enabled: true, HealthyGroupIDs: []int64{11, 15}, DegradedGroupID: 12}
+	require.NoError(t, svc.UpdateAstraAutoGroupSettings(context.Background(), multiple))
+	got, err = svc.GetAstraAutoGroupSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, &multiple, got)
 	repo.value = "invalid json"
 	_, err = svc.GetAstraAutoGroupSettings(context.Background())
 	require.Error(t, err)

@@ -254,7 +254,7 @@ WHERE t.test_type='pelican' AND t.status NOT IN ('queued','running','cancelled')
 	rows, err := r.db.QueryContext(ctx, `SELECT t.id,t.status,t.result,t.model,t.created_at,t.finished_at,t.duration_ms,
 COALESCE((SELECT name FROM groups WHERE id=$1 AND deleted_at IS NULL),''),
 COALESCE(NULLIF(t.config_snapshot#>>'{execution,reasoning_effort}',''),'low'),
-COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),'')
+COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),''),t.evaluation
 `+base+` ORDER BY t.id DESC LIMIT $2 OFFSET $3`, f.GroupID, f.PageSize, (f.Page-1)*f.PageSize)
 	if err != nil {
 		return nil, err
@@ -263,9 +263,16 @@ COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),'')
 	for rows.Next() {
 		item := service.UserPelicanTest{}
 		var raw string
-		if err := rows.Scan(&item.ID, &item.Status, &raw, &item.Model, &item.CreatedAt, &item.FinishedAt, &item.DurationMS, &item.GroupName, &item.ReasoningEffort, &item.Prompt); err != nil {
+		var assessment []byte
+		if err := rows.Scan(&item.ID, &item.Status, &raw, &item.Model, &item.CreatedAt, &item.FinishedAt, &item.DurationMS, &item.GroupName, &item.ReasoningEffort, &item.Prompt, &assessment); err != nil {
 			return nil, err
 		}
+		var evaluation map[string]any
+		if err := json.Unmarshal(assessment, &evaluation); err != nil {
+			return nil, err
+		}
+		public := service.PublicIntelligentAssessment(evaluation)
+		item.VisualJudgement, _ = public["visual_judgement"].(*service.PelicanVisualAssessment)
 		if item.Status != "completed" && item.Status != "success" {
 			// Preserve the history entry, but do not present interrupted output
 			// as a successfully generated picture.

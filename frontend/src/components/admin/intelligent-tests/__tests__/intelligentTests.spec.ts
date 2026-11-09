@@ -7,6 +7,7 @@ import TestSettingsPanel from '../TestSettingsPanel.vue'
 import TestResultCard from '../TestResultCard.vue'
 import TestDetailDialog from '../TestDetailDialog.vue'
 import TestGeneratedImage from '../TestGeneratedImage.vue'
+import PelicanVisualAssessment from '@/components/common/PelicanVisualAssessment.vue'
 import { intelligentTestsAPI, newTestRequestKey, type TestSetting, type TestRecord, type TestAccount } from '@/api/intelligentTests'
 import { getAvailableModels } from '@/api/admin/accounts'
 
@@ -27,6 +28,38 @@ beforeEach(() => {
   vi.mocked(getAvailableModels).mockResolvedValue([{ id: 'gpt-5.3-codex', display_name: 'GPT-5.3 Codex' }, { id: 'gpt-5.5' }])
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+describe('auto-pelican visual scores', () => {
+  it('distinguishes passed, anomalous and unscored without claiming account deletion', async () => {
+    const wrapper = mount(PelicanVisualAssessment, { props: { assessment: { state: 'passed', score: 85, threshold: 70, reason: '画面完整' } } })
+    expect(wrapper.text()).toContain('画面测试通过')
+    expect(wrapper.get('[role="status"]').classes().join(' ')).toContain('emerald')
+    await wrapper.setProps({ assessment: { state: 'anomalous', score: 35, threshold: 70, reason: '脚未踩踏板' } })
+    expect(wrapper.text()).toContain('画面异常')
+    expect(wrapper.text()).toContain('脚未踩踏板')
+    expect(wrapper.text()).not.toMatch(/已删除|已停止调度/)
+    await wrapper.setProps({ assessment: { state: 'unavailable', threshold: 70, reason: '评审超时' } })
+    expect(wrapper.text()).toContain('评分未完成')
+    expect(wrapper.text()).not.toContain('0.0 分')
+    wrapper.unmount()
+  })
+
+  it('saves a fixed pelican task and configurable pass score separately from Astra', async () => {
+    vi.mocked(intelligentTestsAPI.saveSetting).mockImplementationOnce(async setting => setting)
+    const initial = structuredClone(settings[0])
+    initial.visual_judge_ready = true
+    const wrapper = mount(TestSettingsPanel, { props: { settings: [initial] } })
+    await wrapper.get('[data-testid="pelican-visual-judge"]').setValue(true)
+    await wrapper.get('[data-testid="pelican-pass-score"]').setValue('80')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(intelligentTestsAPI.saveSetting).toHaveBeenLastCalledWith(expect.objectContaining({ config: expect.objectContaining({
+      visual_judge_enabled: true, visual_pass_score: 80, evaluator: 'svg_structure', prompt: expect.stringContaining('Do not use JavaScript')
+    }) }))
+    expect(wrapper.text()).toContain('Astra 自动换组仍依据原来的 Astra 检测')
+    wrapper.unmount()
+  })
+})
 
 describe('model-generated image isolation', () => {
   it('loads a historical image with authorization, ignores stale results and revokes object URLs', async () => {

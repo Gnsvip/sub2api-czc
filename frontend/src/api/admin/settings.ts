@@ -1734,6 +1734,7 @@ export default settingsAPI;
 export interface AstraAutoGroupSettings {
   enabled: boolean;
   healthy_group_id: number;
+  healthy_group_ids?: number[];
   degraded_group_id: number;
 }
 

@@ -660,7 +660,7 @@ func TestCodexSynthesisJSONOutputDoesNotInjectSearch(t *testing.T) {
 					toolsPath = `input.#(type=="additional_tools").tools`
 				}
 				require.Equal(t, formatType == "text", gjson.GetBytes(sent, toolsPath+`.#(type=="web_search")`).Exists(), string(sent))
-				require.True(t, gjson.GetBytes(sent, toolsPath+`.#(name=="lookup")`).Exists(), "client tool must be preserved")
+				require.True(t, gjson.GetBytes(sent, `tools.#(name=="lookup")`).Exists(), "client function stays at the top level, including in Lite")
 				require.Equal(t, formatType, gjson.GetBytes(sent, "text.format.type").String())
 				if formatType == "json_schema" {
 					require.Equal(t, "boolean", gjson.GetBytes(sent, "text.format.schema.properties.ok.type").String())

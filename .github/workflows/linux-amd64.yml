@@ -1,112 +1,211 @@
 name: Verified Linux amd64
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: verified-linux-amd64-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOMEMLIMIT: 3GiB
+
 jobs:
-  compression-probe:
+  backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Build temporary encoder probe using the deployed Go dependency
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install auto-pelican test runtime
+        run: |
+          python -m pip install -r deploy/pelican-judge-requirements.txt
+          echo "SUB2API_PELICAN_TEST_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+      - name: Google and Astra settings regression checks
+        working-directory: backend
+        run: go test -tags=unit ./internal/service ./internal/handler/admin -run '^(TestAutoPelican|TestSettingHandler_AstraAutoGroup|TestSettingService_AstraAutoGroup|TestAdminService_.*InvalidRequestFallback|TestSetAntigravityModelRateLimits_Image|TestValidateCreateParams_CheckModeMatrix|TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode|TestMatchingPlatforms|TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets|TestCacheStoragePricePerTokenHourPriority|TestPlatformListDerived|TestCodexCatalogUsesAntigravityCapabilitiesInGeminiMixedGroup|TestCodexCatalogGeminiCapabilitiesExcludeNonMixedAntigravityAccounts|TestScheduler|TestTokenRefreshService_Registrations)' -count=1 -json > "$RUNNER_TEMP/google-focused.jsonl"
+      - name: Unit tests
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -tags=unit ./... -count=1 -json > "$RUNNER_TEMP/backend-tests.jsonl"
+      - name: Migration, billing and account integration tests
         working-directory: backend
         env:
-          CGO_ENABLED: '0'
-          GOOS: linux
-          GOARCH: amd64
+          CI: 'true'
         run: |
-          set -euo pipefail
-          probe_source="$RUNNER_TEMP/compression-probe.go"
-          trap 'rm -f "$probe_source"' EXIT
-          cat > "$probe_source" <<'GO'
-          package main
+          # Standalone billing/soft-delete tests commit fixtures. Run the list
+          # suite in a fresh harness database so its exact counts stay isolated.
+          go test -tags=integration ./internal/repository -run 'TestTiboAutoGroup|TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
+          go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-validation
+          path: |
+            ${{ runner.temp }}/google-focused.jsonl
+            ${{ runner.temp }}/backend-tests.jsonl
+            ${{ runner.temp }}/integration-tests.jsonl
+            ${{ runner.temp }}/subscription-tests.jsonl
+          retention-days: 7
 
-          import (
-              "bytes"
-              "crypto/sha256"
-              "encoding/hex"
-              "encoding/json"
-              "fmt"
-              "io"
-              "os"
+  native-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Native continuation, diagnostics and HTTP/2 race regression
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-race-validation
+          path: ${{ runner.temp }}/native-race.jsonl
+          retention-days: 7
 
-              "github.com/klauspost/compress/zstd"
-          )
-
-          func main() {
-              if err := run(); err != nil {
-                  fmt.Fprintln(os.Stderr, err)
-                  os.Exit(1)
-              }
-          }
-
-          func run() error {
-              if len(os.Args) != 2 {
-                  return fmt.Errorf("expected plain, default, or window2m")
-              }
-              raw, err := io.ReadAll(io.LimitReader(os.Stdin, (32<<20)+1))
-              if err != nil || len(raw) > 32<<20 || !json.Valid(raw) {
-                  return fmt.Errorf("expected valid synthetic JSON at most 32 MiB")
-              }
-              wire := raw
-              var h zstd.Header
-              mode := os.Args[1]
-              if mode != "plain" {
-                  opts := []zstd.EOption{zstd.WithEncoderLevel(zstd.SpeedDefault)}
-                  if mode == "window2m" {
-                      opts = append(opts, zstd.WithWindowSize(2<<20))
-                  } else if mode != "default" {
-                      return fmt.Errorf("unknown encoding")
-                  }
-                  var buf bytes.Buffer
-                  enc, err := zstd.NewWriter(&buf, opts...)
-                  if err != nil {
-                      return err
-                  }
-                  if _, err := enc.Write(raw); err != nil {
-                      _ = enc.Close()
-                      return err
-                  }
-                  if err := enc.Close(); err != nil {
-                      return err
-                  }
-                  wire = buf.Bytes()
-                  if err := h.Decode(wire); err != nil {
-                      return err
-                  }
-                  dec, err := zstd.NewReader(nil)
-                  if err != nil {
-                      return err
-                  }
-                  decoded, err := dec.DecodeAll(wire, nil)
-                  dec.Close()
-                  if err != nil || !bytes.Equal(decoded, raw) {
-                      return fmt.Errorf("compression round trip changed JSON")
-                  }
-              }
-              sum := sha256.Sum256(raw)
-              meta := map[string]any{"mode": mode, "raw_bytes": len(raw), "wire_bytes": len(wire), "window_size": h.WindowSize, "single_segment": h.SingleSegment, "frame_content_size": h.FrameContentSize, "raw_sha256": hex.EncodeToString(sum[:]), "roundtrip_equal": true}
-              if err := json.NewEncoder(os.Stderr).Encode(meta); err != nil {
-                  return err
-              }
-              _, err = os.Stdout.Write(wire)
-              return err
-          }
-          GO
-          gofmt -w "$probe_source"
-          mkdir -p "$RUNNER_TEMP/probe-artifact"
-          go build -trimpath -o "$RUNNER_TEMP/probe-artifact/compression-probe" "$probe_source"
-          cd "$RUNNER_TEMP/probe-artifact"
-          sha256sum compression-probe > checksums.txt
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run lint:check
+      - name: Frontend tests
+        working-directory: frontend
+        run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/frontend-tests.json"
+      - run: pnpm --dir frontend run build
+      - name: Install browser for guide checks
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Public and admin guide browser checks
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/guide-browser-results
+        run: pnpm exec playwright test e2e/guide.spec.ts e2e/guide-admin.spec.ts
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: guide-browser-results
+          path: ${{ runner.temp }}/guide-browser-results/
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: frontend-validation
+          path: ${{ runner.temp }}/frontend-tests.json
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
-          name: compression-probe
+          name: frontend-dist
+          path: backend/internal/web/dist/
+          retention-days: 7
+
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: migration_rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Rehearse the existing schema without production data
+        env:
+          SCHEMA_PART_1: ${{ secrets.REHEARSAL_SCHEMA_PART_1 }}
+          SCHEMA_PART_2: ${{ secrets.REHEARSAL_SCHEMA_PART_2 }}
+          MIGRATIONS_B64: ${{ secrets.REHEARSAL_MIGRATIONS }}
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+          REHEARSAL_DSN: postgres://postgres:ci-only-password@127.0.0.1:5432/migration_rehearsal?sslmode=disable
+        run: bash .github/release-tools/rehearse-migration.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: migration-validation
+          path: ${{ runner.temp }}/migration-result.txt
+          retention-days: 7
+
+  build:
+    needs: [backend, native-race, frontend, migration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: backend/internal/web/dist/
+      - name: Build Linux amd64 only
+        working-directory: backend
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p ../release-output
+          version=$(sh scripts/resolve-version.sh)
+          release_url=$(sh scripts/resolve-release-url.sh)
+          go build -tags embed -trimpath -ldflags="-s -w -X main.Version=$version -X main.Commit=$GITHUB_SHA -X main.ReleaseURL=$release_url -X main.BuildType=release" -o ../release-output/sub2api ./cmd/server
+          ../release-output/sub2api --version
+      - name: Package and verify explicit allowlist
+        run: |
+          version=$(cat backend/cmd/server/VERSION | tr -d '\r\n')
+          cp LICENSE release-output/LICENSE
+          cp deploy/config.example.yaml release-output/config.example.yaml
+          cp deploy/sub2api.service release-output/sub2api.service
+          cp deploy/pelican-judge-requirements.txt deploy/pelican-judge.md release-output/
+          cp backend/internal/service/pelican_worker/LICENSE release-output/auto-pelican-LICENSE
+          cd release-output
+          tar -czf "sub2api_${version}_linux_amd64.tar.gz" sub2api LICENSE config.example.yaml sub2api.service pelican-judge-requirements.txt pelican-judge.md auto-pelican-LICENSE
+          tar -tzf "sub2api_${version}_linux_amd64.tar.gz" > manifest.txt
+          printf 'sub2api\nLICENSE\nconfig.example.yaml\nsub2api.service\npelican-judge-requirements.txt\npelican-judge.md\nauto-pelican-LICENSE\n' | diff - manifest.txt
+          sha256sum "sub2api_${version}_linux_amd64.tar.gz" > checksums.txt
+          sha256sum -c checksums.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-amd64
           path: |
-            ${{ runner.temp }}/probe-artifact/compression-probe
-            ${{ runner.temp }}/probe-artifact/checksums.txt
-          retention-days: 2
+            release-output/*.tar.gz
+            release-output/checksums.txt
+            release-output/manifest.txt
+          retention-days: 14

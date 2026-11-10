@@ -27,75 +27,75 @@ jobs:
           package main
 
           import (
-          	"bytes"
-          	"crypto/sha256"
-          	"encoding/hex"
-          	"encoding/json"
-          	"fmt"
-          	"io"
-          	"os"
+              "bytes"
+              "crypto/sha256"
+              "encoding/hex"
+              "encoding/json"
+              "fmt"
+              "io"
+              "os"
 
-          	"github.com/klauspost/compress/zstd"
+              "github.com/klauspost/compress/zstd"
           )
 
           func main() {
-          	if err := run(); err != nil {
-          		fmt.Fprintln(os.Stderr, err)
-          		os.Exit(1)
-          	}
+              if err := run(); err != nil {
+                  fmt.Fprintln(os.Stderr, err)
+                  os.Exit(1)
+              }
           }
 
           func run() error {
-          	if len(os.Args) != 2 {
-          		return fmt.Errorf("expected plain, default, or window2m")
-          	}
-          	raw, err := io.ReadAll(io.LimitReader(os.Stdin, (32<<20)+1))
-          	if err != nil || len(raw) > 32<<20 || !json.Valid(raw) {
-          		return fmt.Errorf("expected valid synthetic JSON at most 32 MiB")
-          	}
-          	wire := raw
-          	var h zstd.Header
-          	mode := os.Args[1]
-          	if mode != "plain" {
-          		opts := []zstd.EOption{zstd.WithEncoderLevel(zstd.SpeedDefault)}
-          		if mode == "window2m" {
-          			opts = append(opts, zstd.WithWindowSize(2<<20))
-          		} else if mode != "default" {
-          			return fmt.Errorf("unknown encoding")
-          		}
-          		var buf bytes.Buffer
-          		enc, err := zstd.NewWriter(&buf, opts...)
-          		if err != nil {
-          			return err
-          		}
-          		if _, err := enc.Write(raw); err != nil {
-          			_ = enc.Close()
-          			return err
-          		}
-          		if err := enc.Close(); err != nil {
-          			return err
-          		}
-          		wire = buf.Bytes()
-          		if err := h.Decode(wire); err != nil {
-          			return err
-          		}
-          		dec, err := zstd.NewReader(nil)
-          		if err != nil {
-          			return err
-          		}
-          		decoded, err := dec.DecodeAll(wire, nil)
-          		dec.Close()
-          		if err != nil || !bytes.Equal(decoded, raw) {
-          			return fmt.Errorf("compression round trip changed JSON")
-          		}
-          	}
-          	sum := sha256.Sum256(raw)
-          	meta := map[string]any{"mode": mode, "raw_bytes": len(raw), "wire_bytes": len(wire), "window_size": h.WindowSize, "single_segment": h.SingleSegment, "frame_content_size": h.FrameContentSize, "raw_sha256": hex.EncodeToString(sum[:]), "roundtrip_equal": true}
-          	if err := json.NewEncoder(os.Stderr).Encode(meta); err != nil {
-          		return err
-          	}
-          	_, err = os.Stdout.Write(wire)
-          	return err
+              if len(os.Args) != 2 {
+                  return fmt.Errorf("expected plain, default, or window2m")
+              }
+              raw, err := io.ReadAll(io.LimitReader(os.Stdin, (32<<20)+1))
+              if err != nil || len(raw) > 32<<20 || !json.Valid(raw) {
+                  return fmt.Errorf("expected valid synthetic JSON at most 32 MiB")
+              }
+              wire := raw
+              var h zstd.Header
+              mode := os.Args[1]
+              if mode != "plain" {
+                  opts := []zstd.EOption{zstd.WithEncoderLevel(zstd.SpeedDefault)}
+                  if mode == "window2m" {
+                      opts = append(opts, zstd.WithWindowSize(2<<20))
+                  } else if mode != "default" {
+                      return fmt.Errorf("unknown encoding")
+                  }
+                  var buf bytes.Buffer
+                  enc, err := zstd.NewWriter(&buf, opts...)
+                  if err != nil {
+                      return err
+                  }
+                  if _, err := enc.Write(raw); err != nil {
+                      _ = enc.Close()
+                      return err
+                  }
+                  if err := enc.Close(); err != nil {
+                      return err
+                  }
+                  wire = buf.Bytes()
+                  if err := h.Decode(wire); err != nil {
+                      return err
+                  }
+                  dec, err := zstd.NewReader(nil)
+                  if err != nil {
+                      return err
+                  }
+                  decoded, err := dec.DecodeAll(wire, nil)
+                  dec.Close()
+                  if err != nil || !bytes.Equal(decoded, raw) {
+                      return fmt.Errorf("compression round trip changed JSON")
+                  }
+              }
+              sum := sha256.Sum256(raw)
+              meta := map[string]any{"mode": mode, "raw_bytes": len(raw), "wire_bytes": len(wire), "window_size": h.WindowSize, "single_segment": h.SingleSegment, "frame_content_size": h.FrameContentSize, "raw_sha256": hex.EncodeToString(sum[:]), "roundtrip_equal": true}
+              if err := json.NewEncoder(os.Stderr).Encode(meta); err != nil {
+                  return err
+              }
+              _, err = os.Stdout.Write(wire)
+              return err
           }
           GO
           gofmt -w "$probe_source"

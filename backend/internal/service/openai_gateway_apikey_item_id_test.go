@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -156,6 +158,83 @@ func TestOpenAIGatewayService_OAuthForward_StripsInvalidMessageIDs(t *testing.T)
 				require.JSONEq(t, original[i].Raw, forwarded[i].Raw)
 			}
 			require.Equal(t, "item_bad_message", original[1].Get("id").String())
+		})
+	}
+}
+
+func TestOpenAIGatewayService_OAuthHTTPReasoningReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol"} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", model, passthrough), func(t *testing.T) {
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\ndata: [DONE]\n\n")),
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_exec/0.167.0")
+				account := newOpenAIImageGenerationControlTestAccount()
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}
+				account.Extra = astraHealthyTestExtra(map[string]any{"openai_passthrough": passthrough})
+				body := []byte(fmt.Sprintf(`{"model":%q,"stream":true,"store":false,"input":[
+					{"type":"message","role":"developer","content":"synthetic instructions"},
+					{"type":"reasoning","id":"rs_unstored","summary":[{"type":"summary_text","text":"keep summary"}],"opaque":9007199254740993},
+					{"type":"item_reference","id":"rs_unstored"},
+					{"type":"reasoning","id":"rs_complete","encrypted_content":"synthetic-ciphertext","summary":[],"status":"completed"},
+					{"type":"function_call","id":"fc_tool","call_id":"call_tool","name":"lookup","arguments":"{}"},
+					{"type":"function_call_output","id":"fco_result","call_id":"call_tool","output":"synthetic result"},
+					{"type":"message","role":"user","content":"continue"}
+				]}`, model))
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Len(t, upstream.requests, 1)
+				items := gjson.GetBytes(upstream.lastBody, "input").Array()
+				require.Len(t, items, 6, "unpersisted reasoning references must not reach HTTP upstream")
+				require.False(t, items[1].Get("id").Exists(), "bare reasoning IDs cause store=false 404s")
+				require.Equal(t, "keep summary", items[1].Get("summary.0.text").String())
+				require.Equal(t, "9007199254740993", items[1].Get("opaque").Raw)
+				require.Equal(t, "rs_complete", items[2].Get("id").String())
+				require.Equal(t, "synthetic-ciphertext", items[2].Get("encrypted_content").String())
+				require.Equal(t, "call_tool", items[3].Get("call_id").String())
+				require.Equal(t, "call_tool", items[4].Get("call_id").String())
+				require.Equal(t, "synthetic result", items[4].Get("output").String())
+				require.Equal(t, "rs_unstored", gjson.GetBytes(body, "input.1.id").String(), "the original request must remain untouched")
+			})
+		}
+	}
+}
+
+func TestOpenAIRequestErrorDiagnosticHTTPForward(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"detail":"Bad Request"}`))}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.requestErrorStore = newOpenAIBoundedDiagnosticStore(t.TempDir(), "error-", 32<<10)
+			t.Cleanup(svc.requestErrorStore.Close)
+			c, rec := newOpenAIImageGenerationControlTestContext(true, "codex_exec/0.167.0")
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Type = AccountTypeOAuth
+			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}
+			account.Extra = astraHealthyTestExtra(map[string]any{"openai_passthrough": passthrough})
+			body := []byte(`{"model":"gpt-6.1-sol","stream":true,"store":false,"reasoning":{"effort":"high"},"service_tier":"priority","input":[{"type":"message","role":"developer","content":"SECRET_PROMPT"},{"type":"reasoning","id":"rs_bare","summary":[]},{"type":"item_reference","id":"rs_bare"},{"type":"message","role":"user","content":"SECRET_USER"}]}`)
+			_, err := svc.Forward(context.Background(), c, account, body)
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Len(t, upstream.requests, 1, "an opaque 400 must not trigger speculative retries")
+			files, err := filepath.Glob(filepath.Join(svc.requestErrorStore.dir, "error-*.jsonl"))
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			data, err := os.ReadFile(files[0])
+			require.NoError(t, err)
+			require.NotContains(t, string(data), "SECRET")
+			require.NotContains(t, string(data), "rs_bare")
+			require.Equal(t, passthrough, gjson.GetBytes(data, "passthrough").Bool())
+			require.Equal(t, "high", gjson.GetBytes(data, "request.effort").String())
+			require.Zero(t, gjson.GetBytes(data, "request.reasoning_references").Int())
+			require.Zero(t, gjson.GetBytes(data, "request.reasoning_items_with_id").Int(), "diagnostics describe the final repaired outbound body")
 		})
 	}
 }

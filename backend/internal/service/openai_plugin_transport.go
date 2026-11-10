@@ -90,13 +90,11 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	return response, err
 }
 
-// maybeCompressCodexUpstreamRequest 复刻官方 Codex CLI 的 HTTP 请求压缩：
-// enable_request_compression 默认开启（codex-rs features/lib.rs:1449），
-// ChatGPT OAuth + OpenAI provider 的 Responses 请求体用 zstd level 3 压缩并
-// 设置 content-encoding: zstd（http-client/request.rs:209）。
-// 压缩后重写 Body/GetBody，401 重试克隆请求可复放同样的压缩字节。
+// maybeCompressCodexUpstreamRequest optionally compresses Codex HTTP requests.
+// Default to plain JSON: upstream can reject valid zstd frames with an opaque
+// 400 even with a 2 MiB window. Opt-in compression retains replayable wire bytes.
 func (s *OpenAIGatewayService) maybeCompressCodexUpstreamRequest(request *http.Request, account *Account) {
-	if s == nil || request == nil || account == nil {
+	if s == nil || s.cfg == nil || !s.cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled || request == nil || account == nil {
 		return
 	}
 	// zstd 压缩只面向真正的 OpenAI Codex(ChatGPT OAuth/SetupToken)账号。
@@ -129,7 +127,7 @@ func (s *OpenAIGatewayService) maybeCompressCodexUpstreamRequest(request *http.R
 		return
 	}
 	var buf bytes.Buffer
-	zw, err := zstd.NewWriter(&buf, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	zw, err := zstd.NewWriter(&buf, zstd.WithEncoderLevel(zstd.SpeedDefault), zstd.WithWindowSize(2<<20))
 	if err != nil {
 		request.Body = io.NopCloser(bytes.NewReader(raw))
 		request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }

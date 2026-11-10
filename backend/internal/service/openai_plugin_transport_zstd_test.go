@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/require"
 )
 
 func zstdTestCodexAccount(t *testing.T) *Account {
@@ -21,8 +24,117 @@ func zstdTestCodexAccount(t *testing.T) *Account {
 	}
 }
 
+func codexCompressionTestConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg := codexExactFidelityTestConfig(t)
+	cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled = true
+	return cfg
+}
+
+func TestMaybeCompressCodexUpstreamRequest_DefaultPlainJSON(t *testing.T) {
+	for name, cfg := range map[string]*config.Config{
+		"nil": nil, "zero": {}, "exact_fidelity": codexExactFidelityTestConfig(t),
+	} {
+		t.Run(name, func(t *testing.T) {
+			plain := []byte(`{"model":"gpt-5","input":"unchanged"}`)
+			req, err := http.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", bytes.NewReader(plain))
+			require.NoError(t, err)
+			originalBody := req.Body
+			svc := &OpenAIGatewayService{cfg: cfg}
+			svc.maybeCompressCodexUpstreamRequest(req, zstdTestCodexAccount(t))
+			require.True(t, originalBody == req.Body, "default must not consume or replace the body")
+			require.Empty(t, req.Header.Get("Content-Encoding"))
+			require.Equal(t, int64(len(plain)), req.ContentLength)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.Equal(t, plain, body)
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			defer replay.Close()
+			body, err = io.ReadAll(replay)
+			require.NoError(t, err)
+			require.Equal(t, plain, body)
+		})
+	}
+}
+
+func TestMaybeCompressCodexUpstreamRequest_OptInWindowBound(t *testing.T) {
+	plain := []byte(`{"input":"` + strings.Repeat("synthetic-payload-", 500000) + `"}`)
+	req, err := http.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", bytes.NewReader(plain))
+	require.NoError(t, err)
+	svc := &OpenAIGatewayService{cfg: codexCompressionTestConfig(t)}
+	svc.maybeCompressCodexUpstreamRequest(req, zstdTestCodexAccount(t))
+	wire, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	var header zstd.Header
+	require.NoError(t, header.Decode(wire))
+	require.False(t, header.SingleSegment)
+	require.Positive(t, header.WindowSize)
+	require.LessOrEqual(t, header.WindowSize, uint64(2<<20))
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderMaxWindow(2<<20))
+	require.NoError(t, err)
+	defer decoder.Close()
+	decoded, err := decoder.DecodeAll(wire, nil)
+	require.NoError(t, err)
+	require.Equal(t, plain, decoded)
+}
+
+// Reproduce the observed HTTP boundary: valid compressed JSON receives an
+// opaque 400; identical plain JSON succeeds on the first upstream attempt.
+func TestCodexHTTPCompressionRejectedUpstream(t *testing.T) {
+	plain := []byte(`{"input":"` + strings.Repeat("synthetic-", 160000) + `"}`)
+	for _, optIn := range []bool{false, true} {
+		name := "default_plain"
+		if optIn {
+			name = "explicit_compression"
+		}
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				calls.Add(1)
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(500)
+					return
+				}
+				if req.Header.Get("Content-Encoding") == "zstd" {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"detail":"Bad Request"}`)
+					return
+				}
+				if !bytes.Equal(plain, body) {
+					t.Error("request JSON changed")
+					w.WriteHeader(400)
+					return
+				}
+				_, _ = io.WriteString(w, "OK")
+			}))
+			defer srv.Close()
+			cfg := codexExactFidelityTestConfig(t)
+			cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled = optIn
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &liveWireHTTPUpstream{}}
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/backend-api/codex/responses", bytes.NewReader(plain))
+			require.NoError(t, err)
+			resp, err := svc.doOpenAIUpstream(req, "", zstdTestCodexAccount(t))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			if optIn {
+				require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+				require.JSONEq(t, `{"detail":"Bad Request"}`, string(body))
+			} else {
+				require.Equal(t, http.StatusOK, resp.StatusCode)
+				require.Equal(t, "OK", string(body))
+			}
+			require.Equal(t, int32(1), calls.Load(), "no generic 400 retry")
+		})
+	}
+}
+
 func TestMaybeCompressCodexUpstreamRequest_CompressesResponses(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: codexExactFidelityTestConfig(t)}
+	svc := &OpenAIGatewayService{cfg: codexCompressionTestConfig(t)}
 	account := zstdTestCodexAccount(t)
 
 	plain := []byte(`{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`)
@@ -72,7 +184,7 @@ func TestMaybeCompressCodexUpstreamRequest_CompressesResponses(t *testing.T) {
 }
 
 func TestMaybeCompressCodexUpstreamRequest_SkipsNonResponsesPath(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: codexExactFidelityTestConfig(t)}
+	svc := &OpenAIGatewayService{cfg: codexCompressionTestConfig(t)}
 	account := zstdTestCodexAccount(t)
 
 	for _, path := range []string{
@@ -97,7 +209,7 @@ func TestMaybeCompressCodexUpstreamRequest_SkipsNonResponsesPath(t *testing.T) {
 }
 
 func TestMaybeCompressCodexUpstreamRequest_SkipsNonCodexAndDisabled(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: codexExactFidelityTestConfig(t)}
+	svc := &OpenAIGatewayService{cfg: codexCompressionTestConfig(t)}
 
 	apiKeyAccount := &Account{ID: 1, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}
 	plain := []byte(`{"model":"gpt-5","input":[]}`)
@@ -125,6 +237,7 @@ func TestMaybeCompressCodexUpstreamRequest_SkipsNonCodexAndDisabled(t *testing.T
 
 	// exact fidelity 关闭时，codex 账号也不压缩。
 	svcOff := &OpenAIGatewayService{cfg: codexExactFidelityOffTestConfig(t)}
+	svcOff.cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled = true
 	req2, err := http.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", bytes.NewReader(plain))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -136,7 +249,7 @@ func TestMaybeCompressCodexUpstreamRequest_SkipsNonCodexAndDisabled(t *testing.T
 }
 
 func TestMaybeCompressCodexUpstreamRequest_PreservesExistingEncoding(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: codexExactFidelityTestConfig(t)}
+	svc := &OpenAIGatewayService{cfg: codexCompressionTestConfig(t)}
 	account := zstdTestCodexAccount(t)
 
 	plain := []byte(`{"model":"gpt-5"}`)

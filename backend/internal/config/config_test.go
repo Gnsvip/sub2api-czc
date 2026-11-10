@@ -476,6 +476,7 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if !cfg.Gateway.OpenAIWS.Enabled {
 		t.Fatalf("Gateway.OpenAIWS.Enabled = false, want true")
 	}
+	require.False(t, cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled)
 	if !cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 {
 		t.Fatalf("Gateway.OpenAIWS.ResponsesWebsocketsV2 = false, want true")
 	}
@@ -588,6 +589,14 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey != 64 {
 		t.Fatalf("Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey = %d, want 64", cfg.Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey)
 	}
+}
+
+func TestLoadCodexRequestCompressionFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_WS_CODEX_REQUEST_COMPRESSION_ENABLED", "true")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Gateway.OpenAIWS.CodexRequestCompressionEnabled)
 }
 
 func TestLoadOpenAIWSClientFirstMessageTimeoutFromEnv(t *testing.T) {

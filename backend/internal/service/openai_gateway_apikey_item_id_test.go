@@ -160,6 +160,51 @@ func TestOpenAIGatewayService_OAuthForward_StripsInvalidMessageIDs(t *testing.T)
 	}
 }
 
+func TestOpenAIGatewayService_OAuthHTTPReasoningReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol"} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", model, passthrough), func(t *testing.T) {
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\ndata: [DONE]\n\n")),
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_exec/0.167.0")
+				account := newOpenAIImageGenerationControlTestAccount()
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}
+				account.Extra = astraHealthyTestExtra(map[string]any{"openai_passthrough": passthrough})
+				body := []byte(fmt.Sprintf(`{"model":%q,"stream":true,"store":false,"input":[
+					{"type":"message","role":"developer","content":"synthetic instructions"},
+					{"type":"reasoning","id":"rs_unstored","summary":[{"type":"summary_text","text":"keep summary"}],"opaque":9007199254740993},
+					{"type":"item_reference","id":"rs_unstored"},
+					{"type":"reasoning","id":"rs_complete","encrypted_content":"synthetic-ciphertext","summary":[],"status":"completed"},
+					{"type":"function_call","id":"fc_tool","call_id":"call_tool","name":"lookup","arguments":"{}"},
+					{"type":"function_call_output","id":"fco_result","call_id":"call_tool","output":"synthetic result"},
+					{"type":"message","role":"user","content":"continue"}
+				]}`, model))
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Len(t, upstream.requests, 1)
+				items := gjson.GetBytes(upstream.lastBody, "input").Array()
+				require.Len(t, items, 6, "unpersisted reasoning references must not reach HTTP upstream")
+				require.False(t, items[1].Get("id").Exists(), "bare reasoning IDs cause store=false 404s")
+				require.Equal(t, "keep summary", items[1].Get("summary.0.text").String())
+				require.Equal(t, "9007199254740993", items[1].Get("opaque").Raw)
+				require.Equal(t, "rs_complete", items[2].Get("id").String())
+				require.Equal(t, "synthetic-ciphertext", items[2].Get("encrypted_content").String())
+				require.Equal(t, "call_tool", items[3].Get("call_id").String())
+				require.Equal(t, "call_tool", items[4].Get("call_id").String())
+				require.Equal(t, "synthetic result", items[4].Get("output").String())
+				require.Equal(t, "rs_unstored", gjson.GetBytes(body, "input.1.id").String(), "the original request must remain untouched")
+			})
+		}
+	}
+}
+
 func TestOpenAIGatewayService_SetupTokenLegacy_SanitizesAndTransforms(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamSSE := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.6-sol\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n"

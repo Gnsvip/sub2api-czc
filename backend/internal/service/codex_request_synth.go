@@ -652,12 +652,25 @@ func codexSynthesisPrepareTools(
 	capability codexCapability,
 	responsesLite bool,
 ) map[string]string {
-	if capability == codexCapabilityGeneric && !codexSynthesisToolChoiceNone(reqBody) &&
+	if capability == codexCapabilityGeneric && !codexSynthesisToolChoiceNone(reqBody) && !codexSynthesisHasJSONOutput(reqBody) &&
 		!codexSynthesisHasToolType(reqBody, "web_search") && codexDescriptorSupportsWebSearch(descriptor, hasDescriptor) {
 		// Hosted search executes upstream and needs no downstream executor.
 		codexSynthesisAppendTools(reqBody, []any{map[string]any{"type": "web_search"}}, responsesLite)
 	}
 	return nil
+}
+
+// JSON output cannot be combined with hosted search. Leave explicitly supplied
+// tools untouched; only suppress the gateway's optional search declaration.
+func codexSynthesisHasJSONOutput(reqBody map[string]any) bool {
+	text, _ := reqBody["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	switch strings.ToLower(strings.TrimSpace(firstNonEmptyString(format["type"]))) {
+	case "json_object", "json_schema":
+		return true
+	default:
+		return false
+	}
 }
 
 func codexDescriptorSupportsWebSearch(descriptor openai.CodexCatalogModel, hasDescriptor bool) bool {

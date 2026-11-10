@@ -589,6 +589,102 @@ func TestCodexSynthesisChatCompletionsBridge(t *testing.T) {
 	require.Contains(t, string(sent), "be terse", "client system message is preserved as a developer item")
 }
 
+func TestCodexSynthesisJSONOutputDoesNotInjectSearch(t *testing.T) {
+	pinCodexTestVersion(t, "0.163.0")
+	for _, route := range []struct {
+		name string
+		chat bool
+		lite bool
+	}{
+		{name: "responses"},
+		{name: "responses-lite", lite: true},
+		{name: "chat", chat: true},
+		{name: "chat-lite", chat: true, lite: true},
+	} {
+		for _, formatType := range []string{"text", "json_object", "json_schema"} {
+			t.Run(route.name+"/"+formatType, func(t *testing.T) {
+				format := map[string]any{"type": formatType}
+				if formatType == "json_schema" {
+					schema := map[string]any{
+						"name": "answer", "strict": true,
+						"schema": map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}, "required": []string{"ok"}, "additionalProperties": false},
+					}
+					if route.chat {
+						format["json_schema"] = schema
+					} else {
+						for key, value := range schema {
+							format[key] = value
+						}
+					}
+				}
+				request := map[string]any{"model": "gpt-5.5", "stream": false}
+				tool := map[string]any{"name": "lookup", "description": "Lookup a value", "parameters": map[string]any{"type": "object"}}
+				if route.chat {
+					request["messages"] = []any{map[string]any{"role": "user", "content": "Return JSON with ok=true."}}
+					request["response_format"] = format
+					request["tools"] = []any{map[string]any{"type": "function", "function": tool}}
+				} else {
+					request["input"] = []any{map[string]any{"role": "user", "content": "Return JSON with ok=true."}}
+					request["text"] = map[string]any{"format": format}
+					tool["type"] = "function"
+					request["tools"] = []any{tool}
+				}
+				body, err := json.Marshal(request)
+				require.NoError(t, err)
+				cfg := codexSynthEnabledConfig()
+				cfg.Security.URLAllowlist.Enabled = false
+				svc := &OpenAIGatewayService{cfg: cfg}
+				account := newCodexSynthTestAccount(7203, AccountTypeOAuth)
+				headers := map[string]string{"User-Agent": "third-party/1.0"}
+				if route.lite {
+					headers[responsesLiteHeader] = "true"
+				}
+				var sent []byte
+				if route.chat {
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+					for key, value := range headers {
+						c.Request.Header.Set(key, value)
+					}
+					upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_json_synth", "gpt-5.5")}
+					svc.httpUpstream = upstream
+					_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
+					require.NoError(t, err)
+					require.NotNil(t, upstream.lastReq)
+					sent = upstream.lastBody
+				} else {
+					sent = runCodexSynthForward(t, svc, account, body, headers).lastBody
+				}
+				toolsPath := "tools"
+				if route.lite {
+					toolsPath = `input.#(type=="additional_tools").tools`
+				}
+				require.Equal(t, formatType == "text", gjson.GetBytes(sent, toolsPath+`.#(type=="web_search")`).Exists(), string(sent))
+				require.True(t, gjson.GetBytes(sent, toolsPath+`.#(name=="lookup")`).Exists(), "client tool must be preserved")
+				require.Equal(t, formatType, gjson.GetBytes(sent, "text.format.type").String())
+				if formatType == "json_schema" {
+					require.Equal(t, "boolean", gjson.GetBytes(sent, "text.format.schema.properties.ok.type").String())
+				}
+			})
+		}
+	}
+}
+
+func TestCodexSynthesisJSONOutputPreservesExplicitSearch(t *testing.T) {
+	for _, lite := range []bool{false, true} {
+		request := map[string]any{
+			"text": map[string]any{"format": map[string]any{"type": "json_object"}},
+		}
+		codexSynthesisAppendTools(request, []any{map[string]any{"type": "web_search"}}, lite)
+		before, err := json.Marshal(request)
+		require.NoError(t, err)
+		codexSynthesisPrepareTools(request, openai.CodexCatalogModel{}, false, codexCapabilityGeneric, lite)
+		after, err := json.Marshal(request)
+		require.NoError(t, err)
+		require.JSONEq(t, string(before), string(after), "explicit client choices must remain unchanged")
+	}
+}
+
 func TestCodexSynthesisAnthropicBridge(t *testing.T) {
 	pinCodexTestVersion(t, "0.163.0")
 	gin.SetMode(gin.TestMode)

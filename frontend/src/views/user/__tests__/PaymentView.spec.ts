@@ -297,7 +297,7 @@ async function mountSubscriptionPlanList(planCount: number) {
 }
 
 describe('PaymentView balance recharge floor', () => {
-  it('uses the six recharge tiers and blocks amounts below the configured floor', async () => {
+  it('uses the nine upstream recharge tiers and blocks amounts below the configured floor', async () => {
     routeState.path = '/purchase'
     routeState.query = {}
     createOrder.mockReset()
@@ -318,7 +318,7 @@ describe('PaymentView balance recharge floor', () => {
     await flushPromises()
 
     const amountInput = wrapper.findComponent(AmountInput)
-    expect(amountInput.props('amounts')).toEqual([10, 20, 30, 50, 100, 200])
+    expect(amountInput.props('amounts')).toEqual([10, 20, 50, 100, 200, 500, 1000, 2000, 5000])
     expect(amountInput.props('min')).toBe(10)
 
     amountInput.vm.$emit('update:modelValue', 5)

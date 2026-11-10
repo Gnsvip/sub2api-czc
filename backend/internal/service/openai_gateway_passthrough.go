@@ -2021,7 +2021,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			return
 		}
 		flusher.Flush()
-		if semanticOutputPendingFlush {
+		if semanticOutputPendingFlush || (timing != nil && timing.semantic.Load() > 0) {
 			timing.MarkFlush()
 			semanticOutputPendingFlush = false
 		}
@@ -2098,6 +2098,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			timing.MarkSSE(rawEventType, data)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -2261,9 +2262,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			lineHasSemanticOutput = lineStartsClientOutput && eventType != "error" && !openAIStreamEventIsTerminalWithType(trimmedData, eventType)
-			if lineHasSemanticOutput {
-				timing.MarkSemantic()
-			}
 			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
 				semanticOutputSeen = true
 			}

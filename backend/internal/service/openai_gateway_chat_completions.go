@@ -529,7 +529,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			return nil, bindErr
 		}
 		cacheDiagnosticAttempt := cacheDiagnostic.upstreamRequest(account, upstreamReq)
+		timing := newOpenAIForwardTiming(c, upstreamReq, account)
+		upstreamReq = upstreamReq.WithContext(timing.context(upstreamReq.Context()))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		timing.markResponse(resp, err)
 		cacheDiagnosticAttempt.upstreamResponse(resp, err)
 		if nativeChat.preSendFallback(err) {
 			continue
@@ -1138,6 +1141,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	processDataLine := func(payload string) bool {
+		timing := openAIForwardTimingFromContext(c)
+		eventType := gjson.Get(payload, "type").String()
+		timing.MarkSSE(eventType, payload)
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
@@ -1320,6 +1326,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		if len(chunks) > 0 && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
+			if timing != nil && timing.semantic.Load() > 0 {
+				timing.MarkFlush()
+			}
 		}
 		return isTerminalEvent || grokAbortErr != nil
 	}

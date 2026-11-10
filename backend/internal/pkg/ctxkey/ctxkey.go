@@ -22,6 +22,8 @@ const (
 
 	// RequestID 为服务端生成/透传的请求 ID。
 	RequestID Key = "ctx_request_id"
+	// RequestStartedAt is the server-side ingress timestamp, before authentication.
+	RequestStartedAt Key = "ctx_request_started_at"
 
 	// ClientRequestID 客户端请求的唯一标识，用于追踪请求全生命周期（用于 Ops 监控与排障）。
 	ClientRequestID Key = "ctx_client_request_id"

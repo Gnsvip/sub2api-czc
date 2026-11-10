@@ -1438,6 +1438,9 @@ type GatewayOpenAIWSConfig struct {
 	// client_metadata 固定序 + 未改字段原始字节透传）。默认 true；
 	// 关闭后回退到通用 map 序列化。
 	ExactFidelityEnabled bool `mapstructure:"exact_fidelity_enabled"`
+	// CodexRequestCompressionEnabled: opt in to zstd for Codex OAuth HTTP /responses.
+	// Default false: some upstream deployments reject valid compressed JSON with 400.
+	CodexRequestCompressionEnabled bool `mapstructure:"codex_request_compression_enabled"`
 	// ClientReadLimitBytes: 入站客户端 WS 单帧读取上限。
 	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
 	// HTTPBridgeEnabled: 首包过大时，保持客户端 WS，改用 HTTP Responses 上游。
@@ -2649,6 +2652,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", true)
 	viper.SetDefault("gateway.openai_ws.delta_context_enabled", true)
 	viper.SetDefault("gateway.openai_ws.exact_fidelity_enabled", true)
+	viper.SetDefault("gateway.openai_ws.codex_request_compression_enabled", false)
 	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
 	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)

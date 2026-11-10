@@ -1,15 +1,264 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
+	"net/http/httptrace"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+// These regressions belong with the keepalive tests: diagnostic timestamps must
+// never turn a heartbeat into model output or change the stream being forwarded.
+func newSlowTimingTest(t *testing.T) (*OpenAIGatewayService, *gin.Context, *OpenAISlowTiming) {
+	t.Helper()
+	c, _ := newCompactBridgeTestContext(t, false)
+	c.Request.URL.Path = "/v1/responses"
+	ctx := context.WithValue(c.Request.Context(), ctxkey.RequestStartedAt, time.Now().Add(-20*time.Second))
+	ctx = context.WithValue(ctx, ctxkey.RequestID, "request-123")
+	ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "client-456")
+	c.Request = c.Request.WithContext(ctx)
+	store := newOpenAISlowTimingStore(t.TempDir())
+	t.Cleanup(store.Close)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, slowTimingStore: store}
+	root := svc.BeginSlowTiming(c)
+	root.SetRequest(316, 12, true)
+	root.firstForwardAt, root.forwardAt, root.forwardEndAt = time.Second, time.Second, 19*time.Second
+	return svc, c, root
+}
+
+func readSlowTimingTest(t *testing.T, root *OpenAISlowTiming) string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(root.store.dir, "slow-*.jsonl"))
+	require.NoError(t, err)
+	var data strings.Builder
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		require.NoError(t, err)
+		data.Write(body)
+	}
+	return data.String()
+}
+
+func TestOpenAISlowTiming_ThresholdAndLongCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		wait           time.Duration
+		noOutput, want bool
+	}{
+		{"fast", time.Second, false, false},
+		{"exactly_ten", 10 * time.Second, false, false},
+		{"over_ten", 10*time.Second + time.Nanosecond, false, true},
+		{"fast_output_long_completion", 2 * time.Second, false, false},
+		{"slow_without_output", 0, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c, root := newSlowTimingTest(t)
+			newOpenAIForwardTiming(c, c.Request, &Account{ID: 1, Platform: PlatformOpenAI})
+			if !tc.noOutput {
+				root.firstSemantic.Store(int64(root.firstForwardAt+tc.wait) + 1)
+			}
+			root.Finish(c)
+			data := readSlowTimingTest(t, root)
+			require.Equal(t, tc.want, data != "")
+			if tc.want {
+				require.True(t, gjson.Valid(strings.TrimSpace(data)))
+				require.Equal(t, "request-123", gjson.Get(data, "request_id").String())
+				require.Equal(t, int64(316), gjson.Get(data, "user_id").Int())
+			}
+		})
+	}
+}
+
+func TestOpenAISlowTiming_RetriesAndBoundedIdentity(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	var first *openAIForwardTiming
+	for i := 0; i < 12; i++ {
+		attempt := newOpenAIForwardTiming(c, c.Request, &Account{ID: int64(i + 1), Platform: PlatformOpenAI})
+		if first == nil {
+			first = attempt
+		}
+		// No individual attempt waits ten seconds, but the overall chain does.
+		attempt.offset = time.Duration(i+1) * time.Second
+		attempt.closed.Store(int64(time.Second) + 1)
+		if i == 11 {
+			attempt.semantic.Store(int64(time.Second) + 1)
+			attempt.MarkSemantic()
+		}
+	}
+	trace := httptrace.ContextClientTrace(first.context(context.Background()))
+	trace.GotConn(httptrace.GotConnInfo{})
+	require.Positive(t, first.connection.Load())
+	require.Zero(t, root.attempts[7].connection.Load(), "late callback must stay with its original attempt")
+	root.Finish(c)
+	data := readSlowTimingTest(t, root)
+	require.Equal(t, int64(12000), gjson.Get(data, "wait_ms").Int())
+	require.Equal(t, int64(12), gjson.Get(data, "attempt_count").Int())
+	require.Equal(t, int64(4), gjson.Get(data, "omitted_attempts").Int())
+	require.Len(t, gjson.Get(data, "attempts").Array(), 8)
+	require.Equal(t, int64(12), gjson.Get(data, "attempts.7.account_id").Int())
+	require.Nil(t, newOpenAIForwardTiming(c, c.Request, &Account{Platform: PlatformGrok}))
+	require.Nil(t, openAIForwardTimingFromContext(c), "another provider must not inherit old timing")
+}
+
+func TestOpenAISlowTiming_MetadataPrivacyAndConcurrentCallbacks(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	a := newOpenAIForwardTiming(c, c.Request, &Account{ID: 9, Platform: PlatformOpenAI})
+	a.MarkSSE("response.created", `{"type":"response.created"}`)
+	a.MarkSSE("response.output_text.delta", `{"delta":""}`)
+	a.MarkSSE("response.output_item.added", `{"item":{"type":"message","content":[]}}`)
+	a.MarkSSE("error", `{"error":{"message":"secret-token"}}`)
+	a.MarkFlush()
+	require.Zero(t, a.semantic.Load())
+	require.Zero(t, a.flushed.Load())
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.MarkSSE("response.output_text.delta", `{"delta":"private-user-text"}`)
+			a.MarkFlush()
+			_ = a.snapshot()
+		}()
+	}
+	wg.Wait()
+	require.Positive(t, a.semantic.Load())
+	require.Positive(t, a.text.Load())
+	require.Positive(t, a.flushed.Load())
+	root.Finish(c)
+	data := readSlowTimingTest(t, root)
+	require.NotEmpty(t, data)
+	require.NotContains(t, data, "private-user-text")
+	require.NotContains(t, data, "secret-token")
+	require.Equal(t, "response.created", gjson.Get(data, "attempts.0.first_sse_event_type").String())
+	require.Empty(t, slowTimingCorrelationID(strings.Repeat("x", 1024)))
+	require.Empty(t, slowTimingCorrelationID("Bearer secret"))
+	b := &openAIForwardTiming{started: time.Now()}
+	b.MarkSSE("private-event-name", `{}`)
+	require.Equal(t, "other", b.snapshot()["first_sse_event_type"])
+	b.MarkSSE("response.completed", `{"response":{"output":[{"content":[{"text":"done-only"}]}]}}`)
+	require.Positive(t, b.semantic.Load())
+}
+
+type slowTimingTestBody struct {
+	io.Reader
+	closed   bool
+	closeErr error
+}
+
+func (b *slowTimingTestBody) Close() error { b.closed = true; return b.closeErr }
+
+func TestOpenAISlowTiming_BodyTransparency(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	a := newOpenAIForwardTiming(c, c.Request, &Account{Platform: PlatformOpenAI})
+	closeErr := errors.New("close sentinel")
+	body := &slowTimingTestBody{Reader: strings.NewReader("\x00original\r\nbytes"), closeErr: closeErr}
+	resp := &http.Response{StatusCode: 200, Body: body}
+	a.markResponse(resp, nil)
+	require.Zero(t, a.body.Load())
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "\x00original\r\nbytes", string(got))
+	first := a.body.Load()
+	require.Positive(t, first)
+	_, err = resp.Body.Read(make([]byte, 1))
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, first, a.body.Load())
+	require.ErrorIs(t, resp.Body.Close(), closeErr)
+	require.True(t, body.closed)
+	require.Positive(t, a.closed.Load())
+	require.Equal(t, int64(200), a.status.Load())
+	root.stream = false
+	root.Finish(c)
+	require.Empty(t, readSlowTimingTest(t, root), "nonstreaming requests have no measured streaming TTFT")
+}
+
+func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
+	for _, path := range []string{"responses", "passthrough", "chat"} {
+		t.Run(path, func(t *testing.T) {
+			svc, c, root := newSlowTimingTest(t)
+			root.MarkRouting()
+			root.MarkUserSlot()
+			root.MarkSelection()
+			root.MarkAccountWait()
+			root.MarkAccountSlot()
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			a := newOpenAIForwardTiming(c, c.Request, account)
+			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"visible-output\",\"output_index\":0,\"content_index\":0}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+			a.markResponse(resp, nil)
+			var err error
+			switch path {
+			case "responses":
+				_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
+			case "passthrough":
+				_, err = svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
+			case "chat":
+				_, err = svc.handleChatStreamingResponse(resp, c, account, "gpt-test", "gpt-test", "gpt-test", time.Now(), nil)
+			}
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			root.MarkForwardEnd()
+			root.Finish(c)
+			data := readSlowTimingTest(t, root)
+			for _, key := range []string{"response_headers_ms", "first_body_byte_ms", "first_sse_event_ms", "first_text_delta_ms", "first_semantic_ms", "first_downstream_flush_ms", "body_closed_ms", "account_slot_acquired_ms"} {
+				require.True(t, gjson.Get(data, "attempts.0."+key).Exists(), key)
+			}
+			require.NotContains(t, data, "visible-output")
+		})
+	}
+}
+
+func TestOpenAISlowTiming_StoreCapRetentionAndIdleCleanup(t *testing.T) {
+	s := newOpenAISlowTimingStore(t.TempDir())
+	t.Cleanup(s.Close)
+	now := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	for i := 0; i < 200; i++ {
+		s.write(now, map[string]any{"padding": strings.Repeat("x", 1024)})
+	}
+	files, err := filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	info, err := os.Stat(files[0])
+	require.NoError(t, err)
+	require.LessOrEqual(t, info.Size(), int64(slowTimingBucketLimit))
+	s.write(now.Add(time.Minute), map[string]any{"next": true})
+	data, err := os.ReadFile(filepath.Join(s.dir, "slow-"+now.Add(time.Minute).Format(slowTimingBucketLayout)+".jsonl"))
+	require.NoError(t, err)
+	require.Positive(t, gjson.GetBytes(data, "dropped_since_last_record").Int())
+	unrelated := filepath.Join(s.dir, "keep.jsonl")
+	require.NoError(t, os.WriteFile(unrelated, []byte("keep"), 0600))
+	s.Close()
+	// Controlled ticker proves cleanup runs without any new request writes.
+	idle := &openAISlowTimingStore{dir: s.dir, stop: make(chan struct{}), done: make(chan struct{})}
+	ticks := make(chan time.Time)
+	go idle.runJanitor(ticks)
+	t.Cleanup(idle.Close)
+	ticks <- now.Add(2 * time.Hour)
+	require.Eventually(t, func() bool { f, _ := filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl")); return len(f) == 0 }, time.Second, time.Millisecond)
+	require.FileExists(t, unrelated)
+	idle.Close()
+	idle.Close()
+	idle.write(now, map[string]any{"after_close": true})
+	files, err = filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl"))
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
 
 const keepaliveTestInterval = 10 * time.Millisecond
 

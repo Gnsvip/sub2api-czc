@@ -42,7 +42,7 @@ func TestMaybeCompressCodexUpstreamRequest_DefaultPlainJSON(t *testing.T) {
 			originalBody := req.Body
 			svc := &OpenAIGatewayService{cfg: cfg}
 			svc.maybeCompressCodexUpstreamRequest(req, zstdTestCodexAccount(t))
-			require.Same(t, originalBody, req.Body, "default must not consume or replace the body")
+			require.True(t, originalBody == req.Body, "default must not consume or replace the body")
 			require.Empty(t, req.Header.Get("Content-Encoding"))
 			require.Equal(t, int64(len(plain)), req.ContentLength)
 			body, err := io.ReadAll(req.Body)

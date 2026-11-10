@@ -14,8 +14,64 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestOpenAIRequestErrorDiagnosticPrivacyAndScope(t *testing.T) {
+	store := newOpenAIBoundedDiagnosticStore(t.TempDir(), "error-", 32<<10)
+	t.Cleanup(store.Close)
+	svc := &OpenAIGatewayService{requestErrorStore: store}
+	account := &Account{ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"MODEL_SECRET","input":[{"type":"message","content":"PROMPT_SECRET"},{"type":"reasoning","id":"rs_PRIVATE","encrypted_content":"CIPHER_SECRET"},{"type":"item_reference","id":"rs_PRIVATE"},{"type":"PRIVATE_TYPE","content":"OTHER_SECRET"},{"type":"function_call_output","output":"RESULT_SECRET"}],"instructions":"INSTRUCTIONS_SECRET","tools":[{"type":"function","name":"TOOL_SECRET"},{"type":"TOOL_TYPE_SECRET"}],"reasoning":{"effort":"EFFORT_SECRET"},"service_tier":"TIER_SECRET","previous_response_id":"PREVIOUS_SECRET","metadata":{"key":"METADATA_SECRET"},"private_key":"KEY_SECRET"}`)
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, "test-request-400"))
+		c.Request.Header.Set("Authorization", "Bearer AUTH_SECRET")
+		return c
+	}
+	for _, tc := range []struct {
+		status   int
+		response string
+	}{
+		{200, `{"detail":"Bad Request"}`},
+		{400, `{"error":{"message":"specific field failure"}}`},
+		{404, `{"error":{"message":"model not found"}}`},
+	} {
+		svc.recordOpenAIRequestErrorDiagnostic(newContext(), account, tc.status, body, []byte(tc.response))
+	}
+	apiKey := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	svc.recordOpenAIRequestErrorDiagnostic(newContext(), apiKey, 400, body, []byte(`{"detail":"Bad Request"}`))
+	files, err := filepath.Glob(filepath.Join(store.dir, "error-*.jsonl"))
+	require.NoError(t, err)
+	require.Empty(t, files)
+	c := newContext()
+	for i := 0; i < 2; i++ {
+		svc.recordOpenAIRequestErrorDiagnostic(c, account, 400, body, []byte(`{"detail":"Bad Request"}`))
+	}
+	files, err = filepath.Glob(filepath.Join(store.dir, "error-*.jsonl"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	require.Equal(t, 1, bytes.Count(data, []byte{'\n'}))
+	for _, secret := range []string{"SECRET", "rs_PRIVATE", "PRIVATE_TYPE", "private_key", "Authorization"} {
+		require.NotContains(t, string(data), secret)
+	}
+	require.Equal(t, "test-request-400", gjson.GetBytes(data, "request_id").String())
+	require.Equal(t, "opaque_bad_request", gjson.GetBytes(data, "category").String())
+	require.Equal(t, "other", gjson.GetBytes(data, "request.effort").String())
+	require.Equal(t, "other", gjson.GetBytes(data, "request.service_tier").String())
+	require.Equal(t, int64(1), gjson.GetBytes(data, "request.input_types.other").Int())
+	require.Equal(t, int64(1), gjson.GetBytes(data, "request.reasoning_references").Int())
+	require.Equal(t, int64(1), gjson.GetBytes(data, "request.tool_outputs_missing_call_id").Int())
+	unchangedBody, err := io.ReadAll(c.Request.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, unchangedBody)
+}
 
 func TestDiagnosticTraceDisabledByDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.jsonl")

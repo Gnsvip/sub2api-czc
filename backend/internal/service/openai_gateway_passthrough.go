@@ -377,6 +377,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	var imageOutputSizes []string
 	diagnosticUpstreamAttempt := 0
 	for {
+		if normalized, changed, normalizeErr := normalizeOpenAIOAuthHTTPReasoningReplay(body, account); normalizeErr != nil {
+			return nil, normalizeErr
+		} else if changed {
+			body = normalized
+		}
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
 			actualModel = reqModel
@@ -930,6 +935,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	responseBody []byte,
 ) error {
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
+	s.recordOpenAIRequestErrorDiagnostic(c, account, resp.StatusCode, requestBody, body)
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -981,6 +987,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 ) error {
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
+	s.recordOpenAIRequestErrorDiagnostic(c, account, resp.StatusCode, requestBody, body)
 
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的
 	// 错误体在下方统一重建。cyber 是上游网络安全策略拦截，不冷却账号，

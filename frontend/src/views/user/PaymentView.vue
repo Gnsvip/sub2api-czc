@@ -59,7 +59,7 @@
               ></div>
               <AmountInput
                 v-model="amount"
-                :amounts="[10, 20, 30, 50, 100, 200]"
+                :amounts="[10, 20, 50, 100, 200, 500, 1000, 2000, 5000]"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
                 :bonus-tiers="rechargeBonusTiers"

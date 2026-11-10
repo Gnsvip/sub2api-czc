@@ -15,7 +15,7 @@ function mountInput(value: number | null = null) {
 }
 
 describe('AmountInput quick recharge amounts', () => {
-  it('renders the six default tiers in two rows of three', () => {
+  it('renders the nine upstream tiers in three rows of three', () => {
     const wrapper = mountInput()
 
     const grid = wrapper.find('.grid')
@@ -23,10 +23,13 @@ describe('AmountInput quick recharge amounts', () => {
     expect(grid.findAll('button').map(button => button.text())).toEqual([
       '10',
       '20',
-      '30',
       '50',
       '100',
       '200',
+      '500',
+      '1000',
+      '2000',
+      '5000',
     ])
   })
 })

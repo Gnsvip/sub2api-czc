@@ -225,39 +225,46 @@ func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
 }
 
 func TestOpenAISlowTiming_StoreCapRetentionAndIdleCleanup(t *testing.T) {
-	s := newOpenAISlowTimingStore(t.TempDir())
-	t.Cleanup(s.Close)
-	now := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
-	for i := 0; i < 200; i++ {
-		s.write(now, map[string]any{"padding": strings.Repeat("x", 1024)})
+	for _, tc := range []struct {
+		prefix string
+		limit  int64
+	}{{"slow-", slowTimingBucketLimit}, {"error-", 32 << 10}} {
+		t.Run(tc.prefix, func(t *testing.T) {
+			s := newOpenAIBoundedDiagnosticStore(t.TempDir(), tc.prefix, tc.limit)
+			t.Cleanup(s.Close)
+			now := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+			for i := 0; i < 200; i++ {
+				s.write(now, map[string]any{"padding": strings.Repeat("x", 1024)})
+			}
+			files, err := filepath.Glob(filepath.Join(s.dir, tc.prefix+"*.jsonl"))
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			info, err := os.Stat(files[0])
+			require.NoError(t, err)
+			require.LessOrEqual(t, info.Size(), tc.limit)
+			s.write(now.Add(time.Minute), map[string]any{"next": true})
+			data, err := os.ReadFile(filepath.Join(s.dir, tc.prefix+now.Add(time.Minute).Format(slowTimingBucketLayout)+".jsonl"))
+			require.NoError(t, err)
+			require.Positive(t, gjson.GetBytes(data, "dropped_since_last_record").Int())
+			unrelated := filepath.Join(s.dir, "keep.jsonl")
+			require.NoError(t, os.WriteFile(unrelated, []byte("keep"), 0600))
+			s.Close()
+			// Controlled ticker proves cleanup runs without any new request writes.
+			idle := &openAISlowTimingStore{dir: s.dir, prefix: tc.prefix, limit: tc.limit, stop: make(chan struct{}), done: make(chan struct{})}
+			ticks := make(chan time.Time)
+			go idle.runJanitor(ticks)
+			t.Cleanup(idle.Close)
+			ticks <- now.Add(2 * time.Hour)
+			require.Eventually(t, func() bool { f, _ := filepath.Glob(filepath.Join(s.dir, tc.prefix+"*.jsonl")); return len(f) == 0 }, time.Second, time.Millisecond)
+			require.FileExists(t, unrelated)
+			idle.Close()
+			idle.Close()
+			idle.write(now, map[string]any{"after_close": true})
+			files, err = filepath.Glob(filepath.Join(s.dir, tc.prefix+"*.jsonl"))
+			require.NoError(t, err)
+			require.Empty(t, files)
+		})
 	}
-	files, err := filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl"))
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-	info, err := os.Stat(files[0])
-	require.NoError(t, err)
-	require.LessOrEqual(t, info.Size(), int64(slowTimingBucketLimit))
-	s.write(now.Add(time.Minute), map[string]any{"next": true})
-	data, err := os.ReadFile(filepath.Join(s.dir, "slow-"+now.Add(time.Minute).Format(slowTimingBucketLayout)+".jsonl"))
-	require.NoError(t, err)
-	require.Positive(t, gjson.GetBytes(data, "dropped_since_last_record").Int())
-	unrelated := filepath.Join(s.dir, "keep.jsonl")
-	require.NoError(t, os.WriteFile(unrelated, []byte("keep"), 0600))
-	s.Close()
-	// Controlled ticker proves cleanup runs without any new request writes.
-	idle := &openAISlowTimingStore{dir: s.dir, stop: make(chan struct{}), done: make(chan struct{})}
-	ticks := make(chan time.Time)
-	go idle.runJanitor(ticks)
-	t.Cleanup(idle.Close)
-	ticks <- now.Add(2 * time.Hour)
-	require.Eventually(t, func() bool { f, _ := filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl")); return len(f) == 0 }, time.Second, time.Millisecond)
-	require.FileExists(t, unrelated)
-	idle.Close()
-	idle.Close()
-	idle.write(now, map[string]any{"after_close": true})
-	files, err = filepath.Glob(filepath.Join(s.dir, "slow-*.jsonl"))
-	require.NoError(t, err)
-	require.Empty(t, files)
 }
 
 const keepaliveTestInterval = 10 * time.Millisecond

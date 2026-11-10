@@ -498,6 +498,7 @@ type OpenAIGatewayService struct {
 	liveAttestationCipher SecretEncryptor
 	nativeReplayRuntime   *nativeReasoningRuntime
 	slowTimingStore       *openAISlowTimingStore
+	requestErrorStore     *openAISlowTimingStore
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -662,6 +663,7 @@ func NewOpenAIGatewayService(
 	svc.StartOpenAICodexTicketHarvester()
 	if cfg != nil {
 		svc.slowTimingStore = newOpenAISlowTimingStore(openAISlowTimingDirectory(cfg))
+		svc.requestErrorStore = newOpenAIRequestErrorStore(cfg)
 	}
 	return svc
 }
@@ -784,6 +786,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 func (s *OpenAIGatewayService) CloseOpenAIWSPool() {
 	if s != nil {
 		s.slowTimingStore.Close()
+		s.requestErrorStore.Close()
 	}
 	if s != nil && s.openaiWSPool != nil {
 		s.openaiWSPool.Close()

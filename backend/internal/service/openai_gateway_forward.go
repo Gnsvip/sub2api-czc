@@ -1452,6 +1452,13 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	diagnosticUpstreamAttempt := 0
 	for {
+		if normalized, changed, normalizeErr := normalizeOpenAIOAuthHTTPReasoningReplay(body, account); normalizeErr != nil {
+			return nil, normalizeErr
+		} else if changed {
+			body = normalized
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		if account.IsCancelUpstreamOnClientDisconnectEnabled() {

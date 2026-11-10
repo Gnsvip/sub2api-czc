@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -202,6 +204,38 @@ func TestOpenAIGatewayService_OAuthHTTPReasoningReplay(t *testing.T) {
 				require.Equal(t, "rs_unstored", gjson.GetBytes(body, "input.1.id").String(), "the original request must remain untouched")
 			})
 		}
+	}
+}
+
+func TestOpenAIRequestErrorDiagnosticHTTPForward(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"detail":"Bad Request"}`))}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.requestErrorStore = newOpenAIBoundedDiagnosticStore(t.TempDir(), "error-", 32<<10)
+			t.Cleanup(svc.requestErrorStore.Close)
+			c, rec := newOpenAIImageGenerationControlTestContext(true, "codex_exec/0.167.0")
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Type = AccountTypeOAuth
+			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}
+			account.Extra = astraHealthyTestExtra(map[string]any{"openai_passthrough": passthrough})
+			body := []byte(`{"model":"gpt-6.1-sol","stream":true,"store":false,"reasoning":{"effort":"high"},"service_tier":"priority","input":[{"type":"message","role":"developer","content":"SECRET_PROMPT"},{"type":"reasoning","id":"rs_bare","summary":[]},{"type":"item_reference","id":"rs_bare"},{"type":"message","role":"user","content":"SECRET_USER"}]}`)
+			_, err := svc.Forward(context.Background(), c, account, body)
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Len(t, upstream.requests, 1, "an opaque 400 must not trigger speculative retries")
+			files, err := filepath.Glob(filepath.Join(svc.requestErrorStore.dir, "error-*.jsonl"))
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			data, err := os.ReadFile(files[0])
+			require.NoError(t, err)
+			require.NotContains(t, string(data), "SECRET")
+			require.NotContains(t, string(data), "rs_bare")
+			require.Equal(t, passthrough, gjson.GetBytes(data, "passthrough").Bool())
+			require.Equal(t, "high", gjson.GetBytes(data, "request.effort").String())
+			require.Zero(t, gjson.GetBytes(data, "request.reasoning_references").Int())
+			require.Zero(t, gjson.GetBytes(data, "request.reasoning_items_with_id").Int(), "diagnostics describe the final repaired outbound body")
+		})
 	}
 }
 

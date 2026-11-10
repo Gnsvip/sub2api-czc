@@ -24,6 +24,8 @@ const (
 type openAISlowTimingStore struct {
 	mu          sync.Mutex
 	dir         string
+	prefix      string
+	limit       int64
 	stop        chan struct{}
 	done        chan struct{}
 	once        sync.Once
@@ -42,13 +44,36 @@ func openAISlowTimingDirectory(cfg *config.Config) string {
 }
 
 func newOpenAISlowTimingStore(dir string) *openAISlowTimingStore {
-	s := &openAISlowTimingStore{dir: dir, stop: make(chan struct{}), done: make(chan struct{})}
+	return newOpenAIBoundedDiagnosticStore(dir, "slow-", slowTimingBucketLimit)
+}
+
+func newOpenAIRequestErrorStore(cfg *config.Config) *openAISlowTimingStore {
+	dir := filepath.Join(filepath.Dir(openAISlowTimingDirectory(cfg)), "request-errors")
+	return newOpenAIBoundedDiagnosticStore(dir, "error-", 32<<10)
+}
+
+func newOpenAIBoundedDiagnosticStore(dir, prefix string, limit int64) *openAISlowTimingStore {
+	s := &openAISlowTimingStore{dir: dir, prefix: prefix, limit: limit, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		s.runJanitor(ticker.C)
 	}()
 	return s
+}
+
+func (s *openAISlowTimingStore) filePrefix() string {
+	if s.prefix == "error-" {
+		return s.prefix
+	}
+	return "slow-"
+}
+
+func (s *openAISlowTimingStore) bucketLimit() int64 {
+	if s.limit > 0 {
+		return s.limit
+	}
+	return slowTimingBucketLimit
 }
 
 func (s *openAISlowTimingStore) runJanitor(ticks <-chan time.Time) {
@@ -69,7 +94,7 @@ func (s *openAISlowTimingStore) warnLocked(operation string) {
 		return
 	}
 	s.lastWarning = time.Now()
-	logger.L().Warn("openai slow timing log unavailable", zap.String("operation", operation))
+	logger.L().Warn("openai bounded diagnostic log unavailable", zap.String("operation", operation), zap.String("bucket", s.filePrefix()))
 }
 
 func (s *openAISlowTimingStore) Close() {
@@ -95,10 +120,10 @@ func (s *openAISlowTimingStore) cleanupLocked(now time.Time) {
 	}
 	cutoff := now.UTC().Add(-slowTimingRetention)
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), "slow-") || !strings.HasSuffix(entry.Name(), ".jsonl") {
+		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), s.filePrefix()) || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
 		}
-		stamp := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "slow-"), ".jsonl")
+		stamp := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), s.filePrefix()), ".jsonl")
 		created, err := time.Parse(slowTimingBucketLayout, stamp)
 		if err == nil && (!created.After(cutoff) || created.After(now.UTC().Truncate(time.Minute))) {
 			if os.Remove(filepath.Join(s.dir, entry.Name())) != nil {
@@ -131,7 +156,7 @@ func (s *openAISlowTimingStore) write(now time.Time, event map[string]any) {
 	if err != nil || len(line) > 16<<10 {
 		return
 	}
-	path := filepath.Join(s.dir, "slow-"+now.UTC().Format(slowTimingBucketLayout)+".jsonl")
+	path := filepath.Join(s.dir, s.filePrefix()+now.UTC().Format(slowTimingBucketLayout)+".jsonl")
 	info, statErr := os.Lstat(path)
 	flags := os.O_WRONLY | os.O_APPEND
 	if os.IsNotExist(statErr) {
@@ -139,7 +164,7 @@ func (s *openAISlowTimingStore) write(now time.Time, event map[string]any) {
 	} else if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		s.warnLocked("unsafe_file")
 		return
-	} else if info.Size()+int64(len(line)+1) > slowTimingBucketLimit {
+	} else if info.Size()+int64(len(line)+1) > s.bucketLimit() {
 		s.dropped++
 		return
 	}
@@ -150,7 +175,7 @@ func (s *openAISlowTimingStore) write(now time.Time, event map[string]any) {
 	}
 	defer f.Close()
 	opened, err := f.Stat()
-	if err != nil || !opened.Mode().IsRegular() || opened.Mode().Perm()&0077 != 0 || (info != nil && !os.SameFile(info, opened)) || opened.Size()+int64(len(line)+1) > slowTimingBucketLimit {
+	if err != nil || !opened.Mode().IsRegular() || opened.Mode().Perm()&0077 != 0 || (info != nil && !os.SameFile(info, opened)) || opened.Size()+int64(len(line)+1) > s.bucketLimit() {
 		s.warnLocked("file_changed")
 		return
 	}

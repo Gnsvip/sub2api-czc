@@ -41,6 +41,10 @@ func TestNativeReasoningReplayIdentityCompleteOpaqueAndLegacyBoundaries(t *testi
 				require.Equal(t, tc.id, item["id"], "caller input must not be mutated")
 			}
 			body, _ := json.Marshal(map[string]any{"store": false, "input": []any{item}})
+			httpBody, _, err := normalizeOpenAIOAuthHTTPReasoningReplay(body, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+			require.NoError(t, err)
+			require.Equal(t, tc.keep, gjson.GetBytes(httpBody, "input.0.id").Exists())
+			require.Equal(t, gjson.GetBytes(body, "input.0.encrypted_content").Raw, gjson.GetBytes(httpBody, "input.0.encrypted_content").Raw)
 			for _, normalize := range []func([]byte, bool) ([]byte, bool, error){normalizeOpenAIAPIKeyStoreFalseReasoningReplay, normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded} {
 				out, _, err := normalize(body, false)
 				require.NoError(t, err)
@@ -48,6 +52,40 @@ func TestNativeReasoningReplayIdentityCompleteOpaqueAndLegacyBoundaries(t *testi
 			}
 		})
 	}
+}
+
+func TestNativeReasoningReplayHTTPRepairScopesAndSummary(t *testing.T) {
+	body := []byte(`{"input":[{"type":"reasoning","id":"rs_bare","call_id":"remove","summary":null,"extension":9007199254740993},{"type":"item_reference","id":"rs_missing"},{"type":"item_reference","id":"fc_keep"},{"type":"compaction","id":"cmp_keep","encrypted_content":"opaque"}]}`)
+	for _, account := range []*Account{nil, {Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, {Platform: PlatformAnthropic, Type: AccountTypeOAuth}} {
+		got, changed, err := normalizeOpenAIOAuthHTTPReasoningReplay(body, account)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, body, got)
+	}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	got, changed, err := normalizeOpenAIOAuthHTTPReasoningReplay(body, account)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(3), gjson.GetBytes(got, "input.#").Int())
+	require.False(t, gjson.GetBytes(got, "input.0.id").Exists())
+	require.False(t, gjson.GetBytes(got, "input.0.call_id").Exists())
+	require.True(t, gjson.GetBytes(got, "input.0.summary").IsArray())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(got, "input.0.extension").Raw)
+	require.Equal(t, "fc_keep", gjson.GetBytes(got, "input.1.id").String())
+	require.Equal(t, gjson.GetBytes(body, "input.3").Raw, gjson.GetBytes(got, "input.2").Raw)
+	again, changed, err := normalizeOpenAIOAuthHTTPReasoningReplay(got, account)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, got, again)
+	duplicate := []byte(`{"input":[{"type":"reasoning","id":"rs_wrong"}],"input":[{"type":"reasoning","id":"rs_stale","encrypted_content":"opaque","encrypted_content":"","summary":[]},{"type":"reasoning","type":"function_call","id":"fc_keep","call_id":"call_keep","name":"lookup","arguments":"{}"}]}`)
+	repaired, changed, err := normalizeOpenAIOAuthHTTPReasoningReplay(duplicate, account)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(2), gjson.GetBytes(repaired, "input.#").Int())
+	require.False(t, gjson.GetBytes(repaired, "input.0.id").Exists())
+	require.Equal(t, "function_call", gjson.GetBytes(repaired, "input.1.type").String())
+	require.Equal(t, "fc_keep", gjson.GetBytes(repaired, "input.1.id").String())
+	require.Equal(t, "call_keep", gjson.GetBytes(repaired, "input.1.call_id").String())
 }
 
 func TestNativeReasoningReplayIdentityNativeForwardPreservesPrefixedOpaque(t *testing.T) {

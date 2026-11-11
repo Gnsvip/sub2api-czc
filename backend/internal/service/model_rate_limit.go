@@ -12,7 +12,7 @@ import (
 
 const (
 	modelRateLimitsKey                 = "model_rate_limits"
-	antigravityArgonModelRateLimitKey = "antigravity:gemini:argon"
+	antigravityArgonModelRateLimitKey  = "antigravity:gemini:argon"
 	openAIImageGenerationRateLimitKey  = "openai:image_generation"
 	antigravityGeminiModelRateLimitKey = "antigravity:gemini"
 	// anthropicFableRateLimitKey 是 Anthropic 7d_oi（Fable 专属 7d 窗口）限流的

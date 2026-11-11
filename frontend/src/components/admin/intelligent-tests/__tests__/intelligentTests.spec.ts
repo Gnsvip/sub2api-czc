@@ -39,7 +39,7 @@ describe('auto-pelican visual scores', () => {
     expect(wrapper.text()).toContain('脚未踩踏板')
     expect(wrapper.text()).not.toMatch(/已删除|已停止调度/)
     await wrapper.setProps({ assessment: { state: 'unavailable', threshold: 70, reason: '评审超时' } })
-    expect(wrapper.text()).toContain('评分未完成')
+    expect(wrapper.text()).toContain('评分失败')
     expect(wrapper.text()).not.toContain('0.0 分')
     wrapper.unmount()
   })

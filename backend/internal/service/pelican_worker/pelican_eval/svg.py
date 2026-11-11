@@ -46,11 +46,11 @@ def analyze_svg(svg: str) -> dict:
     }
 
 
-def render_png(svg: str, size: int) -> Image.Image:
-    """在白底上把静态 SVG 渲染成长边为 size 像素的图片。"""
-    image = Image.open(io.BytesIO(resvg_py.svg_to_bytes(svg_string=svg, background="white", width=size)))
+def render_png(svg: str, size: int, background: str = "white") -> Image.Image:
+    """在指定纯色背景上把静态 SVG 渲染成长边为 size 像素的图片。"""
+    image = Image.open(io.BytesIO(resvg_py.svg_to_bytes(svg_string=svg, background=background, width=size)))
     if image.height > image.width:
-        image = Image.open(io.BytesIO(resvg_py.svg_to_bytes(svg_string=svg, background="white", height=size)))
+        image = Image.open(io.BytesIO(resvg_py.svg_to_bytes(svg_string=svg, background=background, height=size)))
     return image.convert("RGB")
 
 

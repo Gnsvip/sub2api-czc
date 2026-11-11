@@ -508,6 +508,7 @@ export default {
     passed: '通过',
     anomalous: '异常',
     unscored: '未评分',
+    scoringFailed: '评分失败',
     details: '评分与测试详情',
     empty: '最近 24 小时暂无测试结果，请等待下一轮自动测试。',
     time: '测试时间',

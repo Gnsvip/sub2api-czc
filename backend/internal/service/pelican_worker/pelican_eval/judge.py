@@ -56,7 +56,7 @@ class JudgeConfig:
         protocol = os.getenv("JUDGE_PROTOCOL") or "chat_completions"
         if protocol not in PROTOCOLS:
             raise JudgeConfigError(f"JUDGE_PROTOCOL 须为 {' / '.join(PROTOCOLS)}")
-        samples = os.getenv("JUDGE_SAMPLES") or "3"
+        samples = os.getenv("JUDGE_SAMPLES") or "1"
         if not samples.isdigit() or int(samples) < 1:
             raise JudgeConfigError("JUDGE_SAMPLES 须为正整数")
         return cls(protocol, os.environ["JUDGE_BASE_URL"], os.environ["JUDGE_MODEL"],

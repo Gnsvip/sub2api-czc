@@ -26,6 +26,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	var fail atomic.Bool
 	var failNext atomic.Bool
 	var failOneBadRequest atomic.Bool
+	var checkDuplicateClass atomic.Bool
 	var animalRequests atomic.Int64
 	var characterRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +75,15 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 			r, g, b, _ := frame.At(0, 0).RGBA()
 			require.Equal(t, []uint32{0xea, 0xf4, 0xef}, []uint32{r >> 8, g >> 8, b >> 8}, "outer background must reach the scored image")
 		}
+		if checkDuplicateClass.Load() {
+			url := parts[1]["image_url"].(map[string]any)["url"].(string)
+			raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(url, "data:image/png;base64,"))
+			require.NoError(t, err)
+			frame, err := png.Decode(bytes.NewReader(raw))
+			require.NoError(t, err)
+			r, g, b, _ := frame.At(frame.Bounds().Dx()/5, frame.Bounds().Dy()/2).RGBA()
+			require.Equal(t, []uint32{0x12, 0x34, 0x56}, []uint32{r >> 8, g >> 8, b >> 8}, "duplicate class must keep the first attribute, like HTML preview")
+		}
 		checks := map[string]bool{}
 		for _, key := range []string{"pelican_identifiable", "pelican_long_bill", "pelican_throat_pouch", "pelican_eye", "pelican_wing", "pelican_legs_or_feet", "bicycle_identifiable", "bicycle_two_wheels", "bicycle_frame_connects_wheels", "bicycle_handlebars", "bicycle_saddle", "bicycle_pedals_or_crank", "bicycle_chain_or_chainring", "pelican_mounted", "feet_on_pedals", "wing_on_handlebars", "plausible_scale", "subjects_fully_in_frame", "no_detached_parts", "no_major_artifacts", "motion_visible", "wheels_rotate", "legs_pedal", "parts_stay_attached_in_motion"} {
 			checks[key] = true
@@ -121,6 +131,14 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.Equal(t, 2, result.SampleCount)
 	require.Contains(t, result.Reason, "2/3")
 	require.EqualValues(t, 16, requests.Load(), "retain two valid samples without retrying a permanent 400")
+	t.Setenv("JUDGE_SAMPLES", "")
+	checkDuplicateClass.Store(true)
+	duplicate := strings.Replace(svg, "<circle ", `<style>.visible {fill:#123456} .hidden {fill:#ffffff}</style><circle class="visible" class="hidden" `, 1)
+	result = runAutoPelicanJudge(context.Background(), duplicate, intelligentAnimalHTMLPrompt("鹈鹕"), 50)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.Equal(t, 1, result.SampleCount)
+	require.EqualValues(t, 17, requests.Load(), "one visual review is the default")
+	checkDuplicateClass.Store(false)
 	beforeUnsafe := requests.Load()
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
@@ -131,6 +149,8 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		`<html><body style="height:0;overflow:hidden">` + svg + `</body></html>`,
 		`<html><body style="background:url(https://example.invalid/x)">` + svg + `</body></html>`,
 		`<html><body style="color:white">` + svg + `</body></html>`,
+		`<svg viewBox="0 0 100 100"><circle r="10" r="20"/></svg>`,
+		`<svg viewBox="0 0 100 100"><image class="first" class="second" href="https://example.invalid/x"/></svg>`,
 		`<html><body>` + svg + `<p>another visible object</p></body></html>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,
 		`<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`,
@@ -146,7 +166,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 	require.Equal(t, "unavailable", result.State)
 	require.Nil(t, result.Score, "transport failures must never become zero-quality scores")
-	require.Equal(t, beforeUnsafe+6, requests.Load(), "at most one retry per failed sample")
+	require.Equal(t, beforeUnsafe+2, requests.Load(), "one initial request and at most one retry with the default single sample")
 }
 
 func TestAutoPelicanOutputLimit(t *testing.T) {

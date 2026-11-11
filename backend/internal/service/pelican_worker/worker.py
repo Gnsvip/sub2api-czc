@@ -80,6 +80,43 @@ class CanvasWrapper(HTMLParser):
             raise ValueError("unsupported_declaration")
 
 
+def normalize_duplicate_classes(svg):
+    """Match HTML preview's first-class-attribute rule without repairing XML."""
+    class Parser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.removals = []
+            self.lines = [0]
+            for match in re.finditer("\n", svg):
+                self.lines.append(match.end())
+
+        def handle_starttag(self, tag, attrs):
+            raw = self.get_starttag_text()
+            tag_end = re.match(r"<\s*[^\s/>]+", raw).end()
+            row, column = self.getpos()
+            offset = self.lines[row - 1] + column
+            seen = False
+            # Consume whole attributes so a 'class=' string inside another
+            # quoted value is never mistaken for a real attribute.
+            pattern = r'''\s+([A-Za-z_:][\w:.-]*)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?'''
+            for match in re.finditer(pattern, raw[tag_end:]):
+                if match.group(1) != "class":
+                    continue
+                if seen:
+                    self.removals.append((offset + tag_end + match.start(), offset + tag_end + match.end()))
+                seen = True
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+
+    parser = Parser()
+    parser.feed(svg)
+    parser.close()
+    for start, end in reversed(parser.removals):
+        svg = svg[:start] + svg[end:]
+    return svg
+
+
 def checked_svg(output, extracted=False, canvas_style=None):
     from pelican_eval.svg import extract_svg
     # Check the whole answer: JS outside the SVG can drive its animation too.
@@ -101,7 +138,14 @@ def checked_svg(output, extracted=False, canvas_style=None):
                 raise ValueError("incomplete_wrapper")
             if canvas_style is not None:
                 canvas_style["background"] = wrapper.background
-    root = ET.fromstring(svg)
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        normalized = normalize_duplicate_classes(svg)
+        if normalized == svg:
+            raise
+        root = ET.fromstring(normalized)
+        svg = normalized
     if root.tag.rsplit("}", 1)[-1].lower() != "svg":
         raise ValueError("invalid_root")
     nodes = list(root.iter())

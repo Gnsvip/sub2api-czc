@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Native continuation, diagnostics and HTTP/2 race regression
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service -run '^(TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service ./internal/service/openai_ws_v2 -run '^(TestAuthServiceRefreshTokenPairConsumesTokenOnce|TestRefreshTokenCacheConsumeIsAtomic|TestGatewayServiceNewSelectionResult|TestOpenAIWSIngressWebSearchActivation|TestOpenAIWSConnWebSearchInitialization|TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode|TestRelay|TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -100,7 +100,14 @@ jobs:
       - run: pnpm --dir frontend run build
       - name: Install browser for guide checks
         working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: |
+          pnpm exec playwright install chromium
+          # Hosted runners normally have the shared libraries already. Avoid
+          # apt/network churn unless a real browser launch needs dependencies.
+          if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
+            pnpm exec playwright install-deps chromium
+          fi
       - name: Public and admin guide browser checks
         working-directory: frontend
         env:

@@ -100,7 +100,14 @@ jobs:
       - run: pnpm --dir frontend run build
       - name: Install browser for guide checks
         working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 5
+        run: |
+          pnpm exec playwright install chromium
+          # Hosted runners normally have the shared libraries already. Avoid
+          # apt/network churn unless a real browser launch needs dependencies.
+          if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
+            pnpm exec playwright install-deps chromium
+          fi
       - name: Public and admin guide browser checks
         working-directory: frontend
         env:

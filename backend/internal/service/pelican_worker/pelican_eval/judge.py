@@ -33,8 +33,7 @@ def is_transient_error(error: Exception) -> bool:
     status = getattr(error, "status_code", None)
     if status in TRANSIENT_STATUS_CODES:
         return True
-    name = type(error).__name__.lower()
-    return any(token in name for token in ("timeout", "connection", "ratelimit", "internalserver", "temporarily"))
+    return isinstance(error, (openai.APIConnectionError, anthropic.APIConnectionError))
 
 
 class JudgeConfigError(Exception):
@@ -75,13 +74,14 @@ class Judge:
         client = anthropic.Anthropic if config.protocol == "messages" else openai.OpenAI
         self.client = client(api_key=config.api_key, base_url=config.base_url)
 
-    def evaluate(self, first_frame: bytes, contact_sheet: bytes, animated: bool) -> dict:
+    def evaluate(self, first_frame: bytes, contact_sheet: bytes, animated: bool, deadline: float | None = None) -> dict:
         """同一组画面独立评 samples 次后取平均；SVG 里没有动画时 animation_quality 记 0。"""
         images = [base64.b64encode(png).decode() for png in (first_frame, contact_sheet)]
+        deadline = deadline if deadline is not None else time.monotonic() + 65.0
         samples = []
         failures = 0
         with ThreadPoolExecutor(self.config.samples) as pool:
-            futures = [pool.submit(self._sample, images, animated) for _ in range(self.config.samples)]
+            futures = [pool.submit(self._sample, images, animated, deadline) for _ in range(self.config.samples)]
             for future in as_completed(futures):
                 try:
                     samples.append(future.result())
@@ -97,26 +97,32 @@ class Judge:
             result["observations"] = f"部分评审样本完成（{len(samples)}/{self.config.samples}）；" + result["observations"]
         return result
 
-    def _sample(self, images: list[str], animated: bool) -> dict:
+    def _sample(self, images: list[str], animated: bool, deadline: float) -> dict:
         last_error = None
         for attempt in range(MAX_ATTEMPTS):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                return parse_judgement(self._ask(images), animated)
+                return parse_judgement(self._ask(images, remaining), animated)
             except ValueError as exc:
                 last_error = exc
             except Exception as exc:
                 if not is_transient_error(exc):
                     raise
                 last_error = exc
-            if attempt + 1 < MAX_ATTEMPTS:
+            if attempt + 1 < MAX_ATTEMPTS and deadline - time.monotonic() > 0.8:
                 time.sleep(0.8)
+            else:
+                break
         raise RuntimeError(f"judge sample unavailable: {type(last_error).__name__}")
 
-    def _ask(self, images: list[str]) -> str:
+    def _ask(self, images: list[str], timeout: float) -> str:
         cfg = self.config
         urls = [f"data:image/png;base64,{image}" for image in images]
         if cfg.protocol == "chat_completions":
             resp = self.client.chat.completions.create(
+                timeout=timeout,
                 model=cfg.model,
                 messages=[
                     {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
@@ -129,6 +135,7 @@ class Judge:
             return resp.choices[0].message.content or ""
         if cfg.protocol == "responses":
             resp = self.client.responses.create(
+                timeout=timeout,
                 model=cfg.model,
                 instructions=JUDGE_SYSTEM_PROMPT,
                 input=[{"role": "user", "content": [
@@ -138,6 +145,7 @@ class Judge:
             )
             return resp.output_text
         resp = self.client.messages.create(
+            timeout=timeout,
             model=cfg.model,
             max_tokens=16384,
             system=JUDGE_SYSTEM_PROMPT,

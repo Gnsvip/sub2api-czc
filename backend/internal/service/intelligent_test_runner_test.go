@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +25,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	var requests atomic.Int64
 	var fail atomic.Bool
 	var failNext atomic.Bool
+	var failOneBadRequest atomic.Bool
 	var animalRequests atomic.Int64
 	var characterRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +36,10 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		}
 		if failNext.Swap(false) {
 			http.Error(w, "one transient mock judge failure", http.StatusBadGateway)
+			return
+		}
+		if failOneBadRequest.Swap(false) {
+			http.Error(w, "non-retryable fixture", http.StatusBadRequest)
 			return
 		}
 		var request struct {
@@ -56,6 +64,15 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		var parts []map[string]any
 		if json.Unmarshal(request.Messages[1].Content, &parts) != nil || len(parts) != 3 {
 			t.Error("judge must receive first frame and six-frame montage")
+		}
+		if strings.Contains(string(request.Messages[0].Content), "豆娘") {
+			url := parts[1]["image_url"].(map[string]any)["url"].(string)
+			raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(url, "data:image/png;base64,"))
+			require.NoError(t, err)
+			frame, err := png.Decode(bytes.NewReader(raw))
+			require.NoError(t, err)
+			r, g, b, _ := frame.At(0, 0).RGBA()
+			require.Equal(t, []uint32{0xea, 0xf4, 0xef}, []uint32{r >> 8, g >> 8, b >> 8}, "outer background must reach the scored image")
 		}
 		checks := map[string]bool{}
 		for _, key := range []string{"pelican_identifiable", "pelican_long_bill", "pelican_throat_pouch", "pelican_eye", "pelican_wing", "pelican_legs_or_feet", "bicycle_identifiable", "bicycle_two_wheels", "bicycle_frame_connects_wheels", "bicycle_handlebars", "bicycle_saddle", "bicycle_pedals_or_crank", "bicycle_chain_or_chainring", "pelican_mounted", "feet_on_pedals", "wing_on_handlebars", "plausible_scale", "subjects_fully_in_frame", "no_detached_parts", "no_major_artifacts", "motion_visible", "wheels_rotate", "legs_pedal", "parts_stay_attached_in_motion"} {
@@ -98,11 +115,22 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.Equal(t, "passed", result.State, result.Reason)
 	require.EqualValues(t, 3, result.SampleCount)
 	require.EqualValues(t, 13, requests.Load(), "a transient 502 is retried without discarding successful samples")
+	failOneBadRequest.Store(true)
+	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.Equal(t, 2, result.SampleCount)
+	require.Contains(t, result.Reason, "2/3")
+	require.EqualValues(t, 16, requests.Load(), "retain two valid samples without retrying a permanent 400")
+	beforeUnsafe := requests.Load()
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
 		`<html><body style="opacity:0">` + svg + `</body></html>`,
 		`<html><body style="margin:0;position:fixed">` + svg + `</body></html>`,
 		`<html><body style="margin:0;display:none">` + svg + `</body></html>`,
+		`<html><body style="display:none !important">` + svg + `</body></html>`,
+		`<html><body style="height:0;overflow:hidden">` + svg + `</body></html>`,
+		`<html><body style="background:url(https://example.invalid/x)">` + svg + `</body></html>`,
+		`<html><body style="color:white">` + svg + `</body></html>`,
 		`<html><body>` + svg + `<p>another visible object</p></body></html>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,
 		`<svg viewBox="0 0 100 100"><use href="#x"><set attributeName="href" to="/etc/passwd"/></use></svg>`,
@@ -113,11 +141,12 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		require.Equal(t, "unavailable", result.State)
 		require.Nil(t, result.Score)
 	}
-	require.EqualValues(t, 9, requests.Load(), "unsupported renders must never call a judge")
+	require.Equal(t, beforeUnsafe, requests.Load(), "unsupported renders must never call a judge")
 	fail.Store(true)
 	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 	require.Equal(t, "unavailable", result.State)
 	require.Nil(t, result.Score, "transport failures must never become zero-quality scores")
+	require.Equal(t, beforeUnsafe+6, requests.Load(), "at most one retry per failed sample")
 }
 
 func TestAutoPelicanOutputLimit(t *testing.T) {

@@ -509,6 +509,7 @@ export default {
     passed: 'Passed',
     anomalous: 'Anomalous',
     unscored: 'Unscored',
+    scoringFailed: 'Scoring failed',
     details: 'Score and test details',
     empty: 'No results in the last 24 hours. Wait for the next automatic run.',
     time: 'Test time',

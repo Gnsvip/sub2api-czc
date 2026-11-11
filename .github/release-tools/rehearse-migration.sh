@@ -92,6 +92,11 @@ func main() {
     must(db.QueryRowContext(ctx,"SELECT count(*) FROM accounts WHERE id IN (900002,900003) AND status='active' AND schedulable").Scan(&active))
     must(db.QueryRowContext(ctx,"SELECT count(*) FROM accounts WHERE id=900004 AND status='disabled' AND NOT schedulable").Scan(&disabled))
     if active != 2 || disabled != 1 { panic("Google account states changed") }
+    var costIndexValid bool
+    var costIndexDefinition string
+    must(db.QueryRowContext(ctx,"SELECT indisvalid, pg_get_indexdef(indexrelid) FROM pg_index WHERE indexrelid='idx_usage_logs_api_key_created_cost'::regclass").Scan(&costIndexValid, &costIndexDefinition))
+    if !costIndexValid || !strings.Contains(costIndexDefinition, "(api_key_id, created_at) INCLUDE (actual_cost)") { panic("API key cost covering index invalid") }
+    fmt.Println("API key cost covering index valid")
     fmt.Printf("PASS: %d new migrations, repeat run idempotent, historical checksum retained, synthetic business data preserved; duration=%s\n",first-initial,time.Since(started))
 }
 GO

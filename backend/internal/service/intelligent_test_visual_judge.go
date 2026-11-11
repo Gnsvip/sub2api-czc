@@ -82,7 +82,7 @@ func runAutoPelicanJudge(ctx context.Context, output, prompt string, threshold i
 	fallback := unavailablePelicanAssessment(threshold, "视觉评分未完成，未判定画面质量")
 	animal := intelligentJudgeAnimal(prompt)
 	if animal == "" {
-		return unavailablePelicanAssessment(threshold, "未识别测试题目中的动物，未判定画面质量")
+		return unavailablePelicanAssessment(threshold, "未识别测试题目中的主角，未判定画面质量")
 	}
 	if !pelicanJudgeConfigured() || len(output) > 256<<10 {
 		return fallback

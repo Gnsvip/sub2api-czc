@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,14 +70,7 @@ func TestRunScheduledPelicanEnqueuesRandomAnimalPrompt(t *testing.T) {
 	prompt := repo.enqueued[0].Prompts["pelican"]
 	require.Contains(t, prompt, "骑自行车的2D动画")
 	require.Contains(t, prompt, "不要使用任何skill")
-	matched := false
-	for _, animal := range intelligentTestAnimals {
-		if strings.Contains(prompt, "绘制一个"+animal+"骑自行车") {
-			matched = true
-			break
-		}
-	}
-	require.True(t, matched, "prompt %q should name a known animal", prompt)
+	require.NotEmpty(t, intelligentJudgeAnimal(prompt), "prompt %q should name a known subject", prompt)
 	require.Regexp(t, `^pelican-slot-\d{12}$`, repo.enqueued[0].IdempotencyKey)
 	require.Equal(t, IntelligentTestSourcePelicanSchedule, repo.enqueued[0].Source)
 	require.EqualValues(t, 42, repo.candidateGroupID)

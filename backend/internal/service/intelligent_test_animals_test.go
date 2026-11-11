@@ -1,7 +1,6 @@
 package service
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -22,16 +21,15 @@ func TestIntelligentTestAnimalsAreUniqueAndNumerous(t *testing.T) {
 func TestPickIntelligentTestAnimalAvoidsLastChoice(t *testing.T) {
 	t.Parallel()
 	first := pickIntelligentTestAnimal("")
-	require.Contains(t, intelligentTestAnimals, first)
-	different := 0
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 256; i++ {
 		next := pickIntelligentTestAnimal(first)
-		require.Contains(t, intelligentTestAnimals, next)
-		if next != first {
-			different++
+		require.NotEqual(t, first, next)
+		require.Equal(t, next, intelligentJudgeAnimal(intelligentAnimalHTMLPrompt(next)))
+		for _, excluded := range []string{"抹香鲸", "海豚", "海马", "金鱼", "眼镜蛇", "蚓螈", "水母", "海星", "蜗牛", "蚯蚓", "佛法僧"} {
+			require.NotEqual(t, excluded, next)
 		}
+		first = next
 	}
-	require.Greater(t, different, 20)
 }
 
 func TestIntelligentAnimalHTMLPromptInsertsName(t *testing.T) {
@@ -49,14 +47,7 @@ func TestAdminPelicanRunPicksRandomAnimal(t *testing.T) {
 	require.NotNil(t, req.PromptFor)
 	prompt := req.PromptFor(1, "pelican")
 	require.Contains(t, prompt, "骑自行车的2D动画")
-	matched := false
-	for _, animal := range intelligentTestAnimals {
-		if strings.Contains(prompt, "绘制一个"+animal+"骑自行车") {
-			matched = true
-			break
-		}
-	}
-	require.True(t, matched, "prompt %q should name a known animal", prompt)
+	require.NotEmpty(t, intelligentJudgeAnimal(prompt), "prompt %q should name a known subject", prompt)
 	require.Empty(t, req.PromptFor(1, "candy"))
 	kept := svc.withAdminPelicanAnimal(IntelligentTestEnqueue{TestTypes: []string{"pelican"}, Prompts: map[string]string{"pelican": "keep"}})
 	require.Equal(t, "keep", kept.Prompts["pelican"])
@@ -119,10 +110,12 @@ func TestPelicanNextBoundaryAlignsToThirtyMinutes(t *testing.T) {
 }
 
 func TestVisualJudgeUsesRequestedAnimal(t *testing.T) {
-	for _, animal := range []string{"豆娘", "海豚", "鹈鹕", "大王酸浆鱿"} {
+	for _, animal := range []string{"豆娘", "海豚", "鹈鹕", "大王酸浆鱿", "小熊猫", "哆啦A梦", "江户川柯南", "路飞"} {
 		prompt := intelligentAnimalHTMLPrompt(animal)
 		require.Contains(t, prompt, "创建一个HTML，内容是SVG绘制一个"+animal+"骑自行车")
 		require.Contains(t, prompt, "不使用 JavaScript")
+		require.NotContains(t, prompt, "带脚")
+		require.NotContains(t, prompt, "脚踩")
 		require.Equal(t, animal, intelligentJudgeAnimal(prompt))
 	}
 	require.Equal(t, "鹈鹕", intelligentJudgeAnimal("Generate a pelican riding a bicycle."))

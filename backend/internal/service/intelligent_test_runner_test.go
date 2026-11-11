@@ -22,6 +22,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	var requests atomic.Int64
 	var fail atomic.Bool
 	var animalRequests atomic.Int64
+	var characterRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		if fail.Load() {
@@ -41,6 +42,11 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		if strings.Contains(string(request.Messages[0].Content), "豆娘") {
 			animalRequests.Add(1)
 			require.Contains(t, string(request.Messages[0].Content), "Do not require a beak")
+		}
+		if strings.Contains(string(request.Messages[0].Content), "哆啦A梦") {
+			characterRequests.Add(1)
+			require.Contains(t, string(request.Messages[0].Content), "anime character")
+			require.Contains(t, string(request.Messages[0].Content), "do not require species-specific animal features")
 		}
 		var parts []map[string]any
 		if json.Unmarshal(request.Messages[1].Content, &parts) != nil || len(parts) != 3 {
@@ -76,6 +82,12 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.Equal(t, "animal-judge-v1", result.Rubric)
 	require.EqualValues(t, 3, animalRequests.Load(), "every review must judge the requested species")
 	require.EqualValues(t, 6, requests.Load())
+	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("哆啦A梦"), 50)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.Equal(t, "animal-judge-v1", result.Rubric)
+	require.Equal(t, 50, result.Threshold)
+	require.EqualValues(t, 3, characterRequests.Load(), "every review must judge the requested character")
+	require.EqualValues(t, 9, requests.Load())
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
 		`<html><body style="opacity:0">` + svg + `</body></html>`,
@@ -91,7 +103,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 		require.Equal(t, "unavailable", result.State)
 		require.Nil(t, result.Score)
 	}
-	require.EqualValues(t, 6, requests.Load(), "unsupported renders must never call a judge")
+	require.EqualValues(t, 9, requests.Load(), "unsupported renders must never call a judge")
 	fail.Store(true)
 	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
 	require.Equal(t, "unavailable", result.State)

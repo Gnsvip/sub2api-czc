@@ -25,7 +25,7 @@ import { computed } from 'vue'
 import type { PelicanVisualJudgement } from '@/api/intelligentTests'
 const props = defineProps<{ assessment?: PelicanVisualJudgement; compact?: boolean }>()
 const judged = computed(() => !!props.assessment && ['passed', 'anomalous'].includes(props.assessment.state) && Number.isFinite(props.assessment.score))
-const label = computed(() => !props.assessment ? '未评分' : !judged.value ? '评分未完成' : props.assessment.state === 'passed' ? '画面测试通过' : '画面异常')
+const label = computed(() => !props.assessment ? '未评分' : !judged.value ? '评分失败' : props.assessment.state === 'passed' ? '画面测试通过' : '画面异常')
 const tone = computed(() => !judged.value ? 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
   : props.assessment?.state === 'passed' ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
     : 'bg-rose-50 text-rose-800 dark:bg-rose-900/20 dark:text-rose-300')

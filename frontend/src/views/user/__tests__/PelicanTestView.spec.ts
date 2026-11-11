@@ -22,6 +22,7 @@ const messages = {
     pelicanTest: {
       subtitle: '每半小时自动', passed: '通过', anomalous: '异常', unscored: '未评分', details: '评分与测试详情',
       empty: '暂无测试结果',
+      scoringFailed: '评分失败',
       time: '测试时间',
       group: '测试分组',
       model: '模型',
@@ -78,7 +79,7 @@ describe('PelicanTestView', () => {
       items: [
         { ...base, id: 3, status: 'failed', html: '<html><body><svg><path' },
         { ...base, id: 2, status: 'completed', html: '', preview_issue: 'incomplete' },
-        { ...base, id: 1, status: 'completed', html: '<html><svg id="complete"></svg></html>' }
+        { ...base, id: 1, status: 'completed', html: '<html><svg id="complete"></svg></html>', visual_judgement: { state: 'unavailable', threshold: 50, reason: '评审超时' } }
       ],
       total: 3, page: 1, page_size: 96
     })
@@ -88,6 +89,7 @@ describe('PelicanTestView', () => {
     const buttons = wrapper.findAll('button')
     expect(buttons[0].text()).toContain('输出未完成')
     expect(buttons[1].text()).toContain('输出未完成')
+    expect(buttons[2].text()).toContain('评分失败')
     await buttons[0].trigger('click')
     expect(wrapper.find('iframe').exists()).toBe(false)
     expect(wrapper.get('article > p[role="status"]').text()).toContain('未返回完整内容')

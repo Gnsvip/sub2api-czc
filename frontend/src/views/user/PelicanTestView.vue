@@ -98,6 +98,7 @@ function resultLabel(item: PelicanTestItem) {
   if (isIncomplete(item)) return t('pelicanTest.incompleteLabel')
   if (item.visual_judgement?.state === 'passed') return t('pelicanTest.passed')
   if (item.visual_judgement?.state === 'anomalous') return t('pelicanTest.anomalous')
+  if (item.visual_judgement?.state === 'unavailable') return t('pelicanTest.scoringFailed')
   return t('pelicanTest.unscored')
 }
 

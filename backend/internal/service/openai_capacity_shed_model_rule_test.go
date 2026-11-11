@@ -97,23 +97,33 @@ func TestOpenAICapacityShedModelRule_StreamReaders(t *testing.T) {
 }
 
 func TestOpenAICapacityShedModelRule_HTTP(t *testing.T) {
-	account := openAICapacityShedModelRuleAccount(AccountTypeOAuth)
-	repo := &modelNotFoundAccountRepoStub{}
-	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	body := []byte(`{"error":{"code":"server_is_overloaded","message":"overloaded"}}`)
-	err := svc.handleFailoverErrorResponsePassthrough(context.Background(),
-		&http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, c, account,
-		[]byte(`{"model":"alias"}`), body)
-	var failover *UpstreamFailoverError
-	require.ErrorAs(t, err, &failover)
-	require.False(t, failover.RetryableOnSameAccount)
-	require.True(t, failover.RequestScopedTransient)
-	require.Len(t, repo.modelRateLimitCalls, 1)
-	require.Equal(t, "gpt-6.1-sol", repo.modelRateLimitCalls[0].scope)
-	require.Zero(t, repo.tempCalls)
-	require.False(t, c.Writer.Written())
+	for _, tc := range []struct {
+		name, accountType, model, wantModel string
+	}{
+		{"API key applies mapping once", AccountTypeAPIKey, "alias", "gpt-6.1-sol"},
+		{"OAuth ignores historical alias mapping", AccountTypeOAuth, "alias", "alias"},
+		{"OAuth preserves dispatched model", AccountTypeOAuth, "gpt-6.1-sol", "gpt-6.1-sol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := openAICapacityShedModelRuleAccount(tc.accountType)
+			repo := &modelNotFoundAccountRepoStub{}
+			svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			body := []byte(`{"error":{"code":"server_is_overloaded","message":"overloaded"}}`)
+			err := svc.handleFailoverErrorResponsePassthrough(context.Background(),
+				&http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, c, account,
+				[]byte(`{"model":"`+tc.model+`"}`), body)
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			require.False(t, failover.RetryableOnSameAccount)
+			require.True(t, failover.RequestScopedTransient)
+			require.Len(t, repo.modelRateLimitCalls, 1)
+			require.Equal(t, tc.wantModel, repo.modelRateLimitCalls[0].scope)
+			require.Zero(t, repo.tempCalls)
+			require.False(t, c.Writer.Written())
+		})
+	}
 }
 
 func TestOpenAICapacityShedModelRule_ProtectionBoundaries(t *testing.T) {

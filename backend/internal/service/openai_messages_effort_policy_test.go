@@ -86,6 +86,11 @@ func TestMessagesEffortPolicyHTTP(t *testing.T) {
 							account.Extra = map[string]any{openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions)}
 						}
 						defaultMapped := ""
+						if auth == AccountTypeOAuth && model == "claude-sonnet-4-5" {
+							// This fork resolves OAuth aliases in the Messages dispatcher;
+							// historical account model_mapping is intentionally ignored.
+							defaultMapped = "gpt-6.1-sol"
+						}
 						if test.terminal {
 							model = "public-alias"
 							defaultMapped = "gpt-6.1-sol"

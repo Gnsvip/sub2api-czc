@@ -67,7 +67,7 @@ func TestAuthServiceRefreshTokenPairConsumesTokenOnce(t *testing.T) {
 			RefreshTokenExpireDays:   7,
 		},
 	}
-	svc := service.NewAuthService(nil, newEmailBindUserRepoStub(user), nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := service.NewAuthService(nil, newEmailBindUserRepoStub(user), nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil)
 
 	pair, err := svc.GenerateTokenPair(ctx, user, "")
 	require.NoError(t, err)

@@ -21,12 +21,17 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	}
 	var requests atomic.Int64
 	var fail atomic.Bool
+	var failNext atomic.Bool
 	var animalRequests atomic.Int64
 	var characterRequests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		if fail.Load() {
 			http.Error(w, "mock judge failure", http.StatusServiceUnavailable)
+			return
+		}
+		if failNext.Swap(false) {
+			http.Error(w, "one transient mock judge failure", http.StatusBadGateway)
 			return
 		}
 		var request struct {
@@ -77,7 +82,7 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.InDelta(t, 80, *result.Score, 0.01)
 	require.EqualValues(t, 3, requests.Load())
 	require.Len(t, result.FrameTimes, 6)
-	result = runAutoPelicanJudge(context.Background(), "将以下内容保存为 HTML。\n```html\n"+`<!DOCTYPE html><html style="padding:0"><head><meta charset="utf-8"><title>动画</title></head><body style="margin: 0px 0; padding:0">`+svg+"</body></html>\n```\n可直接打开。", intelligentAnimalHTMLPrompt("豆娘"), 70)
+	result = runAutoPelicanJudge(context.Background(), "将以下内容保存为 HTML。\n```html\n"+`<!DOCTYPE html><html style="padding:0"><head><meta charset="utf-8"><title>动画</title></head><body style="margin: 0px 0; padding:0; min-height:100vh; display:grid; place-items:center; background:#eaf4ef">`+svg+"</body></html>\n```\n可直接打开。", intelligentAnimalHTMLPrompt("豆娘"), 70)
 	require.Equal(t, "passed", result.State, result.Reason)
 	require.Equal(t, "animal-judge-v1", result.Rubric)
 	require.EqualValues(t, 3, animalRequests.Load(), "every review must judge the requested species")
@@ -88,10 +93,15 @@ func TestAutoPelicanWorkerVisualScoring(t *testing.T) {
 	require.Equal(t, 50, result.Threshold)
 	require.EqualValues(t, 3, characterRequests.Load(), "every review must judge the requested character")
 	require.EqualValues(t, 9, requests.Load())
+	failNext.Store(true)
+	result = runAutoPelicanJudge(context.Background(), svg, intelligentAnimalHTMLPrompt("鹈鹕"), 70)
+	require.Equal(t, "passed", result.State, result.Reason)
+	require.EqualValues(t, 3, result.SampleCount)
+	require.EqualValues(t, 13, requests.Load(), "a transient 502 is retried without discarding successful samples")
 	for _, unsafe := range []string{
 		svg + `<script>draw()</script>`,
 		`<html><body style="opacity:0">` + svg + `</body></html>`,
-		`<html><body style="margin:0;background: red">` + svg + `</body></html>`,
+		`<html><body style="margin:0;position:fixed">` + svg + `</body></html>`,
 		`<html><body style="margin:0;display:none">` + svg + `</body></html>`,
 		`<html><body>` + svg + `<p>another visible object</p></body></html>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>`,

@@ -6,7 +6,8 @@ import base64
 import json
 import os
 import statistics
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 import anthropic
@@ -24,6 +25,16 @@ from .prompts import (
 
 PROTOCOLS = ("chat_completions", "messages", "responses")
 MAX_ATTEMPTS = 3  # 评委输出不符合格式时重问的次数
+TRANSIENT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+def is_transient_error(error: Exception) -> bool:
+    """Retry provider throttling, gateway failures and transport timeouts only."""
+    status = getattr(error, "status_code", None)
+    if status in TRANSIENT_STATUS_CODES:
+        return True
+    name = type(error).__name__.lower()
+    return any(token in name for token in ("timeout", "connection", "ratelimit", "internalserver", "temporarily"))
 
 
 class JudgeConfigError(Exception):
@@ -67,17 +78,39 @@ class Judge:
     def evaluate(self, first_frame: bytes, contact_sheet: bytes, animated: bool) -> dict:
         """同一组画面独立评 samples 次后取平均；SVG 里没有动画时 animation_quality 记 0。"""
         images = [base64.b64encode(png).decode() for png in (first_frame, contact_sheet)]
+        samples = []
+        failures = 0
         with ThreadPoolExecutor(self.config.samples) as pool:
-            samples = list(pool.map(lambda _: self._sample(images, animated), range(self.config.samples)))
-        return aggregate(samples)
+            futures = [pool.submit(self._sample, images, animated) for _ in range(self.config.samples)]
+            for future in as_completed(futures):
+                try:
+                    samples.append(future.result())
+                except Exception:
+                    # A failed sample must not discard completed samples. The
+                    # public result records the successful sample count only;
+                    # raw provider errors never leave the worker.
+                    failures += 1
+        if not samples:
+            raise RuntimeError("all judge samples failed")
+        result = aggregate(samples)
+        if failures:
+            result["observations"] = f"部分评审样本完成（{len(samples)}/{self.config.samples}）；" + result["observations"]
+        return result
 
     def _sample(self, images: list[str], animated: bool) -> dict:
-        for _ in range(MAX_ATTEMPTS):
+        last_error = None
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 return parse_judgement(self._ask(images), animated)
             except ValueError as exc:
-                error = exc
-        raise RuntimeError(f"invalid judge output: {error}")
+                last_error = exc
+            except Exception as exc:
+                if not is_transient_error(exc):
+                    raise
+                last_error = exc
+            if attempt + 1 < MAX_ATTEMPTS:
+                time.sleep(0.8)
+        raise RuntimeError(f"judge sample unavailable: {type(last_error).__name__}")
 
     def _ask(self, images: list[str]) -> str:
         cfg = self.config

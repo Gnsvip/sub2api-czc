@@ -66,6 +66,8 @@ func TestAPIKeyAuthForwardsUserScopedOpenAIFastPolicyToUpstream(t *testing.T) {
 	)
 	// API-key 账号的 Tibo 探测也会向上游发请求，多出的请求体会塞满上游
 	// channel 造成死锁；本测试只关心转发体内容。
+	// 先等待后台读取退出，再修改测试开关，避免与探测线程并发访问。
+	gatewayService.StopOpenAICodexTicketHarvester()
 	gatewayService.DisableOpenAITiboRouteForTest()
 
 	groupID := int64(101)

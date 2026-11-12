@@ -209,7 +209,10 @@ func TestHandleChatStreamingResponse_GrokHeartbeatWithoutVisibleDelta(t *testing
 }
 
 func grokChatLargeRequestBody() []byte {
-	return []byte(`{"model":"grok-4.6","reasoning_effort":"xhigh","messages":[{"role":"user","content":"` + strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes) + `"}]}`)
+	// Keep the large-request gate covered without a 64 KiB single BPE word.
+	// EOF estimates usage; this test measures heartbeat delivery, not tokenizer
+	// worst-case performance under the race detector.
+	return []byte(`{"model":"grok-4.6","reasoning_effort":"xhigh","messages":[{"role":"user","content":"` + strings.Repeat("x ", openAISilentRefusalMinRequestBodyBytes/2) + `"}]}`)
 }
 
 func TestHandleChatStreamingResponse_GrokHeartbeatWithLargeRequestBody(t *testing.T) {

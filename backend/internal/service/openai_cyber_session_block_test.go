@@ -374,19 +374,24 @@ func TestCyberSessionScopeKeyNormalizesUserAgentVersion(t *testing.T) {
 }
 
 func TestCyberLegacyTranscriptScanPreservesIdentityAndBounds(t *testing.T) {
- items := make([]map[string]string, 1000)
- for i := range items { items[i] = map[string]string{"role":"user", "content":strconv.Itoa(i)} }
- body := func(id string, count int) []byte {
-  b, err := json.Marshal(map[string]any{"instructions":id, "input":items[:count]})
-  require.NoError(t, err)
-  return b
- }
- key := CyberSessionTranscriptBlocks(7, body("original", 300))[0].Key
- store := &fakeCyberBlockStore{blocked:map[string]bool{key:true}}
- require.Equal(t, key, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("original", 1000)))
- require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 8, body("original", 1000)), "API keys must stay isolated")
- require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("different", 1000)), "root instructions are part of identity")
- for _, keys := range store.findKeys { require.LessOrEqual(t, len(keys), 128) }
- ctx, cancel := context.WithCancel(context.Background()); cancel()
- require.Empty(t, findLegacyCyberTranscriptBlock(ctx, store, 7, body("original", 1000)))
+	items := make([]map[string]string, 1000)
+	for i := range items {
+		items[i] = map[string]string{"role": "user", "content": strconv.Itoa(i)}
+	}
+	body := func(id string, count int) []byte {
+		b, err := json.Marshal(map[string]any{"instructions": id, "input": items[:count]})
+		require.NoError(t, err)
+		return b
+	}
+	key := CyberSessionTranscriptBlocks(7, body("original", 300))[0].Key
+	store := &fakeCyberBlockStore{blocked: map[string]bool{key: true}}
+	require.Equal(t, key, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("original", 1000)))
+	require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 8, body("original", 1000)), "API keys must stay isolated")
+	require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("different", 1000)), "root instructions are part of identity")
+	for _, keys := range store.findKeys {
+		require.LessOrEqual(t, len(keys), 128)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Empty(t, findLegacyCyberTranscriptBlock(ctx, store, 7, body("original", 1000)))
 }

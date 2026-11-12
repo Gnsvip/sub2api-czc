@@ -1582,7 +1582,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		})
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, 0, s.unavailableError(ctx, req, accounts, false, filterStats.summary(""), schedGroup)
+		return nil, 0, 0, 0, s.unavailableError(ctx, req, accounts, false, filterStats.summary(""), trustedGroup)
 	}
 
 	loadMap := map[int64]*AccountLoadInfo{}

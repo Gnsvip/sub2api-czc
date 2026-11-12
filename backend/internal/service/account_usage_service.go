@@ -197,7 +197,6 @@ type AICredit struct {
 
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
-	AntigravityQuotaGroups []*AntigravityQuotaGroup `json:"antigravity_quota_groups,omitempty"`
 	Source                 string                   `json:"source,omitempty"`               // "passive" or "active"
 	UpdatedAt              *time.Time               `json:"updated_at,omitempty"`           // 更新时间
 	FiveHour               *UsageProgress           `json:"five_hour"`                      // 5小时窗口
@@ -1962,12 +1961,6 @@ func (s *AccountUsageService) GetAccountWindowStats(ctx context.Context, account
 	return s.usageLogRepo.GetAccountWindowStats(ctx, accountID, startTime)
 }
 
-type AntigravityQuotaGroup struct {
-	Key         string                    `json:"key"` // bucket prefix, e.g. "gemini" or "3p"
-	Name        string                    `json:"name"`
-	Description string                    `json:"description,omitempty"`
-	Windows     []*AntigravityQuotaWindow `json:"windows"`
-}
 
 // NewAccountUsageService preserves the constructor for callers that do not configure Google platforms.
 func NewAccountUsageService(
@@ -1984,8 +1977,3 @@ func NewAccountUsageService(
 	return NewAccountUsageServiceWithGoogleServices(accountRepo, usageLogRepo, usageFetcher, nil, nil, grokQuotaFetcher, grokQuotaService, openAIQuotaService, cache, identityCache, tlsFPProfileService)
 }
 
-type AntigravityQuotaWindow struct {
-	Window      string     `json:"window"`
-	Utilization float64    `json:"utilization"` // used percentage, 0-100
-	ResetsAt    *time.Time `json:"resets_at"`
-}

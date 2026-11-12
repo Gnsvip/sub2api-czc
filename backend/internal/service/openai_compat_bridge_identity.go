@@ -90,32 +90,34 @@ func (s *OpenAIGatewayService) openAICompatBridgeSession(c *gin.Context, account
 	if key == "" {
 		return openAICompatBridgeSession{}, false
 	}
- s.openaiCompatBridgeSessionMu.Lock()
- defer s.openaiCompatBridgeSessionMu.Unlock()
- now := time.Now()
- expiresAt := now.Add(s.openAIWSResponseStickyTTL())
- if raw, loaded := s.openaiCompatBridgeSessions.Load(key); loaded {
-  if existing, ok := raw.(openAICompatBridgeSession); ok && existing.SessionID != "" {
-   existing.ExpiresAt = expiresAt
-   s.openaiCompatBridgeSessions.Store(key, existing)
-   return existing, true
-  }
- }
- fresh := openAICompatBridgeSession{
-  SessionID: uuid.Must(uuid.NewV7()).String(),
-  ContextWindowID: uuid.Must(uuid.NewV7()).String(),
-  ExpiresAt: expiresAt,
- }
- s.openaiCompatBridgeSessions.Store(key, fresh)
- return fresh, true
+	s.openaiCompatBridgeSessionMu.Lock()
+	defer s.openaiCompatBridgeSessionMu.Unlock()
+	now := time.Now()
+	expiresAt := now.Add(s.openAIWSResponseStickyTTL())
+	if raw, loaded := s.openaiCompatBridgeSessions.Load(key); loaded {
+		if existing, ok := raw.(openAICompatBridgeSession); ok && existing.SessionID != "" {
+			existing.ExpiresAt = expiresAt
+			s.openaiCompatBridgeSessions.Store(key, existing)
+			return existing, true
+		}
+	}
+	fresh := openAICompatBridgeSession{
+		SessionID:       uuid.Must(uuid.NewV7()).String(),
+		ContextWindowID: uuid.Must(uuid.NewV7()).String(),
+		ExpiresAt:       expiresAt,
+	}
+	s.openaiCompatBridgeSessions.Store(key, fresh)
+	return fresh, true
 }
 
 func (s openAICompatBridgeSession) sessionExpiresAt() time.Time { return s.ExpiresAt }
-func (s openAICompatBridgeSession) sessionCost() int { return len(s.SessionID) + len(s.ContextWindowID) }
+func (s openAICompatBridgeSession) sessionCost() int {
+	return len(s.SessionID) + len(s.ContextWindowID)
+}
 func (s openAICompatBridgeSession) cloneSessionValue() sessionMemoryValue {
- s.SessionID = strings.Clone(s.SessionID)
- s.ContextWindowID = strings.Clone(s.ContextWindowID)
- return s
+	s.SessionID = strings.Clone(s.SessionID)
+	s.ContextWindowID = strings.Clone(s.ContextWindowID)
+	return s
 }
 
 // injectOpenAICompatBridgeIdentity 只在桥 + 双开 + 有桥会话键时生效：把合成的客户端原始身份写进

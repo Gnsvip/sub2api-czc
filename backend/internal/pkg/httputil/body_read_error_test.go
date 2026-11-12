@@ -124,23 +124,41 @@ func TestRequestBodyReadLogFieldsProgressAndPrivacy(t *testing.T) {
 }
 
 func TestDescribeRequestBodyReadFailureKeepsProgressAndTimeoutPriority(t *testing.T) {
- for _, tc := range []struct { name string; err error; canceled bool; status int; kind string }{
-  {"timeout with canceled context", os.ErrDeadlineExceeded, true, 408, BodyReadKindReadTimeout},
-  {"truncated upload", io.ErrUnexpectedEOF, false, 408, BodyReadKindTruncatedBody},
-  {"confirmed disconnect", io.ErrUnexpectedEOF, true, 499, BodyReadKindClientDisconnect},
-  {"HTTP2 length mismatch", errors.New("request declared a Content-Length of 100 but only wrote 7 bytes"), false, 408, BodyReadKindTruncatedBody},
-  {"invalid encoding", errors.New(`decode Content-Encoding "gzip": unexpected EOF`), true, 400, BodyReadKindDecodeContentEncoding},
- } {
-  t.Run(tc.name, func(t *testing.T) {
-   ctx, cancel := context.WithCancel(context.Background()); defer cancel()
-   if tc.canceled { cancel() }
-   req, err := http.NewRequestWithContext(ctx, "POST", "/", nil)
-   if err != nil { t.Fatal(err) }; req.ContentLength = 100
-   failure := DescribeRequestBodyReadFailure(req, &RequestBodyReadError{Err:tc.err, BytesRead:7, Elapsed:25*time.Second})
-   if failure.Status != tc.status || failure.Kind != tc.kind { t.Fatalf("failure=%+v",failure) }
-   fields := zapcore.NewMapObjectEncoder()
-   for _, field := range failure.LogFields() { field.AddTo(fields) }
-   if fields.Fields["bytes_read"] != int64(7) || fields.Fields["content_length_gap_bytes"] != int64(93) || fields.Fields["read_ms"] != int64(25000) { t.Fatalf("missing progress: %v",fields.Fields) }
-  })
- }
+	for _, tc := range []struct {
+		name     string
+		err      error
+		canceled bool
+		status   int
+		kind     string
+	}{
+		{"timeout with canceled context", os.ErrDeadlineExceeded, true, 408, BodyReadKindReadTimeout},
+		{"truncated upload", io.ErrUnexpectedEOF, false, 408, BodyReadKindTruncatedBody},
+		{"confirmed disconnect", io.ErrUnexpectedEOF, true, 499, BodyReadKindClientDisconnect},
+		{"HTTP2 length mismatch", errors.New("request declared a Content-Length of 100 but only wrote 7 bytes"), false, 408, BodyReadKindTruncatedBody},
+		{"invalid encoding", errors.New(`decode Content-Encoding "gzip": unexpected EOF`), true, 400, BodyReadKindDecodeContentEncoding},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.canceled {
+				cancel()
+			}
+			req, err := http.NewRequestWithContext(ctx, "POST", "/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.ContentLength = 100
+			failure := DescribeRequestBodyReadFailure(req, &RequestBodyReadError{Err: tc.err, BytesRead: 7, Elapsed: 25 * time.Second})
+			if failure.Status != tc.status || failure.Kind != tc.kind {
+				t.Fatalf("failure=%+v", failure)
+			}
+			fields := zapcore.NewMapObjectEncoder()
+			for _, field := range failure.LogFields() {
+				field.AddTo(fields)
+			}
+			if fields.Fields["bytes_read"] != int64(7) || fields.Fields["content_length_gap_bytes"] != int64(93) || fields.Fields["read_ms"] != int64(25000) {
+				t.Fatalf("missing progress: %v", fields.Fields)
+			}
+		})
+	}
 }

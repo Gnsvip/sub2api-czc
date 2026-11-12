@@ -1221,7 +1221,7 @@ type GatewayConfig struct {
 	// ImageNonstreamKeepaliveInterval: 图片非流式 JSON keepalive 间隔（秒），0表示禁用
 	ImageNonstreamKeepaliveInterval int `mapstructure:"image_nonstream_keepalive_interval"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
-	MaxLineSize      int   `mapstructure:"max_line_size"`
+	MaxLineSize int `mapstructure:"max_line_size"`
 
 	// 是否记录上游错误响应体摘要（避免输出请求内容）
 	LogUpstreamErrorBody bool `mapstructure:"log_upstream_error_body"`

@@ -131,7 +131,7 @@ func TestOpenAICacheWriteTTLPrices(t *testing.T) {
 
 	t.Run("catalog 12h rate", func(t *testing.T) {
 		cost := service.computeTokenBreakdown(base, tokens, 1, "", false)
-		require.InDelta(t, (9*0.125+2390*0.25)/1e6, cost.CacheCreationCost, 1e-12)
+		require.InDelta(t, 9*base.CacheCreationPricePerToken+2390*(*base.CacheCreation12hPricePerToken), cost.CacheCreationCost, 1e-12)
 	})
 	t.Run("legacy flat channel price", func(t *testing.T) {
 		p := *base
@@ -163,7 +163,7 @@ func TestOpenAICacheWriteTTLPrices(t *testing.T) {
 		p, err := service.GetModelPricing("gpt-6-astra")
 		require.NoError(t, err)
 		cost := service.computeTokenBreakdown(p, UsageTokens{CacheCreationTokens: 1_000_000, CacheCreation12hTokens: 1_000_000}, 1, "ultrafast", false)
-		require.InDelta(t, 150, cost.CacheCreationCost, 1e-12)
+		require.InDelta(t, p.CacheCreationPricePerToken*1_000_000*6, cost.CacheCreationCost, 1e-12)
 	})
 	t.Run("explicit free 12h", func(t *testing.T) {
 		p := *base
@@ -198,4 +198,24 @@ func TestOpenAICacheWriteTTLPrices(t *testing.T) {
 		require.NotNil(t, cost)
 		require.InDelta(t, 9e-6+2390*2e-6, *cost, 1e-12)
 	})
+}
+
+func TestOpenAICacheWriteTTLRetainsCustomizedBaseRates(t *testing.T) {
+ svc := NewBillingService(nil, nil)
+ for _, tc := range []struct {model string; input, write float64}{
+  {"gpt-6.1-terra",gpt61TerraOfficialInputPricePerToken*gpt6SolAPIBillingMultiplier,gpt61TerraOfficialCacheCreationPricePerToken*gpt6SolAPIBillingMultiplier},
+  {"gpt-6.1-sol",gpt61SolOfficialInputPricePerToken*gpt6SolAPIBillingMultiplier,gpt61SolOfficialCacheCreationPricePerToken*gpt6SolAPIBillingMultiplier},
+  {"gpt-6-sol",gpt6SolOfficialInputPricePerToken*gpt6SolAPIBillingMultiplier,gpt6SolOfficialCacheCreationPricePerToken*gpt6SolAPIBillingMultiplier},
+  {"gpt-6-luna",gpt56LunaOfficialInputPricePerToken*gpt56LunaAPIBillingMultiplier,gpt56LunaOfficialCacheCreationPricePerToken*gpt56LunaAPIBillingMultiplier},
+  {"gpt-6-astra",gpt6AstraOfficialInputPricePerToken*gpt6AstraAPIBillingMultiplier,gpt6AstraOfficialCacheCreationPricePerToken*gpt6AstraAPIBillingMultiplier},
+ } {
+  t.Run(tc.model,func(t *testing.T){
+   p, err := svc.GetModelPricing(tc.model); require.NoError(t,err)
+   require.InDelta(t,tc.input,p.InputPricePerToken,1e-12)
+   require.InDelta(t,tc.write,p.CacheCreationPricePerToken,1e-12)
+   cost := svc.computeTokenBreakdown(p,UsageTokens{InputTokens:100,CacheCreationTokens:100},1,"",false)
+   require.InDelta(t,100*tc.input,cost.InputCost,1e-12)
+   require.InDelta(t,100*tc.write,cost.CacheCreationCost,1e-12)
+  })
+ }
 }

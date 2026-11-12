@@ -34,7 +34,7 @@ jobs:
         run: go run -mod=mod github.com/google/wire/cmd/wire
       - name: Compile all unit tests
         working-directory: backend
-        run: go test -tags=unit ./... -run '^$' > "$RUNNER_TEMP/compile.log" 2>&1
+        run: go test -gcflags=all=-e -tags=unit ./... -run '^$' > "$RUNNER_TEMP/compile.log" 2>&1
       - name: Export generator and formatter changes
         if: always()
         run: git diff --binary > "$RUNNER_TEMP/generated.patch"
@@ -62,7 +62,9 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run lint:check
       - run: pnpm --dir frontend run build
+        if: success() || failure()
       - name: Frontend tests
+        if: success() || failure()
         working-directory: frontend
         run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/frontend-tests.json"
       - uses: actions/upload-artifact@v7

@@ -10,7 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
- "github.com/tidwall/gjson"
+	"github.com/tidwall/gjson"
 )
 
 // CyberSessionBlockStore 是 cyber 会话屏蔽表的存取接口。
@@ -160,25 +160,32 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 // the legacy scope expires; unlike the former overflow rule this only blocks
 // an actual stored prefix. The same path bounds a saturated length index.
 func findLegacyCyberTranscriptBlock(ctx context.Context, store CyberSessionBlockStore, apiKeyID int64, body []byte) string {
- const batchSize = 128
- keys := make([]string, 0, batchSize)
- matched := ""
- var readErr error
- flush := func() bool {
-  if len(keys) == 0 { return true }
-  matched, readErr = store.FindCyberSessionBlocked(ctx, keys)
-  keys = keys[:0]
-  return readErr == nil && matched == ""
- }
- walkOpenAICyberTranscript(apiKeyID, body, func(_ gjson.Result, _ int, prefixKey func() string) bool {
-  if ctx.Err() != nil { readErr = ctx.Err(); return false }
-  keys = append(keys, prefixKey())
-  return len(keys) < batchSize || flush()
- })
- if readErr == nil && matched == "" { flush() }
- if readErr != nil {
-  logger.LegacyPrintf("service.openai_gateway", "cyber legacy transcript read failed: err=%v", readErr)
-  return ""
- }
- return matched
+	const batchSize = 128
+	keys := make([]string, 0, batchSize)
+	matched := ""
+	var readErr error
+	flush := func() bool {
+		if len(keys) == 0 {
+			return true
+		}
+		matched, readErr = store.FindCyberSessionBlocked(ctx, keys)
+		keys = keys[:0]
+		return readErr == nil && matched == ""
+	}
+	walkOpenAICyberTranscript(apiKeyID, body, func(_ gjson.Result, _ int, prefixKey func() string) bool {
+		if ctx.Err() != nil {
+			readErr = ctx.Err()
+			return false
+		}
+		keys = append(keys, prefixKey())
+		return len(keys) < batchSize || flush()
+	})
+	if readErr == nil && matched == "" {
+		flush()
+	}
+	if readErr != nil {
+		logger.LegacyPrintf("service.openai_gateway", "cyber legacy transcript read failed: err=%v", readErr)
+		return ""
+	}
+	return matched
 }

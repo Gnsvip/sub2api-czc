@@ -272,8 +272,8 @@ func (c *gatewayCache) GetReasoningContent(ctx context.Context, itemID string) (
 const (
 	cyberSessionBlockPrefix             = "cyber_session_block:"
 	cyberSessionScopePrefix             = "cyber_session_scope:v2:"
- cyberSessionLegacyScopePrefix = "cyber_session_scope:"
- cyberSessionTranscriptMaxLengths = 1024
+	cyberSessionLegacyScopePrefix       = "cyber_session_scope:"
+	cyberSessionTranscriptMaxLengths    = 1024
 	cyberSessionTranscriptLengthsPrefix = "cyber_session_transcript_lengths:"
 	cyberSessionRedisCommandMaxKeys     = 128
 )
@@ -319,13 +319,15 @@ func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, block service
 		return nil
 	}
 	args := []any{ttl.Milliseconds(), cyberSessionTranscriptMaxLengths}
- for _, length := range block.TranscriptLengths {
-  if length > 0 { args = append(args, length) }
- }
- return cyberSessionActivateScript.Run(ctx, c.rdb, []string{
-  cyberSessionScopePrefix + block.ScopeKey,
-  cyberSessionTranscriptLengthsKey(block.APIKeyID),
- }, args...).Err()
+	for _, length := range block.TranscriptLengths {
+		if length > 0 {
+			args = append(args, length)
+		}
+	}
+	return cyberSessionActivateScript.Run(ctx, c.rdb, []string{
+		cyberSessionScopePrefix + block.ScopeKey,
+		cyberSessionTranscriptLengthsKey(block.APIKeyID),
+	}, args...).Err()
 }
 
 // Keep the index bounded even if a source repeatedly creates different-length
@@ -371,7 +373,7 @@ func (c *gatewayCache) CyberSessionTranscriptLengths(ctx context.Context, apiKey
 	members, err := cyberSessionTranscriptLengthsScript.Run(ctx, c.rdb, []string{
 		cyberSessionScopePrefix + scopeKey,
 		cyberSessionTranscriptLengthsKey(apiKeyID),
- cyberSessionLegacyScopePrefix + scopeKey,
+		cyberSessionLegacyScopePrefix + scopeKey,
 	}).StringSlice()
 	if err != nil {
 		return nil, err

@@ -221,3 +221,34 @@ func BenchmarkDigestSessionLookupMiss(b *testing.B) {
 		})
 	}
 }
+
+func TestCustomCompatBridgeSessionUsesBoundedCacheAtomically(t *testing.T) {
+ svc := &OpenAIGatewayService{openaiCompatBridgeSessions:sessionMemoryCache{maxEntries:2,maxBytes:4096}}
+ t.Cleanup(svc.CloseOpenAIWSPool)
+ account := &Account{ID:7, Platform:PlatformOpenAI, Type:AccountTypeOAuth}
+ sessions := make(chan openAICompatBridgeSession, 32)
+ var wg sync.WaitGroup
+ for i := 0; i < 32; i++ {
+  wg.Add(1)
+  go func() { defer wg.Done(); session, ok := svc.openAICompatBridgeSession(nil, account, "same"); if ok { sessions <- session } }()
+ }
+ wg.Wait(); close(sessions)
+ var first openAICompatBridgeSession
+ count := 0
+ for session := range sessions {
+  if count == 0 { first = session }
+  require.Equal(t, first.SessionID, session.SessionID)
+  require.Equal(t, first.ContextWindowID, session.ContextWindowID)
+  count++
+ }
+ require.Equal(t, 32, count)
+ next, ok := svc.openAICompatBridgeSession(nil, account, "same")
+ require.True(t, ok)
+ require.Equal(t, first.SessionID, next.SessionID)
+ require.False(t, next.ExpiresAt.Before(first.ExpiresAt))
+ for i:=0;i<10;i++ { _, _ = svc.openAICompatBridgeSession(nil, account, fmt.Sprintf("other-%d",i)) }
+ require.Equal(t, 2, svc.openaiCompatBridgeSessions.ItemCount())
+ newSession, ok := svc.openAICompatBridgeSession(nil, account, "same")
+ require.True(t, ok)
+ require.NotEqual(t, first.SessionID, newSession.SessionID)
+}

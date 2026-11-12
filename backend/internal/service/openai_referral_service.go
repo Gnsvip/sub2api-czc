@@ -57,7 +57,7 @@ func referralCapacity(e *OpenAIReferralEligibility) *int {
 	return &count
 }
 
-func (s *OpenAIQuotaService) referralAccount(ctx context.Context, id int64) (*Account, error) {
+func (s *OpenAIQuotaService) referralAccount(ctx context.Context, id int64, sending bool) (*Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, infraerrors.New(http.StatusServiceUnavailable, "OPENAI_REFERRAL_NOT_CONFIGURED", "referral service is unavailable")
 	}
@@ -156,7 +156,7 @@ func (s *OpenAIQuotaService) SendReferralInvite(ctx context.Context, id int64, i
 	if err != nil || address.Address != email || len(email) > 254 || strings.ContainsAny(email, "\r\n") {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REFERRAL_INVALID_EMAIL", "enter one valid email address")
 	}
-	account, err := s.referralAccount(ctx, id)
+	account, err := s.referralAccount(ctx, id, true)
 	if err != nil {
 		return nil, err
 	}

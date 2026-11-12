@@ -703,9 +703,9 @@ function selectCodexCatalogModel(preferredModel: string): string {
 }
 
 function codexReasoningEffortTomlLine(modelSlug: string): string {
-  return formatCodexReasoningEffortTomlLine(
-    selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
-  )
+  const model = findCodexCatalogModel(codexModelManifestContent.value, modelSlug)
+  // Preserve the site's export default until a catalog supplies model capabilities.
+  return formatCodexReasoningEffortTomlLine(model ? selectCodexConfigReasoningEffort(model) : 'max')
 }
 
 // Generate file configs based on platform and active tab

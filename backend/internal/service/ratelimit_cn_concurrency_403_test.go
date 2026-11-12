@@ -37,7 +37,7 @@ func TestHandleUpstreamError_KimiConcurrency403CooldownSettings(t *testing.T) {
 			repo := &rateLimitAccountRepoStub{}
 			counter := &openAI403CounterCacheStub{counts: []int64{openAI403DisableThreshold}}
 			blocker := &runtimeBlockRecorder{}
-			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil)
 			service.SetOpenAI403CounterCache(counter)
 			service.SetAccountRuntimeBlocker(blocker)
 			if testCase.settings != nil {
@@ -81,7 +81,7 @@ func TestHandleUpstreamError_KimiQuota403IgnoresDisabledConcurrencyCooldown(t *t
 		t.Run(resetIn.String(), func(t *testing.T) {
 			repo := &rateLimitAccountRepoStub{}
 			blocker := &runtimeBlockRecorder{}
-			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil)
 			service.SetAccountRuntimeBlocker(blocker)
 			settingRepo := newMockSettingRepo()
 			settingRepo.data[SettingKeyRateLimit429CooldownSettings] = `{"enabled":false,"cooldown_seconds":17}`
@@ -143,7 +143,7 @@ func TestHandleUpstreamError_KimiConcurrency403ExplicitRulesTakePriority(t *test
 			repo := &rateLimitAccountRepoStub{}
 			blocker := &runtimeBlockRecorder{}
 			counter := &openAI403CounterCacheStub{counts: []int64{openAI403DisableThreshold}}
-			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil)
 			service.SetAccountRuntimeBlocker(blocker)
 			service.SetOpenAI403CounterCache(counter)
 			account := newCNQuotaExhaustedTestAccount(0)

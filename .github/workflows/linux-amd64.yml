@@ -52,6 +52,11 @@ jobs:
           # suite in a fresh harness database so its exact counts stay isolated.
           go test -tags=integration ./internal/repository -run 'TestTiboAutoGroup|TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
+      - name: Usage-log TTL and customized routing database round trip
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: go test -tags=integration ./internal/repository -run '^TestUsageLogRepoSuite$' -count=1 -json > "$RUNNER_TEMP/usage-integration.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -62,6 +67,7 @@ jobs:
             ${{ runner.temp }}/backend-tests.jsonl
             ${{ runner.temp }}/integration-tests.jsonl
             ${{ runner.temp }}/subscription-tests.jsonl
+            ${{ runner.temp }}/usage-integration.jsonl
           retention-days: 7
 
   native-race:
@@ -75,7 +81,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Native continuation, diagnostics and HTTP/2 race regression
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service ./internal/service/openai_ws_v2 -run '^(TestAuthServiceRefreshTokenPairConsumesTokenOnce|TestRefreshTokenCacheConsumeIsAtomic|TestGatewayServiceNewSelectionResult|TestOpenAIWSIngressWebSearchActivation|TestOpenAIWSConnWebSearchInitialization|TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode|TestRelay|TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|TestOpenAIImagesJSONKeepalive|TestOpenAICapacityShedModelRule|TestMessages.*Effort|TestMessagesDisabledThinking|TestAnthropicCompatAccountErrorPolicy|TestPricingSyncRetries|TestPricingHotReload|TestOpenAICompatibleNonReasoning|TestEnforceOpenAICompatibleNonReasoning|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/pkg/httputil ./internal/repository ./internal/service ./internal/service/openai_ws_v2 ./internal/handler ./internal/server/middleware ./internal/managementmcp -run '^(TestCyber|TestFindCyber|TestGatewayCacheCyber|TestSessionMemory|TestCustomCompatBridge|TestDescribeRequestBody|TestRequestBody|TestMCP|TestAuthServiceRefreshTokenPairConsumesTokenOnce|TestRefreshTokenCacheConsumeIsAtomic|TestGatewayServiceNewSelectionResult|TestOpenAIWSIngressWebSearchActivation|TestOpenAIWSConnWebSearchInitialization|TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode|TestRelay|TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|TestOpenAIImagesJSONKeepalive|TestOpenAICapacityShedModelRule|TestMessages.*Effort|TestMessagesDisabledThinking|TestAnthropicCompatAccountErrorPolicy|TestPricingSyncRetries|TestPricingHotReload|TestOpenAICompatibleNonReasoning|TestEnforceOpenAICompatibleNonReasoning|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

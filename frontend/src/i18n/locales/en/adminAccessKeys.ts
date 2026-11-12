@@ -282,18 +282,6 @@ export default {
       "label": "Delete announcements",
       "category": "Content"
     },
-    "promo_dread": {
-      "label": "Read promotion codes and usage records",
-      "category": "Finance"
-    },
-    "promo_dwrite": {
-      "label": "Create and edit promotion code benefits",
-      "category": "Finance"
-    },
-    "promo_ddelete": {
-      "label": "Delete promotion codes",
-      "category": "Finance"
-    },
     "ops_dread": {
       "label": "Read site-wide operational metrics",
       "category": "Monitoring"

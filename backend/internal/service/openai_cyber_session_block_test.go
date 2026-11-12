@@ -107,6 +107,8 @@ func TestCyberTranscriptKeysAtRecomputesRecordedLengthsInOrder(t *testing.T) {
 // --- fakes ---
 
 type fakeCyberBlockStore struct {
+ findErr error
+ lengthsErr error
 	blocked  map[string]bool
 	scopes   map[string]bool
 	lengths  map[int64][]int
@@ -134,6 +136,7 @@ func (f *fakeCyberBlockStore) SetCyberSessionBlocked(_ context.Context, block Cy
 }
 
 func (f *fakeCyberBlockStore) CyberSessionTranscriptLengths(_ context.Context, apiKeyID int64, scopeKey string) ([]int, error) {
+ if f.lengthsErr != nil { return nil, f.lengthsErr }
 	if !f.scopes[scopeKey] {
 		return nil, nil
 	}
@@ -141,6 +144,7 @@ func (f *fakeCyberBlockStore) CyberSessionTranscriptLengths(_ context.Context, a
 }
 
 func (f *fakeCyberBlockStore) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
+ if f.findErr != nil { return "", f.findErr }
 	f.findKeys = append(f.findKeys, append([]string(nil), keys...))
 	for _, key := range keys {
 		if f.blocked[key] {
@@ -394,4 +398,20 @@ func TestCyberLegacyTranscriptScanPreservesIdentityAndBounds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.Empty(t, findLegacyCyberTranscriptBlock(ctx, store, 7, body("original", 1000)))
+}
+
+func TestCyberTranscriptStorageFailuresNeverBecomePolicyDenials(t *testing.T) {
+ combo := &comboCacheAndStore{}
+ svc := &OpenAIGatewayService{cache:combo,settingService:&SettingService{settingRepo:&fakeSettingRepo{vals:map[string]string{SettingKeyCyberSessionBlockEnabled:"true"}}}}
+ body := []byte(`{"input":[{"role":"user","content":"hello"}]}`)
+ scope := CyberSessionScopeKey(7,"203.0.113.1","client")
+ combo.store.scopes = map[string]bool{scope:true}
+ combo.store.lengths = map[int64][]int{7:{1}}
+ combo.store.lengthsErr = errors.New("storage unavailable")
+ require.Empty(t,svc.FindCyberSessionBlockedForRequest(context.Background(),7,nil,body,"203.0.113.1","client"))
+ combo.store.lengthsErr = nil
+ combo.store.findErr = errors.New("storage unavailable")
+ require.Empty(t,svc.FindCyberSessionBlockedForRequest(context.Background(),7,nil,body,"203.0.113.1","client"))
+ combo.store.lengths[7] = []int{CyberSessionLegacyTranscriptLength}
+ require.Empty(t,svc.FindCyberSessionBlockedForRequest(context.Background(),7,nil,body,"203.0.113.1","client"))
 }

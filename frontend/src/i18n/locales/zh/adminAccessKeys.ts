@@ -282,18 +282,6 @@ export default {
       "label": "删除公告",
       "category": "内容"
     },
-    "promo_dread": {
-      "label": "读取优惠码及使用记录",
-      "category": "财务"
-    },
-    "promo_dwrite": {
-      "label": "创建与修改优惠码权益",
-      "category": "财务"
-    },
-    "promo_ddelete": {
-      "label": "删除优惠码",
-      "category": "财务"
-    },
     "ops_dread": {
       "label": "读取全站运维指标",
       "category": "监控"

@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -28,7 +28,7 @@ jobs:
         working-directory: backend
         run: go generate ./ent
       - name: Format changed Go sources
-        run: git diff --name-only -z --diff-filter=ACMR HEAD^ -- '*.go' | xargs -0 -r gofmt -w
+        run: git diff --name-only -z --diff-filter=ACMR 672272e18592d72be4747a9ed1ab8185d4eb8d4f -- '*.go' | xargs -0 -r gofmt -w
       - name: Generate merged dependency wiring
         working-directory: backend/cmd/server
         run: go run -mod=mod github.com/google/wire/cmd/wire

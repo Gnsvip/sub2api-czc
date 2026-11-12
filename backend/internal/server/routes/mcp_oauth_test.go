@@ -454,7 +454,7 @@ func TestMCPOAuthHTTPPermissionAndCredentialBoundaries(t *testing.T) {
 	// Use the real production JWT middleware to prove MCP access credentials
 	// cannot become browser REST credentials, even for an administrator owner.
 	rest := gin.New()
-	auth := service.NewAuthService(nil, nil, nil, nil, f.cfg, f.settings, nil, nil, nil, nil, nil, nil, nil)
+	auth := service.NewAuthService(nil, nil, nil, nil, f.cfg, f.settings, nil, nil, nil, nil, nil, nil)
 	jwtAuth := middleware.NewJWTAuthMiddleware(auth, nil, f.settings, nil)
 	RegisterUserRoutes(rest.Group("/api/v1"), f.handlers, jwtAuth, middleware.AuditLogMiddleware(mcpRouteNext), f.settings, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/mcp/grants", nil)

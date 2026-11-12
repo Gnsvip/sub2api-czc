@@ -529,33 +529,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
-	// Use the same account/API-key namespace and body session evidence as HTTP
-	// forwarding. Resolve once so outbound headers and client_metadata agree.
-	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
-		return nil, fmt.Errorf("prepare http bridge codex identity: %w", err)
-	}
-	stageCodexFingerprintIDs(c, nil)
-	if account.UsesOpenAICodexProtocol() {
-		fpIDs := resolveCodexFingerprintIDsForRawBody(c, account, nil, body)
-		accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-		if scopeErr != nil {
-			return nil, fmt.Errorf("scope http bridge codex identity: %w", scopeErr)
-		}
-		if accountScoped {
-			body = accountScopedBody
-		}
-		if fpIDs != nil {
-			fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)
-			if fpErr != nil {
-				return nil, fmt.Errorf("apply http bridge codex fingerprint: %w", fpErr)
-			}
-			if fpChanged {
-				body = fpBody
-			}
-		}
-		stageCodexFingerprintIDs(c, fpIDs)
-		stageCodexConvergenceBodyIdentityRaw(c, codexAccountIdentitySource(c, account), body)
-	}
+	// The ingress normalizer already calls applyCodexIdentityToWSPayload for
+	// each frame, staging the same account/API-key IDs used in this body. Reuse
+	// them in the HTTP builder: resolving or scoping this prepared payload again
+	// would change conversation identity and break replacement-account replay.
 	grokIntentSourceBody := append([]byte(nil), body...)
 	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")
 	grokExplicitToolIntent := account.Platform == PlatformGrok && hasGrokResponsesToolIntent(grokIntentSourceBody)

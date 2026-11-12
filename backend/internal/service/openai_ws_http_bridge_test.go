@@ -2574,7 +2574,12 @@ func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
 		} else if session != "" {
 			c.Request.Header.Set("session-id", session)
 		}
-		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		// Match the ingress contract: scope each raw frame once before bridging.
+		_, err := svc.prepareCodexAccountIdentitySource(context.Background(), c, account)
+		require.NoError(t, err)
+		payload, err = applyCodexIdentityToWSPayload(c, account, payload)
+		require.NoError(t, err)
+		_, err = svc.proxyOpenAIWSHTTPBridgeTurn(
 			context.Background(), c, account, "test-token", payload, len(payload),
 			"gpt-5.5", "", "", "", "", 1,
 			func([]byte) error { return nil },

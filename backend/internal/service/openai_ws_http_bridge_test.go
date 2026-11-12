@@ -2579,6 +2579,9 @@ func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
 		require.NoError(t, err)
 		payload, err = applyCodexIdentityToWSPayload(c, account, payload)
 		require.NoError(t, err)
+		if account.GetCodexFingerprintMode() == codexFingerprintOff {
+			require.Nil(t, stagedCodexFingerprintIDs(c, account))
+		}
 		_, err = svc.proxyOpenAIWSHTTPBridgeTurn(
 			context.Background(), c, account, "test-token", payload, len(payload),
 			"gpt-5.5", "", "", "", "", 1,
@@ -2615,7 +2618,11 @@ func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
 
 	off := newTestOAuthAccount(7102, map[string]any{"codex_fingerprint_mode": "off"})
 	offRequest, offBody := run(off, "", 737, false)
-	require.Empty(t, offRequest.Header.Get("session-id"), "off mode must not invent a session")
+	// Native HTTP defaults still supply a per-request anonymous session in off
+	// mode. They must not converge separate requests into one account session.
+	require.NotEmpty(t, offRequest.Header.Get("session-id"))
 	require.Empty(t, offRequest.Header.Get("session_id"))
-	require.False(t, gjson.GetBytes(offBody, "client_metadata.session_id").Exists())
+	require.Equal(t, offRequest.Header.Get("session-id"), gjson.GetBytes(offBody, "client_metadata.session_id").String())
+	secondOffRequest, _ := run(off, "", 737, false)
+	require.NotEqual(t, offRequest.Header.Get("session-id"), secondOffRequest.Header.Get("session-id"))
 }

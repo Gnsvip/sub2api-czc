@@ -1028,7 +1028,8 @@ func TestOpenAIGatewayService_OAuthReasoningContentBatchRetry(t *testing.T) {
 					account.Extra["openai_passthrough"] = passthrough
 					c := newOpenAIRejectedFieldTestContext(body)
 					c.Request.Header.Set("User-Agent", "codex_exec/0.167.0")
-					c.Request.Header.Set("session_id", "synthetic-session")
+					c.Request.Header.Set("session-id", "019df690-cde8-7cd1-8f30-9b79a5cb2011")
+					c.Request.Header.Set("thread-id", "019df690-cde8-7cd1-8f30-9b79a5cb2011")
 					success := newOpenAIRejectedFieldTestResponse(http.StatusOK, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_batch_ok\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n")
 					success.Header.Set("Content-Type", "text/event-stream")
 					responses := []*http.Response{success}
@@ -1067,11 +1068,21 @@ func TestOpenAIGatewayService_OAuthReasoningContentBatchRetry(t *testing.T) {
 						require.Equal(t, http.MethodPost, request.Method)
 						require.Equal(t, "Bearer oauth-token", request.Header.Get("Authorization"))
 						require.Equal(t, "chatgpt-account", request.Header.Get("Chatgpt-Account-Id"))
-						require.Equal(t, upstream.requests[0].Header.Get("session_id"), request.Header.Get("session_id"))
+						require.NotEmpty(t, request.Header.Get("session-id"))
+						require.Equal(t, upstream.requests[0].Header.Get("session-id"), request.Header.Get("session-id"))
+						require.Equal(t, upstream.requests[0].Header.Get("thread-id"), request.Header.Get("thread-id"))
 						require.Empty(t, request.Header.Get("Upgrade"), "remain on HTTP")
 					}
 					if wantAttempts == 2 {
-						assertOpenAIReasoningContentBatchRetryPreserved(t, upstream.bodies[0], upstream.bodies[1])
+						// HTTP builders separately generate per-attempt client_metadata.
+						// Check the complete history here; the helper test above checks
+						// the entire body before any transport metadata is generated.
+						before := []byte(`{"input":` + gjson.GetBytes(upstream.bodies[0], "input").Raw + `}`)
+						after := []byte(`{"input":` + gjson.GetBytes(upstream.bodies[1], "input").Raw + `}`)
+						assertOpenAIReasoningContentBatchRetryPreserved(t, before, after)
+						for _, field := range []string{"model", "stream", "store", "reasoning", "tools", "tool_choice", "prompt_cache_key"} {
+							require.Equal(t, gjson.GetBytes(upstream.bodies[0], field).Raw, gjson.GetBytes(upstream.bodies[1], field).Raw, field)
+						}
 					}
 					require.Equal(t, original, body, "repair is local to this request attempt")
 				})

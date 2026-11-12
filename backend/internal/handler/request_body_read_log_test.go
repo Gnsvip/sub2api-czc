@@ -10,6 +10,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -43,7 +46,9 @@ func TestWriteRequestBodyReadFailureClassifiesTruncatedBodyAs408(t *testing.T) {
 	c.Request = req
 
 	log, logs := newObservedLogger(t)
-	writeRequestBodyReadFailure(c, log, io.ErrUnexpectedEOF, func(c *gin.Context, status int, errType, message string) {
+	req.ContentLength = 100
+	readErr := &pkghttputil.RequestBodyReadError{Err: io.ErrUnexpectedEOF, BytesRead: 7, Elapsed: 25 * time.Second}
+	writeRequestBodyReadFailure(c, log, readErr, func(c *gin.Context, status int, errType, message string) {
 		c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 	})
 
@@ -52,4 +57,7 @@ func TestWriteRequestBodyReadFailureClassifiesTruncatedBodyAs408(t *testing.T) {
 	entries := logs.All()
 	require.Len(t, entries, 1)
 	require.Equal(t, "truncated_body", entries[0].ContextMap()["error_kind"])
+	require.EqualValues(t, 7, entries[0].ContextMap()["bytes_read"])
+	require.EqualValues(t, 93, entries[0].ContextMap()["content_length_gap_bytes"])
+	require.EqualValues(t, 25000, entries[0].ContextMap()["read_ms"])
 }

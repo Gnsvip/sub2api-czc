@@ -25,18 +25,7 @@ func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error)
 		}
 	}
 
-	contentLength := int64(-1)
-	contentEncoding := "identity"
-	if req != nil {
-		contentLength = req.ContentLength
-		contentEncoding = pkghttputil.RequestContentEncodingCategory(req.Header.Get("Content-Encoding"))
-	}
-
-	reqLog.Warn("read request body failed",
-		zap.String("error_kind", pkghttputil.RequestBodyReadErrorKind(err)),
-		zap.String("content_encoding", contentEncoding),
-		zap.Int64("content_length", contentLength),
-	)
+	reqLog.Warn("read request body failed", pkghttputil.RequestBodyReadLogFields(req, err)...)
 }
 
 type gatewayErrorWriter func(*gin.Context, int, string, string)

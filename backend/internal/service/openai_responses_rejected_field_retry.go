@@ -466,17 +466,29 @@ func normalizeOpenAIResponsesRejectedNullContentAtIndex(body []byte, index int) 
 }
 
 func removeOpenAIResponsesRejectedReasoningContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+	root := parseRawJSONView(body)
+	if !root.Get("input").IsArray() || hasDuplicateJSONObjectKeys(root) {
+		return nil, "", false, nil
+	}
 	itemPath := fmt.Sprintf("input.%d", index)
 	item := gjson.GetBytes(body, itemPath)
 	content := item.Get("content")
-	if !item.IsObject() || strings.TrimSpace(item.Get("type").String()) != "reasoning" || !content.IsArray() || len(content.Array()) == 0 {
+	if !item.IsObject() || hasDuplicateJSONObjectKeys(item) || strings.TrimSpace(item.Get("type").String()) != "reasoning" || !content.IsArray() || len(content.Array()) == 0 {
 		return nil, "", false, nil
 	}
-	retryBody, err := sjson.DeleteBytes(body, itemPath+".content")
+	// The upstream reports one index even when many historical reasoning items
+	// carry the same unsupported array. Once that exact rejection is verified,
+	// normalize all nonempty reasoning.content arrays in this request in one
+	// retry. Keep normal OAuth requests untouched and reuse the existing bounded
+	// retry loop on the same account/transport; do not learn a global policy.
+	retryBody, changed, err := normalizeOpenAIResponsesReasoningContentReplay(body)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("delete rejected reasoning content at input[%d]: %w", index, err)
+		return nil, "", false, fmt.Errorf("normalize rejected reasoning content after input[%d] rejection: %w", index, err)
 	}
-	return retryBody, "indexed reasoning content maximum-length rejection", true, nil
+	if !changed {
+		return nil, "", false, nil
+	}
+	return retryBody, "batched reasoning content maximum-length rejection", true, nil
 }
 
 func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {

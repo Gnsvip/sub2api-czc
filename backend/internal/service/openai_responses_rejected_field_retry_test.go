@@ -924,8 +924,10 @@ func openAIReasoningContentBatchRetryTestBody(stream bool) []byte {
 			items[i] = fmt.Sprintf(`{"type":"reasoning","id":"rs_history_%d","status":"completed","content":[{"type":"reasoning_text","text":"history %d"}],"summary":[{"type":"summary_text","text":"summary %d"}],"encrypted_content":"opaque-%d","extension":{"integer":9007199254740993}}`, i, i, i, i)
 		}
 	}
-	items[2] = `{"type":"function_call","id":"fc_lookup","call_id":"call_lookup","name":"lookup","arguments":"{\"content\":[\"keep\"],\"n\":9007199254740993}"}`
-	items[3] = `{"type":"function_call_output","id":"fco_lookup","call_id":"call_lookup","output":"{\"content\":[\"result\"]}"}`
+	// Normal HTTP forwarding already canonicalizes tool call IDs to item IDs.
+	// Use canonical history here so the gateway test isolates rejection recovery.
+	items[2] = `{"type":"function_call","id":"fc_lookup","call_id":"fc_lookup","name":"lookup","arguments":"{\"content\":[\"keep\"],\"n\":9007199254740993}"}`
+	items[3] = `{"type":"function_call_output","id":"fco_lookup","call_id":"fc_lookup","output":"{\"content\":[\"result\"]}"}`
 	items[66] = `{"type":"reasoning","content":[],"summary":[]}`
 	items[67] = `{"type":"reasoning","content":null,"summary":[]}`
 	items[68] = `{"type":"reasoning","content":"keep non-array","summary":[]}`
@@ -958,6 +960,8 @@ func assertOpenAIReasoningContentBatchRetryPreserved(t *testing.T, before, after
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBatchesReasoningContent(t *testing.T) {
 	body := openAIReasoningContentBatchRetryTestBody(true)
+	// The repair itself must also preserve noncanonical tool identities.
+	body = bytes.ReplaceAll(body, []byte(`"call_id":"fc_lookup"`), []byte(`"call_id":"call_lookup"`))
 	original := append([]byte(nil), body...)
 	response := []byte(openAIReasoningContentBatchRetryTestError())
 	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, response)

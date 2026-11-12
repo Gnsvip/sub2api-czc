@@ -132,7 +132,7 @@ func RequestBodyReadErrorKind(err error) string {
 		errors.Is(err, io.ErrClosedPipe) {
 		return BodyReadKindClientDisconnect
 	}
-	if errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(lower, "request declared a content-length") {
 		return BodyReadKindTruncatedBody
 	}
 	if errors.As(err, &netErr) {

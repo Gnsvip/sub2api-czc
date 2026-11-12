@@ -16,7 +16,7 @@ type scopedAnnouncementReadResponse struct {
 }
 
 func adminAnnouncementReadResponse(c *gin.Context, items []service.AnnouncementUserReadStatus) any {
-	if adminaccess.FromContext(c.Request.Context()) == nil {
+	if adminaccess.RestrictedFromContext(c.Request.Context()) == nil {
 		return items
 	}
 	out := make([]scopedAnnouncementReadResponse, 0, len(items))

@@ -121,18 +121,3 @@ func validCodexPageSnapshot(text string) bool {
 	var value string
 	return json.Unmarshal(id, &value) == nil && strings.TrimSpace(value) != ""
 }
-
-func mayContainCodexCallOutputCandidate(body []byte, toolNames ...string) bool {
-	if bytes.Contains(body, []byte(`\u`)) {
-		return true
-	}
-	if !bytes.Contains(body, []byte("function_call_output")) {
-		return false
-	}
-	for _, name := range toolNames {
-		if bytes.Contains(body, []byte(name)) {
-			return true
-		}
-	}
-	return false
-}

@@ -173,8 +173,8 @@ func TestMessagesRawEffortValidation(t *testing.T) {
 		{body: `{"model":"gpt-6.1-sol_low","output_config":{"effort":"low"}}`},
 		{body: `{"model":"gpt-6.1-sol","output_config":{"effort":"high"}}`},
 	} {
-		require.Equal(t, test.deny, validateGPT61SolRawEffort([]byte(test.body), "gpt-6.1-sol") != nil, test.body)
-		require.NoError(t, validateGPT61SolRawEffort([]byte(test.body), "gpt-6-sol"))
+		require.Equal(t, test.deny, validateGPT61RawEffort([]byte(test.body), "gpt-6.1-sol") != nil, test.body)
+		require.NoError(t, validateGPT61RawEffort([]byte(test.body), "gpt-6-sol"))
 	}
 }
 

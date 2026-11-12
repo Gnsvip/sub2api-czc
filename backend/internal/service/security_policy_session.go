@@ -54,7 +54,12 @@ func SecurityPolicyTranscriptKeys(protocol string, apiKeyID int64, body []byte) 
 	switch protocol {
 	case ContentModerationProtocolOpenAIResponses,
 		ContentModerationProtocolOpenAIChat:
-		return CyberSessionTranscriptBlockKeys(apiKeyID, body)
+		blocks := CyberSessionTranscriptBlocks(apiKeyID, body)
+		keys := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			keys = append(keys, block.Key)
+		}
+		return keys
 	default:
 		return securityPolicyGenericTranscriptKeys(protocol, apiKeyID, body)
 	}

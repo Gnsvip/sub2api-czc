@@ -578,7 +578,7 @@ describe('UseKeyModal', () => {
     expect(configToml).toContain('approval_policy = "never"')
     expect(configToml).toContain('sandbox_mode = "danger-full-access"')
     expect(configToml).toContain('plan_mode_reasoning_effort = "max"')
-    expect(configToml).toContain('[features]\napi_key_model_discovery = true\nimage_generation = true\nresponses_websockets_v2 = true\ngoals = true')
+    expect(configToml).toContain('[features]\napi_key_model_discovery = true\nresponses_websockets_v2 = true\ngoals = true')
     expect(codeBlocks).toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).toContain('auth.json')
   })

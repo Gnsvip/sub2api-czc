@@ -39,7 +39,7 @@ func writeRequestBodyReadFailure(c *gin.Context, reqLog *zap.Logger, err error, 
 	if handleRequestBodyReadError(c, reqLog, err) {
 		return
 	}
-	if maxErr, ok := extractMaxBytesError(err); ok {
+	if maxErr, ok := pkghttputil.ExtractMaxBytesError(err); ok {
 		write(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 		return
 	}

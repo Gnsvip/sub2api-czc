@@ -209,7 +209,10 @@ func TestHandleChatStreamingResponse_GrokHeartbeatWithoutVisibleDelta(t *testing
 }
 
 func grokChatLargeRequestBody() []byte {
-	return []byte(`{"model":"grok-4.6","reasoning_effort":"xhigh","messages":[{"role":"user","content":"` + strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes) + `"}]}`)
+	// Keep the large-request gate covered without a 64 KiB single BPE word.
+	// EOF estimates usage; this test measures heartbeat delivery, not tokenizer
+	// worst-case performance under the race detector.
+	return []byte(`{"model":"grok-4.6","reasoning_effort":"xhigh","messages":[{"role":"user","content":"` + strings.Repeat("x ", openAISilentRefusalMinRequestBodyBytes/2) + `"}]}`)
 }
 
 func TestHandleChatStreamingResponse_GrokHeartbeatWithLargeRequestBody(t *testing.T) {
@@ -217,7 +220,7 @@ func TestHandleChatStreamingResponse_GrokHeartbeatWithLargeRequestBody(t *testin
 	body := newGrokChatHangBody()
 	defer body.Close()
 
-	rec := httptest.NewRecorder()
+	rec := &lockedTestResponseWriter{ResponseWriter: httptest.NewRecorder()}
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := &http.Response{
@@ -248,16 +251,16 @@ func TestHandleChatStreamingResponse_GrokHeartbeatWithLargeRequestBody(t *testin
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if strings.Contains(rec.Body.String(), `"reasoning_content":"…"`) {
+		if strings.Contains(rec.snapshotBody(), `"reasoning_content":"…"`) {
 			break
 		}
 		if time.Now().After(deadline) {
 			_ = body.Close()
-			t.Fatalf("expected Grok reasoning heartbeat on >=64KiB request, got %q", rec.Body.String())
+			t.Fatalf("expected Grok reasoning heartbeat on >=64KiB request, got %q", rec.snapshotBody())
 		}
 		select {
 		case <-done:
-			t.Fatalf("stream returned before heartbeat, body=%q", rec.Body.String())
+			t.Fatalf("stream returned before heartbeat, body=%q", rec.snapshotBody())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -267,8 +270,8 @@ func TestHandleChatStreamingResponse_GrokHeartbeatWithLargeRequestBody(t *testin
 	case <-time.After(15 * time.Second):
 		t.Fatal("stream did not return after closing hung body")
 	}
-	require.Contains(t, rec.Body.String(), `"reasoning_content":"…"`)
-	require.NotContains(t, rec.Body.String(), ":\n\n")
+	require.Contains(t, rec.snapshotBody(), `"reasoning_content":"…"`)
+	require.NotContains(t, rec.snapshotBody(), ":\n\n")
 }
 
 func TestHandleChatStreamingResponse_GrokIdleTimeoutFailoversBeforeOutput(t *testing.T) {
@@ -342,7 +345,7 @@ func TestHandleChatStreamingResponse_GrokUpstreamCutAfterHeartbeatWritesChatTerm
 	body := newGrokChatHangErrBody(io.ErrUnexpectedEOF)
 	defer body.Close()
 
-	rec := httptest.NewRecorder()
+	rec := &lockedTestResponseWriter{ResponseWriter: httptest.NewRecorder()}
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := &http.Response{
@@ -371,16 +374,16 @@ func TestHandleChatStreamingResponse_GrokUpstreamCutAfterHeartbeatWritesChatTerm
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if strings.Contains(rec.Body.String(), `"reasoning_content":"…"`) {
+		if strings.Contains(rec.snapshotBody(), `"reasoning_content":"…"`) {
 			break
 		}
 		if time.Now().After(deadline) {
 			_ = body.Close()
-			t.Fatalf("expected Grok reasoning heartbeat before upstream cut, got %q", rec.Body.String())
+			t.Fatalf("expected Grok reasoning heartbeat before upstream cut, got %q", rec.snapshotBody())
 		}
 		select {
 		case <-done:
-			t.Fatalf("stream returned before heartbeat, body=%q", rec.Body.String())
+			t.Fatalf("stream returned before heartbeat, body=%q", rec.snapshotBody())
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -395,10 +398,10 @@ func TestHandleChatStreamingResponse_GrokUpstreamCutAfterHeartbeatWritesChatTerm
 	var failover *UpstreamFailoverError
 	require.False(t, errors.As(err, &failover))
 	require.NotNil(t, result)
-	require.Contains(t, rec.Body.String(), `"reasoning_content":"…"`)
-	requireGrokChatAbortTerminal(t, rec.Body.String(), grokChatReasoningUpstreamCutMsg, "stop")
-	require.NotContains(t, rec.Body.String(), grokChatReasoningUpstreamCutCode)
-	require.NotContains(t, rec.Body.String(), OpenAIUpstreamStreamReadErrorCode)
+	require.Contains(t, rec.snapshotBody(), `"reasoning_content":"…"`)
+	requireGrokChatAbortTerminal(t, rec.snapshotBody(), grokChatReasoningUpstreamCutMsg, "stop")
+	require.NotContains(t, rec.snapshotBody(), grokChatReasoningUpstreamCutCode)
+	require.NotContains(t, rec.snapshotBody(), OpenAIUpstreamStreamReadErrorCode)
 }
 
 func TestHandleChatStreamingResponse_GrokWindowFuse(t *testing.T) {

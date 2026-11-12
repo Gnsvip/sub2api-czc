@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -137,7 +138,10 @@ func (t *OpenAISlowTiming) Finish(c *gin.Context) {
 		"wait_ms": wait.Milliseconds(), "outcome": outcome,
 		"attempt_count": t.count, "attempts": rows,
 		"threshold_ms": openAISlowTimingThreshold.Milliseconds(), "threshold_scope": "forward_start_to_first_semantic",
-		"measurement_boundary": "server_receive_to_local_flush",
+		"measurement_boundary":    "server_receive_to_local_flush",
+		"stream_timing_version":   1,
+		"sse_event_columns":       []string{"count", "first_ms", "last_ms"},
+		"stream_activity_columns": []string{"start_ms", "end_ms", "raw_bytes", "decoded_bytes", "sse_events", "written_bytes", "flushes"},
 	}
 	if t.routingAt > 0 {
 		event["routing_start_ms"] = t.routingAt.Milliseconds()
@@ -158,6 +162,20 @@ func (t *OpenAISlowTiming) Finish(c *gin.Context) {
 			if n, ok := value.(int64); ok {
 				event[key] = n
 			}
+		}
+	}
+	// Retries must not make an otherwise useful record exceed the existing
+	// line cap. Trim older detail first, preserving timestamps and the latest
+	// attempt for as long as possible. Never silently discard the whole trace.
+	for _, key := range []string{"stream_activity", "sse_events", "stream_io"} {
+		for _, row := range rows {
+			encoded, err := json.Marshal(event)
+			if err == nil && len(encoded) <= slowTimingRecordLimit-128 {
+				t.store.write(now, event)
+				return
+			}
+			delete(row, key)
+			row["stream_detail_truncated"] = true
 		}
 	}
 	t.store.write(now, event)
@@ -201,6 +219,7 @@ type openAIForwardTiming struct {
 	closed            atomic.Int64
 	eventMu           sync.Mutex
 	event             string
+	stream            openAIStreamTiming
 }
 
 func openAIForwardTimingFromContext(c *gin.Context) *openAIForwardTiming {
@@ -245,6 +264,7 @@ func (t *openAIForwardTiming) context(ctx context.Context) context.Context {
 	if t == nil {
 		return ctx
 	}
+	ctx = context.WithValue(ctx, openAIStreamTimingContextKey{}, t)
 	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		DNSStart:             func(httptrace.DNSStartInfo) { t.mark(&t.dnsStart) },
 		DNSDone:              func(httptrace.DNSDoneInfo) { t.mark(&t.dnsDone) },
@@ -284,7 +304,9 @@ type openAITimingBody struct {
 }
 
 func (r *openAITimingBody) Read(p []byte) (int, error) {
+	start := r.timing.streamElapsed()
 	n, err := r.ReadCloser.Read(p)
+	r.timing.recordStreamIO(streamTimingDecoded, start, n, err)
 	if n > 0 {
 		r.timing.mark(&r.timing.body)
 	}
@@ -300,6 +322,8 @@ func (t *openAIForwardTiming) MarkSSE(eventType, data string) {
 	if t == nil {
 		return
 	}
+	visible := openAIStreamDataStartsVisibleOutput(data, eventType)
+	t.recordStreamEvent(eventType, data, visible)
 	if t.sse.Load() == 0 {
 		t.eventMu.Lock()
 		if t.sse.Load() == 0 {
@@ -317,7 +341,7 @@ func (t *openAIForwardTiming) MarkSSE(eventType, data string) {
 	}
 	// Metadata, empty deltas and error frames are not usable model output.
 	// Include content-bearing terminal snapshots when an upstream omits deltas.
-	if openAIStreamDataStartsVisibleOutput(data, eventType) {
+	if visible {
 		t.MarkSemantic()
 	}
 }
@@ -361,6 +385,7 @@ func (t *openAIForwardTiming) snapshot() map[string]any {
 	if t.event != "" {
 		row["first_sse_event_type"] = t.event
 	}
+	t.streamSnapshotLocked(row)
 	t.eventMu.Unlock()
 	return row
 }

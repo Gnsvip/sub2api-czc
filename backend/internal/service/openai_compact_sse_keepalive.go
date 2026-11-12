@@ -78,7 +78,7 @@ func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
 	}
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
-		writer: originalWriter,
+		writer: openAIForwardTimingFromContext(c).wrapWriter(originalWriter),
 		stop:   make(chan struct{}),
 	}
 	// Header waits, stream pumps, and account retries share one downstream

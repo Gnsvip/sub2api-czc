@@ -1,7 +1,10 @@
 package service
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -187,7 +190,7 @@ func TestOpenAISlowTiming_BodyTransparency(t *testing.T) {
 }
 
 func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
-	for _, path := range []string{"responses", "passthrough", "chat"} {
+	for _, path := range []string{"responses", "oauth", "passthrough", "chat"} {
 		t.Run(path, func(t *testing.T) {
 			svc, c, root := newSlowTimingTest(t)
 			root.MarkRouting()
@@ -196,6 +199,9 @@ func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
 			root.MarkAccountWait()
 			root.MarkAccountSlot()
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			if path == "oauth" {
+				account.Type = AccountTypeOAuth
+			}
 			a := newOpenAIForwardTiming(c, c.Request, account)
 			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
 				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"visible-output\",\"output_index\":0,\"content_index\":0}\n\n" +
@@ -204,7 +210,7 @@ func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
 			a.markResponse(resp, nil)
 			var err error
 			switch path {
-			case "responses":
+			case "responses", "oauth":
 				_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
 			case "passthrough":
 				_, err = svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
@@ -220,6 +226,204 @@ func TestOpenAISlowTiming_StreamingPaths(t *testing.T) {
 				require.True(t, gjson.Get(data, "attempts.0."+key).Exists(), key)
 			}
 			require.NotContains(t, data, "visible-output")
+			require.Positive(t, gjson.Get(data, "attempts.0.stream_io.decoded_body_read.bytes").Int())
+			require.Positive(t, gjson.Get(data, "attempts.0.stream_io.downstream_write.bytes").Int())
+			require.Positive(t, gjson.Get(data, "attempts.0.stream_io.downstream_flush.calls").Int())
+			require.Equal(t, "text", gjson.Get(data, "attempts.0.first_content_kind").String())
+		})
+	}
+}
+
+func TestOpenAISlowTiming_CompressedBodyStages(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	a := newOpenAIForwardTiming(c, c.Request, &Account{ID: 1, Platform: PlatformOpenAI})
+	var wire bytes.Buffer
+	z := gzip.NewWriter(&wire)
+	payload := strings.Repeat("private content ", 100)
+	_, err := io.WriteString(z, payload)
+	require.NoError(t, err)
+	require.NoError(t, z.Close())
+	wireSize := wire.Len()
+	body := &slowTimingTestBody{Reader: bytes.NewReader(wire.Bytes())}
+	resp := &http.Response{StatusCode: 200, Proto: "HTTP/1.1", Header: http.Header{"Content-Encoding": {"gzip"}}, Body: body}
+	ObserveOpenAIUpstreamBody(a.context(context.Background()), resp)
+	raw := resp.Body
+	decoded, err := gzip.NewReader(raw)
+	require.NoError(t, err)
+	resp.Body = &slowTimingTestBody{Reader: decoded}
+	a.markResponse(resp, nil)
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, payload, string(got))
+	require.NoError(t, raw.Close())
+	require.True(t, body.closed)
+	row := a.snapshot()
+	require.Equal(t, "gzip", row["body_encoding"])
+	stats := row["stream_io"].(map[string]any)
+	require.Equal(t, int64(wireSize), stats["raw_body_read"].(map[string]any)["bytes"])
+	require.Equal(t, int64(len(payload)), stats["decoded_body_read"].(map[string]any)["bytes"])
+	root.Finish(c)
+	require.NotContains(t, readSlowTimingTest(t, root), "private content")
+
+	// Uninstrumented requests retain the exact original reader. A transport
+	// that already decompressed must never claim to expose compressed bytes.
+	plain := &http.Response{Body: body, Uncompressed: true}
+	ObserveOpenAIUpstreamBody(context.Background(), plain)
+	require.Same(t, body, plain.Body)
+	ObserveOpenAIUpstreamBody(a.context(context.Background()), plain)
+	require.Equal(t, "transport_decoded", a.snapshot()["body_encoding"])
+}
+
+type slowTimingReadError struct{ err error }
+
+func (r slowTimingReadError) Read(p []byte) (int, error) { return copy(p, "x"), r.err }
+func (r slowTimingReadError) Close() error               { return r.err }
+
+func TestOpenAISlowTiming_ReadErrorAndIntervals(t *testing.T) {
+	_, c, _ := newSlowTimingTest(t)
+	a := newOpenAIForwardTiming(c, c.Request, &Account{ID: 1, Platform: PlatformOpenAI})
+	sentinel := errors.New("private transport failure")
+	resp := &http.Response{StatusCode: 200, Header: make(http.Header), Body: slowTimingReadError{sentinel}}
+	ObserveOpenAIUpstreamBody(a.context(context.Background()), resp)
+	a.markResponse(resp, nil)
+	buf := make([]byte, 10)
+	n, err := resp.Body.Read(buf)
+	require.Equal(t, 1, n)
+	require.Equal(t, byte('x'), buf[0])
+	require.ErrorIs(t, err, sentinel)
+	require.ErrorIs(t, resp.Body.Close(), sentinel)
+	for _, kind := range []int{streamTimingRaw, streamTimingDecoded} {
+		require.Equal(t, int64(1), a.stream.io[kind].failures)
+	}
+	// Deterministic 110-second stall: completion gaps and blocked calls are
+	// different measurements; EOF is not counted as progress or an error.
+	var stats streamTimingIO
+	stats.record(time.Second, 2*time.Second, 8, nil, true)
+	stats.record(3*time.Second, 112*time.Second, 12, nil, true)
+	stats.record(113*time.Second, 114*time.Second, 0, io.EOF, false)
+	r := stats.snapshot()
+	require.Equal(t, int64(110000), r["max_gap_ms"])
+	require.Equal(t, int64(109000), r["max_call_ms"])
+	require.Equal(t, int64(3000), r["max_call_start_ms"])
+	require.Equal(t, int64(112000), r["last_ms"])
+	require.Equal(t, int64(0), r["errors"])
+}
+
+func TestOpenAISlowTiming_EventPrivacyAndBoundedActivity(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	a := newOpenAIForwardTiming(c, c.Request, &Account{ID: 1, Platform: PlatformOpenAI})
+	a.MarkSSEComment(": secret heartbeat")
+	a.MarkSSE("secret event", `{"secret":"body"}`)
+	a.MarkSSE("response.function_call_arguments.delta", `{"delta":"secret tool argument"}`)
+	for i := 0; i < 10000; i++ {
+		a.activityLocked(a.offset+time.Duration(i)*time.Second, 0, 1)
+	}
+	row := a.snapshot()
+	require.Equal(t, "tool", row["first_content_kind"])
+	require.Equal(t, "response.function_call_arguments.delta", row["first_content_event_type"])
+	activity := row["stream_activity"].([][7]int64)
+	require.Len(t, activity, streamTimingBuckets)
+	var total int64
+	for _, bucket := range activity {
+		total += bucket[2]
+	}
+	require.Equal(t, int64(10000), total)
+	require.Equal(t, (a.offset + 9999*time.Second).Milliseconds(), activity[len(activity)-1][1])
+	root.Finish(c)
+	data := readSlowTimingTest(t, root)
+	require.NotContains(t, data, "secret")
+	require.Contains(t, data, `"comment":[1,`)
+	require.Contains(t, data, `"other":[1,`)
+}
+
+func TestOpenAISlowTiming_RetryDetailFitsRecordCap(t *testing.T) {
+	_, c, root := newSlowTimingTest(t)
+	for n := 0; n < 12; n++ {
+		a := newOpenAIForwardTiming(c, c.Request, &Account{ID: int64(n + 1), Platform: PlatformOpenAI})
+		for i := range a.stream.io {
+			a.stream.io[i].record(time.Second, 2*time.Second, 100000, nil, true)
+			a.stream.io[i].record(3*time.Second, 112*time.Second, 100000, nil, true)
+		}
+		for i := range streamTimingEventNames {
+			a.stream.events[i] = [3]int64{100000, 100000, 999999}
+		}
+		for i := 0; i < streamTimingBuckets; i++ {
+			for column := 0; column < 5; column++ {
+				a.activityLocked(a.offset+time.Duration(i)*streamTimingBucketWidth, column, 100000)
+			}
+		}
+	}
+	root.Finish(c)
+	data := strings.TrimSpace(readSlowTimingTest(t, root))
+	require.NotEmpty(t, data, "large retry traces must not disappear")
+	require.LessOrEqual(t, len(data), slowTimingRecordLimit)
+	require.Equal(t, int64(12), gjson.Get(data, "attempts.7.account_id").Int())
+	require.Contains(t, data, "stream_detail_truncated")
+}
+
+type slowTimingFlushWriter struct {
+	gin.ResponseWriter
+	once    sync.Once
+	flushed chan struct{}
+}
+
+func (w *slowTimingFlushWriter) Flush() {
+	w.ResponseWriter.Flush()
+	w.once.Do(func() { close(w.flushed) })
+}
+
+func TestOpenAISlowTiming_IncrementalDeliveryBeforeEOF(t *testing.T) {
+	for _, path := range []string{"responses", "passthrough", "chat"} {
+		t.Run(path, func(t *testing.T) {
+			svc, c, root := newSlowTimingTest(t)
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			a := newOpenAIForwardTiming(c, c.Request, account)
+			writer := &slowTimingFlushWriter{ResponseWriter: c.Writer, flushed: make(chan struct{})}
+			c.Writer = writer
+			reader, upstream := io.Pipe()
+			defer reader.Close()
+			defer upstream.Close()
+			resp := &http.Response{StatusCode: 200, Header: make(http.Header), Body: reader}
+			ObserveOpenAIUpstreamBody(a.context(context.Background()), resp)
+			a.markResponse(resp, nil)
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				switch path {
+				case "responses":
+					_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
+				case "passthrough":
+					_, err = svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-test", "gpt-test")
+				case "chat":
+					_, err = svc.handleChatStreamingResponse(resp, c, account, "gpt-test", "gpt-test", "gpt-test", time.Now(), nil)
+				}
+				done <- err
+			}()
+			_, err := io.WriteString(upstream, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"live\",\"output_index\":0,\"content_index\":0}\n\n")
+			require.NoError(t, err)
+			select {
+			case <-writer.flushed:
+			case <-time.After(3 * time.Second):
+				t.Fatal("output buffered until EOF")
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("stream ended before terminal: %v", err)
+			default:
+			}
+			_, err = io.WriteString(upstream, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+			require.NoError(t, err)
+			require.NoError(t, upstream.Close())
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(3 * time.Second):
+				t.Fatal("stream did not finish")
+			}
+			root.Finish(c)
+			var event map[string]any
+			require.NoError(t, json.Unmarshal([]byte(readSlowTimingTest(t, root)), &event))
+			require.NotContains(t, readSlowTimingTest(t, root), `"live"`)
 		})
 	}
 }

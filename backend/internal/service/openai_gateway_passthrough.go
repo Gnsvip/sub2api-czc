@@ -2047,7 +2047,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	defer stopKeepalive()
 	// Capture the wrapped writer: synthesized terminal/error writes must stop
 	// the heartbeat too, not only the normal first-output branch below.
-	w := c.Writer
+	w := timing.wrapWriter(c.Writer)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return nil, errors.New("streaming not supported")
@@ -2127,6 +2127,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 
 	for documentScanner.Scan() {
 		line := documentScanner.Text()
+		timing.MarkSSEComment(line)
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			eventType = strings.TrimSpace(eventType)

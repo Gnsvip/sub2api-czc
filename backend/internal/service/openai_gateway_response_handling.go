@@ -111,7 +111,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		c.Header("X-Accel-Buffering", "no")
 	}
 
-	w := c.Writer
+	w := timing.wrapWriter(c.Writer)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return nil, errors.New("streaming not supported")
@@ -527,6 +527,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if streamEarlyErr != nil {
 			return
 		}
+		timing.MarkSSEComment(line)
 		grokProgress.ObserveLine(line)
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType

@@ -260,7 +260,7 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesExactReasoningCont
 
 	require.NoError(t, err)
 	require.True(t, changed)
-	require.Equal(t, "indexed reasoning content maximum-length rejection", reason)
+	require.Equal(t, "batched reasoning content maximum-length rejection", reason)
 	require.False(t, gjson.GetBytes(retryBody, "input.0.content").Exists())
 	require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.1.content.0.text").String())
 }
@@ -912,4 +912,181 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyClearsUntypedStatusAtInde
 	require.True(t, changed)
 	require.Equal(t, "keep_a", gjson.GetBytes(retryBody, "input.0.status").String())
 	require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
+}
+
+// This reproduces a late indexed error with more historical reasoning arrays
+// than the entire retry budget, interleaved with normal messages and tool I/O.
+func openAIReasoningContentBatchRetryTestBody(stream bool) []byte {
+	items := make([]string, 70)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":"message %d"}]}`, i)
+		if i%6 == 5 {
+			items[i] = fmt.Sprintf(`{"type":"reasoning","id":"rs_history_%d","status":"completed","content":[{"type":"reasoning_text","text":"history %d"}],"summary":[{"type":"summary_text","text":"summary %d"}],"encrypted_content":"opaque-%d","extension":{"integer":9007199254740993}}`, i, i, i, i)
+		}
+	}
+	// Normal HTTP forwarding already canonicalizes tool call IDs to item IDs.
+	// Use canonical history here so the gateway test isolates rejection recovery.
+	items[2] = `{"type":"function_call","id":"fc_lookup","call_id":"fc_lookup","name":"lookup","arguments":"{\"content\":[\"keep\"],\"n\":9007199254740993}"}`
+	items[3] = `{"type":"function_call_output","id":"fco_lookup","call_id":"fc_lookup","output":"{\"content\":[\"result\"]}"}`
+	items[66] = `{"type":"reasoning","content":[],"summary":[]}`
+	items[67] = `{"type":"reasoning","content":null,"summary":[]}`
+	items[68] = `{"type":"reasoning","content":"keep non-array","summary":[]}`
+	items[69] = `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"keep answer"}]}`
+	return []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":%t,"store":false,"instructions":"synthetic instructions","input":[%s]}`, stream, strings.Join(items, ",")))
+}
+
+func openAIReasoningContentBatchRetryTestError() string {
+	return `{"error":{"code":"array_above_max_length","message":"Invalid 'input[65].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","param":"input[65].content","type":"invalid_request_error"}}`
+}
+
+func assertOpenAIReasoningContentBatchRetryPreserved(t *testing.T, before, after []byte) {
+	t.Helper()
+	var expected, actual map[string]any
+	require.NoError(t, decodeOpenAIJSONUseNumber(before, &expected))
+	require.NoError(t, decodeOpenAIJSONUseNumber(after, &actual))
+	removed := 0
+	for _, value := range expected["input"].([]any) {
+		item := value.(map[string]any)
+		if item["type"] == "reasoning" {
+			if content, ok := item["content"].([]any); ok && len(content) > 0 {
+				delete(item, "content")
+				removed++
+			}
+		}
+	}
+	require.Greater(t, removed, maxOpenAIResponsesRejectedFieldRetries)
+	require.Equal(t, expected, actual, "only nonempty reasoning.content arrays may change; keep all other fields and item positions")
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBatchesReasoningContent(t *testing.T) {
+	body := openAIReasoningContentBatchRetryTestBody(true)
+	// The repair itself must also preserve noncanonical tool identities.
+	body = bytes.ReplaceAll(body, []byte(`"call_id":"fc_lookup"`), []byte(`"call_id":"call_lookup"`))
+	original := append([]byte(nil), body...)
+	response := []byte(openAIReasoningContentBatchRetryTestError())
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, response)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "batched reasoning content maximum-length rejection", reason)
+	assertOpenAIReasoningContentBatchRetryPreserved(t, body, retryBody)
+	require.Equal(t, original, body)
+
+	state := newOpenAIResponsesRejectedFieldRetryState(body)
+	require.True(t, state.Allow(retryBody))
+	require.Equal(t, 1, state.budget.attempts, "all historical items consume one retry")
+	next, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, retryBody, response)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, next, "a repeated stale rejection must not cause another retry")
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyReasoningBatchGuards(t *testing.T) {
+	body := openAIReasoningContentBatchRetryTestBody(true)
+	response := openAIReasoningContentBatchRetryTestError()
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     []byte
+		response string
+	}{
+		{"not HTTP 400", http.StatusUnprocessableEntity, body, response},
+		{"wrong code", http.StatusBadRequest, body, strings.ReplaceAll(response, "array_above_max_length", "invalid_request_error")},
+		{"nonzero limit", http.StatusBadRequest, body, strings.ReplaceAll(response, "maximum length 0", "maximum length 1")},
+		{"different indexed field", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[65].summary")},
+		{"message target", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[0].content")},
+		{"tool target", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[2].content")},
+		{"index out of bounds", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[99].content")},
+		{"empty target array", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[66].content")},
+		{"null target", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[67].content")},
+		{"string target", http.StatusBadRequest, body, strings.ReplaceAll(response, "input[65].content", "input[68].content")},
+		{"conflicting param", http.StatusBadRequest, body, strings.Replace(response, `"param":"input[65].content"`, `"param":"input[5].content"`, 1)},
+		{"missing param", http.StatusBadRequest, body, strings.Replace(response, `,"param":"input[65].content"`, "", 1)},
+		{"opaque 400", http.StatusBadRequest, body, `{"detail":"Bad Request"}`},
+		{"input object", http.StatusBadRequest, []byte(`{"input":{"65":{"type":"reasoning","content":[{}]}}}`), response},
+		{"duplicate input", http.StatusBadRequest, []byte(`{"input":[{"type":"reasoning","content":[{}]}],"input":[]}`), strings.ReplaceAll(response, "input[65].content", "input[0].content")},
+		{"ambiguous target type", http.StatusBadRequest, []byte(`{"input":[{"type":"reasoning","type":"message","content":[{}]},{"type":"reasoning","content":[{}]}]}`), strings.ReplaceAll(response, "input[65].content", "input[0].content")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := append([]byte(nil), tc.body...)
+			retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(tc.status, tc.body, []byte(tc.response))
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Nil(t, retryBody)
+			require.Equal(t, original, tc.body)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_OAuthReasoningContentBatchRetry(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, scenario := range []string{"accepted", "recovered", "unrelated rejection", "repeated rejection"} {
+				t.Run(fmt.Sprintf("passthrough=%t/stream=%t/%s", passthrough, stream, scenario), func(t *testing.T) {
+					body := openAIReasoningContentBatchRetryTestBody(stream)
+					original := append([]byte(nil), body...)
+					account := newOpenAIOAuthNamespaceTestAccount()
+					account.Extra["openai_passthrough"] = passthrough
+					c := newOpenAIRejectedFieldTestContext(body)
+					c.Request.Header.Set("User-Agent", "codex_exec/0.167.0")
+					c.Request.Header.Set("session-id", "019df690-cde8-7cd1-8f30-9b79a5cb2011")
+					c.Request.Header.Set("thread-id", "019df690-cde8-7cd1-8f30-9b79a5cb2011")
+					success := newOpenAIRejectedFieldTestResponse(http.StatusOK, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_batch_ok\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n")
+					success.Header.Set("Content-Type", "text/event-stream")
+					responses := []*http.Response{success}
+					switch scenario {
+					case "recovered":
+						responses = []*http.Response{newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, openAIReasoningContentBatchRetryTestError()), success}
+					case "unrelated rejection":
+						responses = []*http.Response{newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_request_error","message":"Bad Request"}}`)}
+					case "repeated rejection":
+						responses = []*http.Response{
+							newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, openAIReasoningContentBatchRetryTestError()),
+							newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, openAIReasoningContentBatchRetryTestError()),
+						}
+					}
+					upstream := &httpUpstreamRecorder{responses: responses}
+					result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, body)
+					if scenario == "unrelated rejection" || scenario == "repeated rejection" {
+						require.Error(t, err)
+						var failover *UpstreamFailoverError
+						require.NotErrorAs(t, err, &failover, "schema 400 must not switch accounts")
+						require.Equal(t, http.StatusBadRequest, c.Writer.Status())
+					} else {
+						require.NoError(t, err)
+						require.NotNil(t, result)
+						require.Equal(t, http.StatusOK, c.Writer.Status())
+					}
+					wantAttempts := 1
+					if scenario == "recovered" || scenario == "repeated rejection" {
+						wantAttempts = 2
+					}
+					require.Len(t, upstream.requests, wantAttempts)
+					require.Len(t, upstream.bodies, wantAttempts)
+					require.JSONEq(t, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(upstream.bodies[0], "input").Raw, "native OAuth history must reach the first HTTP attempt intact")
+					for _, request := range upstream.requests {
+						require.Equal(t, chatgptCodexURL, request.URL.String())
+						require.Equal(t, http.MethodPost, request.Method)
+						require.Equal(t, "Bearer oauth-token", request.Header.Get("Authorization"))
+						require.Equal(t, "chatgpt-account", request.Header.Get("Chatgpt-Account-Id"))
+						require.NotEmpty(t, request.Header.Get("session-id"))
+						require.Equal(t, upstream.requests[0].Header.Get("session-id"), request.Header.Get("session-id"))
+						require.Equal(t, upstream.requests[0].Header.Get("thread-id"), request.Header.Get("thread-id"))
+						require.Empty(t, request.Header.Get("Upgrade"), "remain on HTTP")
+					}
+					if wantAttempts == 2 {
+						// HTTP builders separately generate per-attempt client_metadata.
+						// Check the complete history here; the helper test above checks
+						// the entire body before any transport metadata is generated.
+						before := []byte(`{"input":` + gjson.GetBytes(upstream.bodies[0], "input").Raw + `}`)
+						after := []byte(`{"input":` + gjson.GetBytes(upstream.bodies[1], "input").Raw + `}`)
+						assertOpenAIReasoningContentBatchRetryPreserved(t, before, after)
+						for _, field := range []string{"model", "stream", "store", "reasoning", "tools", "tool_choice", "prompt_cache_key"} {
+							require.Equal(t, gjson.GetBytes(upstream.bodies[0], field).Raw, gjson.GetBytes(upstream.bodies[1], field).Raw, field)
+						}
+					}
+					require.Equal(t, original, body, "repair is local to this request attempt")
+				})
+			}
+		}
+	}
 }

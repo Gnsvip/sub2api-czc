@@ -10,9 +10,12 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func newGroupModelAllowlistTestRouter(apiKey *service.APIKey, pathPrefix string) (*gin.Engine, *[]string) {
@@ -180,7 +183,10 @@ func TestGroupModelAllowlistTruncatedBodyReturns408(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Content-Type", "application/json")
-	req.Body = errReadCloser{err: io.ErrUnexpectedEOF}
+	req.Body = io.NopCloser(io.MultiReader(strings.NewReader("secret-payload-marker"), errReadCloser{err: io.ErrUnexpectedEOF}))
+	req.ContentLength = 100
+	core, logs := observer.New(zap.WarnLevel)
+	req = req.WithContext(logger.IntoContext(req.Context(), zap.New(core)))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -192,6 +198,17 @@ func TestGroupModelAllowlistTruncatedBodyReturns408(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("expected handler not to run, got %v", *calls)
+	}
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected one bounded upload failure log, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["bytes_read"] != int64(21) || fields["content_length_gap_bytes"] != int64(79) || fields["read_ms"] == nil {
+		t.Fatalf("upload progress missing from middleware: %v", fields)
+	}
+	if strings.Contains(w.Body.String(), "secret-payload-marker") {
+		t.Fatal("partial request body leaked in error response")
 	}
 }
 

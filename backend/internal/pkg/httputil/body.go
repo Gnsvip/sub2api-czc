@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -109,6 +110,7 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 // This avoids doubling large buffers or eagerly allocating an untrusted
 // Content-Length before the corresponding bytes have arrived.
 func readRequestBodyChunks(reader io.Reader, initialCapacity int, contentLength int64) ([]byte, error) {
+	started := time.Now()
 	capacity := initialCapacity
 	var chunks [][]byte
 	total := 0
@@ -126,7 +128,7 @@ func readRequestBodyChunks(reader io.Reader, initialCapacity int, contentLength 
 			n += read
 		}
 		if err != nil && err != io.EOF {
-			return nil, err
+			return nil, &RequestBodyReadError{Err: err, BytesRead: int64(total + n), Elapsed: time.Since(started)}
 		}
 		if n > 0 {
 			chunks = append(chunks, chunk[:n])

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 type bodyReaderOnly struct{ io.Reader }
@@ -35,6 +36,39 @@ func TestReadRequestBodyChunksPreservesReadErrors(t *testing.T) {
 		if !errors.Is(err, readErr) || got != nil {
 			t.Fatalf("truncated body accepted: body=%q err=%v", got, err)
 		}
+		var progress *RequestBodyReadError
+		if !errors.As(err, &progress) || progress.BytesRead != 7 || progress.Elapsed < 0 {
+			t.Fatalf("missing upload progress: %#v", progress)
+		}
+	}
+}
+
+type partialBodyFailureReader struct{ remaining int }
+
+func (r *partialBodyFailureReader) Read(p []byte) (int, error) {
+	n := min(len(p), r.remaining)
+	clear(p[:n])
+	r.remaining -= n
+	if r.remaining == 0 {
+		return n, io.ErrUnexpectedEOF
+	}
+	return n, nil
+}
+
+func TestReadRequestBodyChunksCountsBytesReturnedWithError(t *testing.T) {
+	for _, size := range []int{0, 7, 513, (2 << 20) + 17} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			req := &http.Request{Body: io.NopCloser(&partialBodyFailureReader{remaining: size}), ContentLength: int64(size + 100)}
+			started := time.Now()
+			body, err := ReadRequestBodyWithPrealloc(req)
+			var progress *RequestBodyReadError
+			if body != nil || !errors.Is(err, io.ErrUnexpectedEOF) || !errors.As(err, &progress) {
+				t.Fatalf("partial upload accepted or error lost: %v", err)
+			}
+			if progress.BytesRead != int64(size) || progress.Elapsed < 0 || progress.Elapsed > time.Since(started) {
+				t.Fatalf("wrong progress across chunks/final read: %#v", progress)
+			}
+		})
 	}
 }
 
@@ -45,6 +79,10 @@ func TestReadRequestBodyChunksPreservesMaxBytesReader(t *testing.T) {
 	var limitErr *http.MaxBytesError
 	if !errors.As(err, &limitErr) || limitErr.Limit != 2<<20 || got != nil {
 		t.Fatalf("body limit changed: len=%d err=%v", len(got), err)
+	}
+	var progress *RequestBodyReadError
+	if !errors.As(err, &progress) || progress.BytesRead != 2<<20 {
+		t.Fatalf("max bytes progress changed: %#v", progress)
 	}
 }
 

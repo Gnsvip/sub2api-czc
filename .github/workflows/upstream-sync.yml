@@ -16,6 +16,17 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: admin_validation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,6 +52,12 @@ jobs:
       - name: Export generator and formatter changes
         if: always()
         run: git diff --binary > "$RUNNER_TEMP/generated.patch"
+      - name: Customized administrator permissions on isolated PostgreSQL schemas
+        if: success() || failure()
+        working-directory: backend
+        env:
+          SCOPED_ADMIN_TEST_DSN: host=127.0.0.1 port=5432 user=postgres password=ci-only-password dbname=admin_validation sslmode=disable
+        run: go test -tags=unit ./internal/handler/admin ./internal/repository ./internal/service -run '^(TestLegacyAdminKeyRotationPostgres|TestScoped|TestAdminFullAccessPostgres|TestProxySamplePostgres|TestAccountProxySelectionLargePool)' -count=1 -json > "$RUNNER_TEMP/admin-postgres.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -49,6 +66,7 @@ jobs:
             ${{ runner.temp }}/generated.patch
             ${{ runner.temp }}/compile.log
             ${{ runner.temp }}/compatibility-focused.jsonl
+            ${{ runner.temp }}/admin-postgres.jsonl
           retention-days: 7
   frontend:
     runs-on: ubuntu-latest

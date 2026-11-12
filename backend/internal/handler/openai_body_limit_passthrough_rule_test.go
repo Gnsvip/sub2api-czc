@@ -68,7 +68,7 @@ func newBodyLimitPassthroughRule(responseCode int, customMessage string) *model.
 }
 
 // A configured 413 rule must win over the built-in body-limit mapping: the
-// built-in branch returns 413 before the generic passthrough lookup runs, so a
+// built-in branch signals context overflow before generic rule lookup, so a
 // rule could otherwise never match on this path.
 func TestOpenAIBodyLimitFailoverExhausted_PassthroughRuleOverridesBuiltInMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -106,8 +106,8 @@ func TestOpenAIBodyLimitFailoverExhausted_PassthroughRuleAppliesToStartedStream(
 	require.NotContains(t, body, "must-not-leak")
 }
 
-// Without a rule the built-in 413 mapping stays in place.
-func TestOpenAIBodyLimitFailoverExhausted_NoRuleKeepsBuiltIn413(t *testing.T) {
+// Without a rule, preserve the custom context-overflow signal used for client compaction.
+func TestOpenAIBodyLimitFailoverExhausted_NoRuleKeepsCustomCompactionResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -117,12 +117,14 @@ func TestOpenAIBodyLimitFailoverExhausted_NoRuleKeepsBuiltIn413(t *testing.T) {
 
 	h.handleFailoverExhausted(c, bodyLimitFailoverTestError(), false)
 
-	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
-	require.Contains(t, rec.Body.String(), service.OpenAIRequestBodyTooLargeClientMessage)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code":"context_length_exceeded"`)
+	require.Contains(t, rec.Body.String(), service.OpenAIContextLengthExceededMessage)
+	require.NotContains(t, rec.Body.String(), "must-not-leak")
 }
 
 // A rule scoped to a different upstream status must not affect the 413 path.
-func TestOpenAIBodyLimitFailoverExhausted_NonMatchingRuleKeepsBuiltIn413(t *testing.T) {
+func TestOpenAIBodyLimitFailoverExhausted_NonMatchingRuleKeepsCustomCompactionResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -134,8 +136,10 @@ func TestOpenAIBodyLimitFailoverExhausted_NonMatchingRuleKeepsBuiltIn413(t *test
 
 	h.handleFailoverExhausted(c, bodyLimitFailoverTestError(), false)
 
-	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
-	require.Contains(t, rec.Body.String(), service.OpenAIRequestBodyTooLargeClientMessage)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code":"context_length_exceeded"`)
+	require.Contains(t, rec.Body.String(), service.OpenAIContextLengthExceededMessage)
+	require.NotContains(t, rec.Body.String(), "must-not-leak")
 }
 
 // skip_monitoring on a matching rule must still be honored on this path.

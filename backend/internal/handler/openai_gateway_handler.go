@@ -3796,7 +3796,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 //
 // Rules are operator opt-in overrides, so they take precedence over the
 // gateway's built-in mapping for the same upstream status, including the
-// body-too-large branch that otherwise returns a fixed 413.
+// body-too-large branch that otherwise signals context overflow for compaction.
 func (h *OpenAIGatewayHandler) applyOpenAIFailoverPassthroughRule(
 	c *gin.Context,
 	statusCode int,

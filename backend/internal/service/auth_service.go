@@ -86,7 +86,7 @@ type AuthService struct {
 	defaultSubAssigner      DefaultSubscriptionAssigner
 	signupAPIKeyProvisioner SignupAPIKeyProvisioner
 	userPlatformQuotaRepo   UserPlatformQuotaRepository
-	mcpGrantRevoker MCPGrantRevoker
+	mcpGrantRevoker         MCPGrantRevoker
 }
 
 type CaptchaProof struct {

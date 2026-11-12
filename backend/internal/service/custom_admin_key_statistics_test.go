@@ -32,11 +32,11 @@ func TestScopedAdminUsageServiceRechecksScopeBeforeSnapshot(t *testing.T) {
 	require.Equal(t, 404, infraerrors.Code(err))
 }
 func TestScopedAdminReferralServiceChecksAccountScope(t *testing.T) {
- a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, GroupIDs: []int64{2}}
- svc := &OpenAIQuotaService{accountRepo: &stubQuotaAccountRepo{accounts: map[int64]*Account{1: a}}}
- result, err := svc.referralAccount(scopedStatisticsServiceContext("openai.referrals.read"), 1, false)
- require.Nil(t, result)
- require.Equal(t, 404, infraerrors.Code(err))
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, GroupIDs: []int64{2}}
+	svc := &OpenAIQuotaService{accountRepo: &stubQuotaAccountRepo{accounts: map[int64]*Account{1: a}}}
+	result, err := svc.referralAccount(scopedStatisticsServiceContext("openai.referrals.read"), 1, false)
+	require.Nil(t, result)
+	require.Equal(t, 404, infraerrors.Code(err))
 }
 
 func TestScopedAdminQuotaCacheWriteRechecksScope(t *testing.T) {
@@ -186,20 +186,24 @@ func TestScopedAdminGrokSharedFlightPreservesPrincipal(t *testing.T) {
 }
 
 func TestScopedAdminQuotaHeadersRecheckAccountScope(t *testing.T) {
- a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, GroupIDs: []int64{2}}
- svc := &OpenAIQuotaService{accountRepo: &stubQuotaAccountRepo{accounts: map[int64]*Account{1: a}}}
- headers, _, err := svc.buildCodexQuotaHeaders(scopedStatisticsServiceContext("openai.quota.read"), 1, "old-token", "old-account-id", false)
- require.Nil(t, headers)
- require.Equal(t, 404, infraerrors.Code(err))
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, GroupIDs: []int64{2}}
+	svc := &OpenAIQuotaService{accountRepo: &stubQuotaAccountRepo{accounts: map[int64]*Account{1: a}}}
+	headers, _, err := svc.buildCodexQuotaHeaders(scopedStatisticsServiceContext("openai.quota.read"), 1, "old-token", "old-account-id", false)
+	require.Nil(t, headers)
+	require.Equal(t, 404, infraerrors.Code(err))
 }
 
 type scopedUsageSnapshotRepo struct {
- stubQuotaAccountRepo
- updates chan map[string]any
+	stubQuotaAccountRepo
+	updates chan map[string]any
 }
+
 func (r *scopedUsageSnapshotRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
- select { case r.updates <- updates: default: }
- return r.stubQuotaAccountRepo.UpdateExtra(ctx, id, updates)
+	select {
+	case r.updates <- updates:
+	default:
+	}
+	return r.stubQuotaAccountRepo.UpdateExtra(ctx, id, updates)
 }
 
 type scopedUsageRoundTripper func(*http.Request) (*http.Response, error)
@@ -208,10 +212,10 @@ func (f scopedUsageRoundTripper) RoundTrip(r *http.Request) (*http.Response, err
 
 func TestScopedAdminOpenAIUsageRefreshNeverGeneratesModelRequests(t *testing.T) {
 	for _, tc := range []struct {
-		name                     string
+		name             string
 		restricted, full bool
-		wantModel                int
-		wantUsage                float64
+		wantModel        int
+		wantUsage        float64
 	}{
 		{"受限普通账号", true, false, 0, 37},
 		{"JWT普通账号", false, false, 0, 37}, {"全权密钥普通账号", false, true, 0, 37},

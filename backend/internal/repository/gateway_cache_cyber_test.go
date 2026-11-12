@@ -115,8 +115,8 @@ func TestGatewayCacheCyberBlockCommandsAreBoundedAndLookupShortCircuits(t *testi
 	}
 	ctx := context.Background()
 	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "large-scope", Keys: keys}, time.Minute))
-	// Exact blocks in bounded batches, then the scope activation transaction.
-	require.Equal(t, []int{cyberSessionRedisCommandMaxKeys, cyberSessionRedisCommandMaxKeys, 44, 1}, hook.setBatchSizes)
+	// Exact blocks in bounded batches; the bounded index/scope activates via Lua.
+	require.Equal(t, []int{cyberSessionRedisCommandMaxKeys, cyberSessionRedisCommandMaxKeys, 44}, hook.setBatchSizes)
 
 	lookup := make([]string, len(keys))
 	for i := range lookup {
@@ -127,4 +127,34 @@ func TestGatewayCacheCyberBlockCommandsAreBoundedAndLookupShortCircuits(t *testi
 	require.NoError(t, err)
 	require.Equal(t, keys[cyberSessionRedisCommandMaxKeys+3], matched)
 	require.Equal(t, []int{cyberSessionRedisCommandMaxKeys, cyberSessionRedisCommandMaxKeys}, hook.mgetKeyCounts)
+}
+
+func TestGatewayCacheCyberLegacyAndBoundedIndex(t *testing.T) {
+ server := miniredis.RunT(t)
+ client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+ t.Cleanup(func() { _ = client.Close() })
+ store := NewGatewayCache(client).(service.CyberSessionBlockStore)
+ ctx := context.Background()
+ // Existing v1 scopes keep all their exact blocks searchable until expiry,
+ // even if the same client produces a new v2 block after an upgrade.
+ require.NoError(t, client.Set(ctx, cyberSessionLegacyScopePrefix+"scope", "1", time.Minute).Err())
+ require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "scope", Keys: []string{"new"}, TranscriptLengths: []int{3}}, 2*time.Minute))
+ lengths, err := store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+ require.NoError(t, err)
+ require.Equal(t, []int{service.CyberSessionLegacyTranscriptLength}, lengths)
+ server.FastForward(time.Minute)
+ lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+ require.NoError(t, err)
+ require.Equal(t, []int{3}, lengths)
+ many := make([]int, cyberSessionTranscriptMaxLengths+1)
+ for i := range many { many[i] = i+1 }
+ require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "scope", Keys: []string{"another"}, TranscriptLengths: many}, time.Minute))
+ lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+ require.NoError(t, err)
+ require.Equal(t, []int{service.CyberSessionLegacyTranscriptLength}, lengths)
+ require.EqualValues(t, 1, client.SCard(ctx, cyberSessionTranscriptLengthsKey(7)).Val())
+ server.FastForward(2*time.Minute)
+ lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+ require.NoError(t, err)
+ require.Empty(t, lengths)
 }

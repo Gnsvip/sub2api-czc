@@ -112,7 +112,7 @@ type Config struct {
 	ContentModerationArchive ContentModerationArchiveConfig `mapstructure:"content_moderation_archive"`
 	Plugins                  PluginConfig                   `mapstructure:"plugins"`
 	APIKeyCreate             APIKeyCreateConfig             `mapstructure:"api_key_create"`
-	MCP MCPConfig `mapstructure:"mcp"`
+	MCP                      MCPConfig                      `mapstructure:"mcp"`
 
 	// Enforce only API-key spending windows in simple mode.
 	SimpleModeKeyRateLimitEnabled bool `mapstructure:"simple_mode_key_rate_limit_enabled" yaml:"simple_mode_key_rate_limit_enabled"`
@@ -1222,9 +1222,6 @@ type GatewayConfig struct {
 	ImageNonstreamKeepaliveInterval int `mapstructure:"image_nonstream_keepalive_interval"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
 	MaxLineSize      int   `mapstructure:"max_line_size"`
-	SSEQueueMaxBytes int64 `mapstructure:"sse_queue_max_bytes"`
-	SSEEventMaxBytes int64 `mapstructure:"sse_event_max_bytes"`
-	SSEEventMaxLines int   `mapstructure:"sse_event_max_lines"`
 
 	// 是否记录上游错误响应体摘要（避免输出请求内容）
 	LogUpstreamErrorBody bool `mapstructure:"log_upstream_error_body"`

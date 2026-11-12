@@ -271,7 +271,9 @@ func (c *gatewayCache) GetReasoningContent(ctx context.Context, itemID string) (
 
 const (
 	cyberSessionBlockPrefix             = "cyber_session_block:"
-	cyberSessionScopePrefix             = "cyber_session_scope:"
+	cyberSessionScopePrefix             = "cyber_session_scope:v2:"
+ cyberSessionLegacyScopePrefix = "cyber_session_scope:"
+ cyberSessionTranscriptMaxLengths = 1024
 	cyberSessionTranscriptLengthsPrefix = "cyber_session_transcript_lengths:"
 	cyberSessionRedisCommandMaxKeys     = 128
 )
@@ -316,24 +318,46 @@ func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, block service
 	if block.ScopeKey == "" {
 		return nil
 	}
-	pipe := c.rdb.TxPipeline()
-	if len(block.TranscriptLengths) > 0 {
-		lengthsKey := cyberSessionTranscriptLengthsKey(block.APIKeyID)
-		members := make([]any, len(block.TranscriptLengths))
-		for i, length := range block.TranscriptLengths {
-			members[i] = length
-		}
-		pipe.SAdd(ctx, lengthsKey, members...)
-		pipe.Expire(ctx, lengthsKey, ttl)
-	}
-	pipe.Set(ctx, cyberSessionScopePrefix+block.ScopeKey, "1", ttl)
-	_, err := pipe.Exec(ctx)
-	return err
+	args := []any{ttl.Milliseconds(), cyberSessionTranscriptMaxLengths}
+ for _, length := range block.TranscriptLengths {
+  if length > 0 { args = append(args, length) }
+ }
+ return cyberSessionActivateScript.Run(ctx, c.rdb, []string{
+  cyberSessionScopePrefix + block.ScopeKey,
+  cyberSessionTranscriptLengthsKey(block.APIKeyID),
+ }, args...).Err()
 }
+
+// Keep the index bounded even if a source repeatedly creates different-length
+// blocks. Saturation switches to exact, batched prefix matching, never a deny.
+var cyberSessionActivateScript = redis.NewScript(`
+ local ttl = tonumber(ARGV[1])
+ local limit = tonumber(ARGV[2])
+ local previous = redis.call('PTTL', KEYS[2])
+ if redis.call('SISMEMBER', KEYS[2], '-1') == 0 then
+  for i = 3, #ARGV do
+   redis.call('SADD', KEYS[2], ARGV[i])
+   if redis.call('SCARD', KEYS[2]) > limit then
+    redis.call('DEL', KEYS[2])
+    redis.call('SADD', KEYS[2], '-1')
+    break
+   end
+  end
+ end
+ if redis.call('EXISTS', KEYS[2]) == 1 then
+  redis.call('PEXPIRE', KEYS[2], math.max(ttl, previous))
+ end
+ local scopeTTL = redis.call('PTTL', KEYS[1])
+ redis.call('SET', KEYS[1], '1', 'PX', math.max(ttl, scopeTTL))
+ return 1
+`)
 
 // cyberSessionTranscriptLengthsScript reads the API key's length index only
 // when the source scope is active, keeping inactive sources to one EXISTS.
 var cyberSessionTranscriptLengthsScript = redis.NewScript(`
+	if redis.call('EXISTS', KEYS[3]) == 1 then
+		return {'-1'}
+	end
 	if redis.call('EXISTS', KEYS[1]) == 0 then
 		return {}
 	end
@@ -347,6 +371,7 @@ func (c *gatewayCache) CyberSessionTranscriptLengths(ctx context.Context, apiKey
 	members, err := cyberSessionTranscriptLengthsScript.Run(ctx, c.rdb, []string{
 		cyberSessionScopePrefix + scopeKey,
 		cyberSessionTranscriptLengthsKey(apiKeyID),
+ cyberSessionLegacyScopePrefix + scopeKey,
 	}).StringSlice()
 	if err != nil {
 		return nil, err

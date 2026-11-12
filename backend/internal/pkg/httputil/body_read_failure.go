@@ -9,33 +9,33 @@ import (
 )
 
 const (
-	RequestBodyReadErrorMaxBytes = BodyReadKindMaxBytes
-	RequestBodyReadErrorTimeout = BodyReadKindReadTimeout
-	RequestBodyReadErrorClientDisconnect = BodyReadKindClientDisconnect
-	RequestBodyReadErrorTruncated = BodyReadKindTruncatedBody
-	RequestBodyReadErrorDecodeContentEncoding = BodyReadKindDecodeContentEncoding
+	RequestBodyReadErrorMaxBytes                   = BodyReadKindMaxBytes
+	RequestBodyReadErrorTimeout                    = BodyReadKindReadTimeout
+	RequestBodyReadErrorClientDisconnect           = BodyReadKindClientDisconnect
+	RequestBodyReadErrorTruncated                  = BodyReadKindTruncatedBody
+	RequestBodyReadErrorDecodeContentEncoding      = BodyReadKindDecodeContentEncoding
 	RequestBodyReadErrorUnsupportedContentEncoding = BodyReadKindUnsupportedContentEncoding
-	RequestBodyReadErrorTransport = BodyReadKindTransport
-	RequestBodyReadErrorIO = BodyReadKindIORead
-	StatusClientClosedRequest = 499
+	RequestBodyReadErrorTransport                  = BodyReadKindTransport
+	RequestBodyReadErrorIO                         = BodyReadKindIORead
+	StatusClientClosedRequest                      = 499
 )
 
 // RequestBodyReadFailure shares the upstream ingress contract while preserving
 // this fork's incomplete-upload response and bounded progress diagnostics.
 type RequestBodyReadFailure struct {
-	Kind string
-	Status int
-	Message string
+	Kind          string
+	Status        int
+	Message       string
 	MaxBytesLimit int64
-	fields []zap.Field
+	fields        []zap.Field
 }
 
 func DescribeRequestBodyReadFailure(req *http.Request, err error) RequestBodyReadFailure {
 	f := RequestBodyReadFailure{
-		Kind: RequestBodyReadErrorKind(err),
-		Status: RequestBodyReadHTTPStatus(err),
+		Kind:    RequestBodyReadErrorKind(err),
+		Status:  RequestBodyReadHTTPStatus(err),
 		Message: RequestBodyReadErrorMessage(err),
-		fields: RequestBodyReadLogFields(req, err),
+		fields:  RequestBodyReadLogFields(req, err),
 	}
 	if maxErr, ok := ExtractMaxBytesError(err); ok {
 		f.MaxBytesLimit = maxErr.Limit

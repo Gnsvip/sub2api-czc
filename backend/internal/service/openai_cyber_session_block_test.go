@@ -141,7 +141,7 @@ func (f *fakeCyberBlockStore) CyberSessionTranscriptLengths(_ context.Context, a
 }
 
 func (f *fakeCyberBlockStore) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
-	f.findKeys = append(f.findKeys, keys)
+	f.findKeys = append(f.findKeys, append([]string(nil), keys...))
 	for _, key := range keys {
 		if f.blocked[key] {
 			return key, nil
@@ -371,4 +371,22 @@ func TestCyberSessionScopeKeyNormalizesUserAgentVersion(t *testing.T) {
 	require.Equal(t, base, CyberSessionScopeKey(7, "203.0.113.10", "Codex CLI 1.2.4"))
 	require.NotEqual(t, base, CyberSessionScopeKey(8, "203.0.113.10", "Codex CLI 1.2.3"))
 	require.NotEqual(t, base, CyberSessionScopeKey(7, "203.0.113.11", "Codex CLI 1.2.3"))
+}
+
+func TestCyberLegacyTranscriptScanPreservesIdentityAndBounds(t *testing.T) {
+ items := make([]map[string]string, 1000)
+ for i := range items { items[i] = map[string]string{"role":"user", "content":strconv.Itoa(i)} }
+ body := func(id string, count int) []byte {
+  b, err := json.Marshal(map[string]any{"instructions":id, "input":items[:count]})
+  require.NoError(t, err)
+  return b
+ }
+ key := CyberSessionTranscriptBlocks(7, body("original", 300))[0].Key
+ store := &fakeCyberBlockStore{blocked:map[string]bool{key:true}}
+ require.Equal(t, key, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("original", 1000)))
+ require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 8, body("original", 1000)), "API keys must stay isolated")
+ require.Empty(t, findLegacyCyberTranscriptBlock(context.Background(), store, 7, body("different", 1000)), "root instructions are part of identity")
+ for _, keys := range store.findKeys { require.LessOrEqual(t, len(keys), 128) }
+ ctx, cancel := context.WithCancel(context.Background()); cancel()
+ require.Empty(t, findLegacyCyberTranscriptBlock(ctx, store, 7, body("original", 1000)))
 }

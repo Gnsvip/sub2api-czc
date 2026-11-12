@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+ "github.com/tidwall/gjson"
 )
 
 // CyberSessionBlockStore 是 cyber 会话屏蔽表的存取接口。
@@ -26,6 +27,10 @@ type CyberSessionBlockStore interface {
 // CyberSessionBlock is one cyber hit to persist. Keys are exact block keys;
 // TranscriptLengths records the history length of each transcript key among
 // them and, like ScopeKey, is only meaningful for transcript matching.
+// CyberSessionLegacyTranscriptLength requests a bounded scan for old records
+// without a length index or an overflowed index; it never implies a block.
+const CyberSessionLegacyTranscriptLength = -1
+
 type CyberSessionBlock struct {
 	APIKeyID          int64
 	ScopeKey          string
@@ -131,6 +136,11 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 		logger.LegacyPrintf("service.openai_gateway", "cyber session scope read failed: err=%v", err)
 		return ""
 	}
+	for _, length := range lengths {
+		if length == CyberSessionLegacyTranscriptLength {
+			return findLegacyCyberTranscriptBlock(ctx, store, apiKeyID, body)
+		}
+	}
 	// Blocked prefixes are recomputed only at their recorded lengths, so any
 	// number of appended items still reaches them and history length alone
 	// never decides a block.
@@ -144,4 +154,31 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 		return ""
 	}
 	return key
+}
+
+// Old exact hashes retain their identity. Scan in bounded Redis batches until
+// the legacy scope expires; unlike the former overflow rule this only blocks
+// an actual stored prefix. The same path bounds a saturated length index.
+func findLegacyCyberTranscriptBlock(ctx context.Context, store CyberSessionBlockStore, apiKeyID int64, body []byte) string {
+ const batchSize = 128
+ keys := make([]string, 0, batchSize)
+ matched := ""
+ var readErr error
+ flush := func() bool {
+  if len(keys) == 0 { return true }
+  matched, readErr = store.FindCyberSessionBlocked(ctx, keys)
+  keys = keys[:0]
+  return readErr == nil && matched == ""
+ }
+ walkOpenAICyberTranscript(apiKeyID, body, func(_ gjson.Result, _ int, prefixKey func() string) bool {
+  if ctx.Err() != nil { readErr = ctx.Err(); return false }
+  keys = append(keys, prefixKey())
+  return len(keys) < batchSize || flush()
+ })
+ if readErr == nil && matched == "" { flush() }
+ if readErr != nil {
+  logger.LegacyPrintf("service.openai_gateway", "cyber legacy transcript read failed: err=%v", readErr)
+  return ""
+ }
+ return matched
 }

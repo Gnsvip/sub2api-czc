@@ -34,7 +34,7 @@ jobs:
         run: go run -mod=mod github.com/google/wire/cmd/wire
       - name: Compile all unit tests
         working-directory: backend
-        run: go test -gcflags=all=-e -tags=unit ./... -run '^$' > "$RUNNER_TEMP/compile.log" 2>&1
+        run: go test -gcflags='github.com/Wei-Shaw/sub2api/...=-e' -tags=unit ./... -run '^$' > "$RUNNER_TEMP/compile.log" 2>&1
       - name: Export generator and formatter changes
         if: always()
         run: git diff --binary > "$RUNNER_TEMP/generated.patch"

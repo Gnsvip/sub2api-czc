@@ -43,17 +43,17 @@ func TestUpdateSettingsPartialPayloadKeepsUnsentKeys(t *testing.T) {
 // 导致任意一次后台保存都会关掉版本自动同步。
 func TestUpdateSettingsPartialPayloadKeepsClaudeCodeVersionSettings(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
-		service.SettingKeyClaudeCodeClientVersion:          "2.1.280",
-		service.SettingKeyClaudeCodeClientVersionSynced:    "2.1.281",
+		service.SettingKeyClaudeCodeClientVersion:          "2.1.330",
+		service.SettingKeyClaudeCodeClientVersionSynced:    "2.1.331",
 		service.SettingKeyClaudeCodeVersionAutoSyncEnabled: "true",
 	})
 
 	rec := doUpdateSettings(t, h, map[string]any{"risk_control_enabled": true}, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	require.Equal(t, "2.1.280", repo.values[service.SettingKeyClaudeCodeClientVersion])
+	require.Equal(t, "2.1.330", repo.values[service.SettingKeyClaudeCodeClientVersion])
 	require.Equal(t, "true", repo.values[service.SettingKeyClaudeCodeVersionAutoSyncEnabled])
-	require.Equal(t, "2.1.281", repo.values[service.SettingKeyClaudeCodeClientVersionSynced])
+	require.Equal(t, "2.1.331", repo.values[service.SettingKeyClaudeCodeClientVersionSynced])
 }
 
 func TestUpdateSettingsWritesClaudeCodeVersionSettingsWhenSent(t *testing.T) {
@@ -62,12 +62,12 @@ func TestUpdateSettingsWritesClaudeCodeVersionSettingsWhenSent(t *testing.T) {
 	})
 
 	rec := doUpdateSettings(t, h, map[string]any{
-		"claude_code_client_version":            "2.1.279",
+		"claude_code_client_version":            "2.1.329",
 		"claude_code_version_auto_sync_enabled": false,
 	}, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	require.Equal(t, "2.1.279", repo.values[service.SettingKeyClaudeCodeClientVersion])
+	require.Equal(t, "2.1.329", repo.values[service.SettingKeyClaudeCodeClientVersion])
 	require.Equal(t, "false", repo.values[service.SettingKeyClaudeCodeVersionAutoSyncEnabled])
 }
 

@@ -57,7 +57,7 @@ func referralCapacity(e *OpenAIReferralEligibility) *int {
 	return &count
 }
 
-func (s *OpenAIQuotaService) referralAccount(ctx context.Context, id int64) (*Account, error) {
+func (s *OpenAIQuotaService) referralAccount(ctx context.Context, id int64, sending bool) (*Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, infraerrors.New(http.StatusServiceUnavailable, "OPENAI_REFERRAL_NOT_CONFIGURED", "referral service is unavailable")
 	}
@@ -67,6 +67,13 @@ func (s *OpenAIQuotaService) referralAccount(ctx context.Context, id int64) (*Ac
 	}
 	if a == nil {
 		return nil, ErrAccountNotFound
+	}
+	action := scopedAccountOperation(ctx, "openai.referrals.read")
+	if sending {
+		action = "openai.referrals.invite"
+	}
+	if err := scopedAccountAccess(ctx, s.accountRepo, a, action, !sending); err != nil {
+		return nil, err
 	}
 	if a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REFERRAL_INVALID_ACCOUNT", "referrals require an OpenAI OAuth account")
@@ -102,7 +109,8 @@ func (s *OpenAIQuotaService) referralCall(ctx context.Context, id int64, program
 }
 
 func (s *OpenAIQuotaService) QueryReferralEligibility(ctx context.Context, id int64) (*OpenAIReferralEligibility, error) {
-	account, err := s.referralAccount(ctx, id)
+	ctx = WithScopedAdminAccountOperation(ctx, scopedAccountOperation(ctx, "openai.referrals.read"))
+	account, err := s.referralAccount(ctx, id, false)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +132,9 @@ func (s *OpenAIQuotaService) QueryReferralEligibility(ctx context.Context, id in
 }
 
 func (s *OpenAIQuotaService) CacheReferralSnapshot(ctx context.Context, id int64, eligibility *OpenAIReferralEligibility) error {
+	if err := scopedAccountIDAccess(ctx, s.accountRepo, id, scopedAccountOperation(ctx, "openai.referrals.read"), true); err != nil {
+		return err
+	}
 	return s.accountRepo.UpdateExtra(ctx, id, map[string]any{openAIReferralSnapshotKey: eligibility})
 }
 
@@ -139,12 +150,13 @@ type OpenAIReferralSendResult struct {
 }
 
 func (s *OpenAIQuotaService) SendReferralInvite(ctx context.Context, id int64, input OpenAIReferralSendRequest) (*OpenAIReferralSendResult, error) {
+	ctx = WithScopedAdminAccountOperation(ctx, "openai.referrals.invite")
 	email := strings.TrimSpace(input.Email)
 	address, err := mail.ParseAddress(email)
 	if err != nil || address.Address != email || len(email) > 254 || strings.ContainsAny(email, "\r\n") {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REFERRAL_INVALID_EMAIL", "enter one valid email address")
 	}
-	account, err := s.referralAccount(ctx, id)
+	account, err := s.referralAccount(ctx, id, true)
 	if err != nil {
 		return nil, err
 	}

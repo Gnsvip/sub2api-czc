@@ -36,14 +36,17 @@ jobs:
         working-directory: backend
         run: go test -tags=unit ./internal/service ./internal/handler/admin -run '^(TestAutoPelican|TestSettingHandler_AstraAutoGroup|TestSettingService_AstraAutoGroup|TestAdminService_.*InvalidRequestFallback|TestSetAntigravityModelRateLimits_Image|TestValidateCreateParams_CheckModeMatrix|TestApplyMonitorUpdate_ProviderOnlyRevalidatesCheckMode|TestMatchingPlatforms|TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets|TestCacheStoragePricePerTokenHourPriority|TestPlatformListDerived|TestCodexCatalogUsesAntigravityCapabilitiesInGeminiMixedGroup|TestCodexCatalogGeminiCapabilitiesExcludeNonMixedAntigravityAccounts|TestScheduler|TestTokenRefreshService_Registrations)' -count=1 -json > "$RUNNER_TEMP/google-focused.jsonl"
       - name: Upstream error handling and custom reasoning regression checks
+        if: success() || failure()
         working-directory: backend
         run: go test -tags=unit ./internal/handler ./internal/pkg/apicompat ./internal/service -run '^(TestMessages.*Effort|TestMessagesDisabledThinking|TestAnthropic.*Responses|TestOpenAIResponses_(RejectsInvalidUTF8|ValidUnicode)|TestOpenAICapacityShedModelRule|TestOpenAIImagesJSONKeepalive|TestAnthropicCompatAccountErrorPolicy|TestPricingSyncRetries|TestPricingHotReload|TestOpenAICompatibleNonReasoning|TestEnforceOpenAICompatibleNonReasoning|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/error-paths-focused.jsonl"
       - name: Unit tests
+        if: success() || failure()
         working-directory: backend
         run: |
           set -o pipefail
           go test -tags=unit ./... -count=1 -json > "$RUNNER_TEMP/backend-tests.jsonl"
       - name: Migration, billing and account integration tests
+        if: success() || failure()
         working-directory: backend
         env:
           CI: 'true'
@@ -52,6 +55,12 @@ jobs:
           # suite in a fresh harness database so its exact counts stay isolated.
           go test -tags=integration ./internal/repository -run 'TestTiboAutoGroup|TestMigrationsRunner_|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
+      - name: Usage-log TTL and customized routing database round trip
+        if: success() || failure()
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: go test -tags=integration ./internal/repository -run '^TestUsageLogRepoSuite$' -count=1 -json > "$RUNNER_TEMP/usage-integration.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -62,6 +71,7 @@ jobs:
             ${{ runner.temp }}/backend-tests.jsonl
             ${{ runner.temp }}/integration-tests.jsonl
             ${{ runner.temp }}/subscription-tests.jsonl
+            ${{ runner.temp }}/usage-integration.jsonl
           retention-days: 7
 
   native-race:
@@ -75,7 +85,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Native continuation, diagnostics and HTTP/2 race regression
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/repository ./internal/service ./internal/service/openai_ws_v2 -run '^(TestAuthServiceRefreshTokenPairConsumesTokenOnce|TestRefreshTokenCacheConsumeIsAtomic|TestGatewayServiceNewSelectionResult|TestOpenAIWSIngressWebSearchActivation|TestOpenAIWSConnWebSearchInitialization|TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode|TestRelay|TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|TestOpenAIImagesJSONKeepalive|TestOpenAICapacityShedModelRule|TestMessages.*Effort|TestMessagesDisabledThinking|TestAnthropicCompatAccountErrorPolicy|TestPricingSyncRetries|TestPricingHotReload|TestOpenAICompatibleNonReasoning|TestEnforceOpenAICompatibleNonReasoning|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
+        run: go test -race -tags=unit ./internal/pkg/codexwire ./internal/pkg/httputil ./internal/repository ./internal/service ./internal/service/openai_ws_v2 ./internal/handler ./internal/server/middleware ./internal/managementmcp -run '^(TestCyber|TestFindCyber|TestGatewayCacheCyber|TestSessionMemory|TestCustomCompatBridge|TestDescribeRequestBody|TestRequestBody|TestMCP|TestAuthServiceRefreshTokenPairConsumesTokenOnce|TestRefreshTokenCacheConsumeIsAtomic|TestGatewayServiceNewSelectionResult|TestOpenAIWSIngressWebSearchActivation|TestOpenAIWSConnWebSearchInitialization|TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode|TestRelay|TestMaybeCompressCodexUpstreamRequest|TestCodexHTTPCompressionRejectedUpstream|TestCodexProbe|TestOpenAIUpstream_401|TestSettingService_AstraAutoGroup|TestH2|TestCodexOwnedH2|TestNativeReasoningReplay|TestOpenAISlowTiming|TestOpenAIRequestErrorDiagnostic|TestOpenAIGatewayService_OAuthHTTPReasoningReplay|TestUserCacheDiagnostic|TestCodexSynthesis|TestTibo|TestAdminService_SetOpenAIAstraProbeEnabled|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|TestOpenAIImagesJSONKeepalive|TestOpenAICapacityShedModelRule|TestMessages.*Effort|TestMessagesDisabledThinking|TestAnthropicCompatAccountErrorPolicy|TestPricingSyncRetries|TestPricingHotReload|TestOpenAICompatibleNonReasoning|TestEnforceOpenAICompatibleNonReasoning|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/native-race.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -163,11 +173,18 @@ jobs:
           PG_CONTAINER: ${{ job.services.postgres.id }}
           REHEARSAL_DSN: postgres://postgres:ci-only-password@127.0.0.1:5432/migration_rehearsal?sslmode=disable
         run: bash .github/release-tools/rehearse-migration.sh
+      - name: Customized administrator permissions on isolated PostgreSQL schemas
+        working-directory: backend
+        env:
+          SCOPED_ADMIN_TEST_DSN: host=127.0.0.1 port=5432 user=postgres password=ci-only-password dbname=migration_rehearsal sslmode=disable
+        run: go test -tags=unit ./internal/handler/admin ./internal/repository ./internal/service -run '^(TestLegacyAdminKeyRotationPostgres|TestScoped|TestAdminFullAccessPostgres|TestProxySamplePostgres|TestAccountProxySelectionLargePool)' -count=1 -json > "$RUNNER_TEMP/admin-postgres.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: migration-validation
-          path: ${{ runner.temp }}/migration-result.txt
+          path: |
+            ${{ runner.temp }}/migration-result.txt
+            ${{ runner.temp }}/admin-postgres.jsonl
           retention-days: 7
 
   build:

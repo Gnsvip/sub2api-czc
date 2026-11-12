@@ -2,13 +2,18 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,6 +111,48 @@ func TestBoundedSSELineReaderRejectsOversizeWithoutTruncatedPrefix(t *testing.T)
 	require.ErrorIs(t, err, errSSETransportLimit)
 }
 
+func TestGatewayStreamingUndelimitedEventFailsWithoutSuccessfulTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newStreamingResponseTestGatewayService()
+	svc.cfg.Gateway.SSEEventMaxLines = 4
+	svc.cfg.Gateway.SSEQueueMaxBytes = 128
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	wire := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n" + strings.Repeat(": malformed event\n", 5) + "\ndata: {\"type\":\"message_stop\"}\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
+	defer func() { _ = resp.Body.Close() }()
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	require.ErrorIs(t, err, errSSETransportLimit)
+	require.NotNil(t, result)
+	require.Equal(t, 3, result.usage.InputTokens)
+	require.Contains(t, rec.Body.String(), "response_too_large")
+	require.NotContains(t, rec.Body.String(), "message_stop")
+}
+
+func TestAnthropicNativePumpLargeLineBudgetAndStop(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{SSEQueueMaxBytes: 64}}
+	scanner := bufio.NewScanner(strings.NewReader(strings.Repeat(strings.Repeat("x", 1024)+"\n", 32)))
+	pump := newAnthropicNativeLinePump(scanner, time.Second, cfg)
+	line, err := pump.next()
+	require.NoError(t, err)
+	require.Len(t, line, 1024)
+	pump.stop()
+	// The producer must stop even if another oversized payload already occupies
+	// the entire queue budget. Draining here observes channel closure only.
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case _, ok := <-pump.events:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("line pump remained blocked after stop")
+		}
+	}
+}
+
 func TestSSETransportDefaultsAndFirstOutputGuardCompose(t *testing.T) {
 	require.Equal(t, int64(defaultSSEQueueMaxBytes), newSSEQueueBudget(&config.Config{}).limit)
 	limits := newSSEEventLimits(&config.Config{}, 1234)
@@ -125,4 +172,142 @@ func TestSSEConfiguredLargeFrameLimitRemainsAvailable(t *testing.T) {
 	configured := newBoundedSSELineReader(strings.NewReader(""), cfg)
 	require.Equal(t, 64<<20, configured.maxLineSize)
 	require.Equal(t, int64(64<<20), configured.limits.maxBytes)
+}
+
+type sseTransportFailureReader struct{ err error }
+
+func (r sseTransportFailureReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestAnthropicCompatTransportFailureNeverFinalizesSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: 1 << 20, SSEEventMaxLines: 4, SSEQueueMaxBytes: 128}}
+	gateway := &GatewayService{cfg: cfg}
+	openai := &OpenAIGatewayService{cfg: cfg}
+	mapping := apicompat.ResponsesClientToolMapping{}
+	calls := []struct {
+		name   string
+		stream bool
+		call   func(*http.Response, *gin.Context) (int, error)
+	}{
+		{"gateway_cc_buffered", false, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := gateway.handleCCBufferedFromAnthropic(resp, c, "m", "m", nil, time.Now())
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+		{"gateway_responses_buffered", false, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := gateway.handleResponsesBufferedStreamingResponse(resp, c, "m", "m", nil, time.Now(), mapping)
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+		{"native_cc_buffered", false, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := openai.handleCCBufferedFromNativeAnthropic(resp, c, "m", "m", "m", nil, time.Now())
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+		{"native_responses_buffered", false, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := openai.handleResponsesBufferedFromNativeAnthropic(resp, c, "m", "m", "m", nil, time.Now(), mapping)
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+		{"native_cc_stream", true, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := openai.handleCCStreamingFromNativeAnthropic(resp, c, "m", "m", "m", nil, time.Now())
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+		{"native_responses_stream", true, func(resp *http.Response, c *gin.Context) (int, error) {
+			r, e := openai.handleResponsesStreamingFromNativeAnthropic(resp, c, "m", "m", "m", nil, time.Now(), mapping)
+			if r == nil {
+				return 0, e
+			}
+			return r.Usage.InputTokens, e
+		}},
+	}
+	prefix := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"model\":\"m\",\"usage\":{\"input_tokens\":3}}}\n\n"
+	for _, call := range calls {
+		for _, failure := range []string{"event_limit", "cancel", "truncated"} {
+			t.Run(call.name+"/"+failure, func(t *testing.T) {
+				var tail io.Reader
+				switch failure {
+				case "event_limit":
+					tail = strings.NewReader(strings.Repeat(": missing delimiter\n", 5))
+				case "cancel":
+					tail = sseTransportFailureReader{context.Canceled}
+				default:
+					tail = strings.NewReader("")
+				}
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(io.MultiReader(strings.NewReader(prefix), tail))}
+				defer func() { _ = resp.Body.Close() }()
+				usage, err := call.call(resp, c)
+				require.Error(t, err)
+				if failure == "event_limit" {
+					require.ErrorIs(t, err, errSSETransportLimit)
+				}
+				if failure == "cancel" {
+					require.ErrorIs(t, err, context.Canceled)
+				}
+				require.Equal(t, 3, usage)
+				if !call.stream {
+					require.Equal(t, http.StatusBadGateway, rec.Code)
+				}
+				require.NotContains(t, rec.Body.String(), "response.completed")
+				require.NotContains(t, rec.Body.String(), "data: [DONE]")
+			})
+		}
+	}
+}
+
+func TestImageStreamLimitDoesNotFinalizePendingTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, async := range []bool{false, true} {
+		for _, oauth := range []bool{false, true} {
+			name := "direct"
+			if oauth {
+				name = "responses"
+			}
+			if async {
+				name += "_async"
+			} else {
+				name += "_sync"
+			}
+			t.Run(name, func(t *testing.T) {
+				cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: 1024, SSEQueueMaxBytes: 128}}
+				if async {
+					cfg.Gateway.ImageStreamDataIntervalTimeout = 1
+				}
+				svc := &OpenAIGatewayService{cfg: cfg}
+				wire := "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"AA==\"}\n"
+				if oauth {
+					wire = "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"result\":\"AA==\"}]}}\n"
+				}
+				wire += ":" + strings.Repeat("x", 2048)
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
+				defer func() { _ = resp.Body.Close() }()
+				var err error
+				if oauth {
+					_, _, _, _, err = svc.handleOpenAIImagesOAuthStreamingResponse(resp, c, time.Now(), "b64_json", "image_generation", "gpt-image-2")
+				} else {
+					_, _, _, _, err = svc.handleOpenAIImagesStreamingResponse(resp, c, time.Now(), &OpenAIImagesRequest{Model: "gpt-image-2", ResponseFormat: "b64_json"})
+				}
+				require.ErrorIs(t, err, errSSETransportLimit)
+				require.NotContains(t, rec.Body.String(), "image_generation.completed")
+				require.NotContains(t, rec.Body.String(), "response.completed")
+			})
+		}
+	}
 }

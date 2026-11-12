@@ -49,7 +49,7 @@ func (h *cyberRedisCommandHook) ProcessPipelineHook(next redis.ProcessPipelineHo
 	}
 }
 
-func TestGatewayCacheCyberBlockWritesScopeAndExactKeysTogether(t *testing.T) {
+func TestGatewayCacheCyberBlockWritesScopeLengthsAndExactKeysTogether(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
@@ -57,15 +57,47 @@ func TestGatewayCacheCyberBlockWritesScopeAndExactKeysTogether(t *testing.T) {
 	require.True(t, ok)
 
 	ctx := context.Background()
-	require.NoError(t, store.SetCyberSessionBlocked(ctx, "scope-1", []string{"block-1", "block-2"}, time.Minute))
-	active, err := store.IsCyberSessionScopeActive(ctx, "scope-1")
+	lengths, err := store.CyberSessionTranscriptLengths(ctx, 7, "scope-1")
 	require.NoError(t, err)
-	require.True(t, active)
+	require.Empty(t, lengths)
+
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{
+		APIKeyID: 7, ScopeKey: "scope-1", Keys: []string{"block-1", "block-2"}, TranscriptLengths: []int{3, 2},
+	}, time.Minute))
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{
+		APIKeyID: 7, ScopeKey: "scope-2", Keys: []string{"block-3"}, TranscriptLengths: []int{3, 40},
+	}, time.Minute))
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope-1")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int{2, 3, 40}, lengths, "lengths are indexed per API key, like the block keys")
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "inactive-scope")
+	require.NoError(t, err)
+	require.Empty(t, lengths)
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 8, "scope-1")
+	require.NoError(t, err)
+	require.Empty(t, lengths)
+
 	matched, err := store.FindCyberSessionBlocked(ctx, []string{"missing", "block-1", "block-2"})
 	require.NoError(t, err)
 	require.Equal(t, "block-1", matched)
 	require.Greater(t, server.TTL(cyberSessionScopePrefix+"scope-1"), time.Duration(0))
+	require.Greater(t, server.TTL(cyberSessionTranscriptLengthsKey(7)), time.Duration(0))
 	require.Equal(t, server.TTL(cyberSessionBlockPrefix+"block-1"), server.TTL(cyberSessionBlockPrefix+"block-2"))
+}
+
+func TestGatewayCacheCyberBlockWithoutScopeSkipsTranscriptIndex(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store, ok := NewGatewayCache(client).(service.CyberSessionBlockStore)
+	require.True(t, ok)
+
+	ctx := context.Background()
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, Keys: []string{"explicit"}, TranscriptLengths: []int{3}}, time.Minute))
+	require.False(t, server.Exists(cyberSessionTranscriptLengthsKey(7)))
+	matched, err := store.FindCyberSessionBlocked(ctx, []string{"explicit"})
+	require.NoError(t, err)
+	require.Equal(t, "explicit", matched)
 }
 
 func TestGatewayCacheCyberBlockCommandsAreBoundedAndLookupShortCircuits(t *testing.T) {
@@ -82,7 +114,8 @@ func TestGatewayCacheCyberBlockCommandsAreBoundedAndLookupShortCircuits(t *testi
 		keys[i] = "block-" + strconv.Itoa(i)
 	}
 	ctx := context.Background()
-	require.NoError(t, store.SetCyberSessionBlocked(ctx, "large-scope", keys, time.Minute))
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "large-scope", Keys: keys}, time.Minute))
+	// Exact blocks in bounded batches; the bounded index/scope activates via Lua.
 	require.Equal(t, []int{cyberSessionRedisCommandMaxKeys, cyberSessionRedisCommandMaxKeys, 44}, hook.setBatchSizes)
 
 	lookup := make([]string, len(keys))
@@ -94,4 +127,36 @@ func TestGatewayCacheCyberBlockCommandsAreBoundedAndLookupShortCircuits(t *testi
 	require.NoError(t, err)
 	require.Equal(t, keys[cyberSessionRedisCommandMaxKeys+3], matched)
 	require.Equal(t, []int{cyberSessionRedisCommandMaxKeys, cyberSessionRedisCommandMaxKeys}, hook.mgetKeyCounts)
+}
+
+func TestGatewayCacheCyberLegacyAndBoundedIndex(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewGatewayCache(client).(service.CyberSessionBlockStore)
+	ctx := context.Background()
+	// Existing v1 scopes keep all their exact blocks searchable until expiry,
+	// even if the same client produces a new v2 block after an upgrade.
+	require.NoError(t, client.Set(ctx, cyberSessionLegacyScopePrefix+"scope", "1", time.Minute).Err())
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "scope", Keys: []string{"new"}, TranscriptLengths: []int{3}}, 2*time.Minute))
+	lengths, err := store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+	require.NoError(t, err)
+	require.Equal(t, []int{service.CyberSessionLegacyTranscriptLength}, lengths)
+	server.FastForward(time.Minute)
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+	require.NoError(t, err)
+	require.Equal(t, []int{3}, lengths)
+	many := make([]int, cyberSessionTranscriptMaxLengths+1)
+	for i := range many {
+		many[i] = i + 1
+	}
+	require.NoError(t, store.SetCyberSessionBlocked(ctx, service.CyberSessionBlock{APIKeyID: 7, ScopeKey: "scope", Keys: []string{"another"}, TranscriptLengths: many}, time.Minute))
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+	require.NoError(t, err)
+	require.Equal(t, []int{service.CyberSessionLegacyTranscriptLength}, lengths)
+	require.EqualValues(t, 1, client.SCard(ctx, cyberSessionTranscriptLengthsKey(7)).Val())
+	server.FastForward(2 * time.Minute)
+	lengths, err = store.CyberSessionTranscriptLengths(ctx, 7, "scope")
+	require.NoError(t, err)
+	require.Empty(t, lengths)
 }

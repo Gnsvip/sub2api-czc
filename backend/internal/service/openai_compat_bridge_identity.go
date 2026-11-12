@@ -79,9 +79,9 @@ func openAICompatBridgeSessionKey(c *gin.Context, account *Account, promptCacheK
 	return strings.Join([]string{namespace, strconv.FormatInt(apiKeyID, 10), key}, "\x00")
 }
 
-// openAICompatBridgeSession 取（或首铸）该桥会话的身份。sync.Map 上用 LoadOrStore + CompareAndSwap
-// 收口：并发首轮只会有一枚胜出，其余读到它；命中即续期，TTL 是空闲窗口而不是首铸后的定时轮换；
-// 过期或实例重启后重新铸造——上游看到的是一个新会话，不是错形态。
+// openAICompatBridgeSession atomically creates or renews a bounded session.
+// A hit keeps its identity and extends the idle window; expiration or eviction
+// starts a new upstream conversation, like an instance restart.
 func (s *OpenAIGatewayService) openAICompatBridgeSession(c *gin.Context, account *Account, promptCacheKey string) (openAICompatBridgeSession, bool) {
 	if s == nil {
 		return openAICompatBridgeSession{}, false
@@ -90,32 +90,34 @@ func (s *OpenAIGatewayService) openAICompatBridgeSession(c *gin.Context, account
 	if key == "" {
 		return openAICompatBridgeSession{}, false
 	}
+	s.openaiCompatBridgeSessionMu.Lock()
+	defer s.openaiCompatBridgeSessionMu.Unlock()
 	now := time.Now()
-	ttl := s.openAIWSResponseStickyTTL()
-	fresh := openAICompatBridgeSession{
-		SessionID:       uuid.Must(uuid.NewV7()).String(),
-		ContextWindowID: uuid.Must(uuid.NewV7()).String(),
-		ExpiresAt:       now.Add(ttl),
-	}
-	for {
-		raw, loaded := s.openaiCompatBridgeSessions.LoadOrStore(key, fresh)
-		if !loaded {
-			return fresh, true
-		}
-		existing, ok := raw.(openAICompatBridgeSession)
-		expired := !existing.ExpiresAt.IsZero() && now.After(existing.ExpiresAt)
-		if !ok || existing.SessionID == "" || expired {
-			if s.openaiCompatBridgeSessions.CompareAndSwap(key, raw, fresh) {
-				return fresh, true
-			}
-			continue
-		}
-		renewed := existing
-		renewed.ExpiresAt = now.Add(ttl)
-		if s.openaiCompatBridgeSessions.CompareAndSwap(key, raw, renewed) {
+	expiresAt := now.Add(s.openAIWSResponseStickyTTL())
+	if raw, loaded := s.openaiCompatBridgeSessions.Load(key); loaded {
+		if existing, ok := raw.(openAICompatBridgeSession); ok && existing.SessionID != "" {
+			existing.ExpiresAt = expiresAt
+			s.openaiCompatBridgeSessions.Store(key, existing)
 			return existing, true
 		}
 	}
+	fresh := openAICompatBridgeSession{
+		SessionID:       uuid.Must(uuid.NewV7()).String(),
+		ContextWindowID: uuid.Must(uuid.NewV7()).String(),
+		ExpiresAt:       expiresAt,
+	}
+	s.openaiCompatBridgeSessions.Store(key, fresh)
+	return fresh, true
+}
+
+func (s openAICompatBridgeSession) sessionExpiresAt() time.Time { return s.ExpiresAt }
+func (s openAICompatBridgeSession) sessionCost() int {
+	return len(s.SessionID) + len(s.ContextWindowID)
+}
+func (s openAICompatBridgeSession) cloneSessionValue() sessionMemoryValue {
+	s.SessionID = strings.Clone(s.SessionID)
+	s.ContextWindowID = strings.Clone(s.ContextWindowID)
+	return s
 }
 
 // injectOpenAICompatBridgeIdentity 只在桥 + 双开 + 有桥会话键时生效：把合成的客户端原始身份写进

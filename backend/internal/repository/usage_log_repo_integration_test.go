@@ -1698,3 +1698,22 @@ func (s *UsageLogRepoSuite) TestListWithFilters_CombinedFilters() {
 	s.Require().Len(logs, 2)
 	s.Require().Equal(int64(2), page.Total)
 }
+
+func (s *UsageLogRepoSuite) TestCacheWriteTTLAndCustomRoutingRoundTrip() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "ttl-roundtrip@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-ttl-roundtrip", Name: "ttl"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "ttl"})
+	log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: uuid.NewString(), Model: "gpt-6.1-sol", InputTokens: 3, CacheCreationTokens: 2399, CacheCreation30mTokens: 9, CacheCreation12hTokens: 2390, NativeCompactionV2: true, RouteDegraded: func() *bool { value := true; return &value }()}
+	inserted, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+	s.Require().True(inserted)
+	saved, err := s.repo.GetByID(s.ctx, log.ID)
+	s.Require().NoError(err)
+	s.Equal(3, saved.InputTokens)
+	s.Equal(2399, saved.CacheCreationTokens)
+	s.Equal(9, saved.CacheCreation30mTokens)
+	s.Equal(2390, saved.CacheCreation12hTokens)
+	s.True(saved.NativeCompactionV2)
+	s.Require().NotNil(saved.RouteDegraded)
+	s.True(*saved.RouteDegraded)
+}

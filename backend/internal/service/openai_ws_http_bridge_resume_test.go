@@ -172,6 +172,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		ginCtx.Request = r.Clone(r.Context())
+		ginCtx.Set("api_key", &APIKey{ID: 737})
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		_, firstMessage, readErr := conn.Read(readCtx)
 		cancel()
@@ -254,11 +255,11 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	}
 	require.Len(t, upstream.bodies, 3)
 	require.Contains(t, string(upstream.bodies[0]), "first")
-	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "client-session"), gjson.GetBytes(upstream.bodies[1], "client_metadata.session_id").String())
-	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[1], "client_metadata.thread_id").String())
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 737, "session", "client-session"), gjson.GetBytes(upstream.bodies[1], "client_metadata.session_id").String())
+	require.Equal(t, scopeCodexAccountIdentityValue(account, 737, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[1], "client_metadata.thread_id").String())
 	require.NotContains(t, string(upstream.bodies[2]), "previous_response_id")
 	require.Contains(t, string(upstream.bodies[2]), "second")
-	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 0, "session", "client-session"), gjson.GetBytes(upstream.bodies[2], "client_metadata.session_id").String())
-	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 0, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[2], "client_metadata.thread_id").String())
+	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 737, "session", "client-session"), gjson.GetBytes(upstream.bodies[2], "client_metadata.session_id").String())
+	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 737, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[2], "client_metadata.thread_id").String())
 	require.Empty(t, upstream.requests[2].Header.Get(openAIWSTurnStateHeader))
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestResolveOpenAIWSClientFirstMessageTimeout(t *testing.T) {
@@ -2545,4 +2546,83 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 		t.Fatal("timed out waiting for idle HTTP bridge session to close")
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(account *Account, session string, apiKeyID int64, bodySession bool) (*http.Request, []byte) {
+		sse := `data: {"type":"response.completed","response":{"id":"resp_fp","model":"gpt-5.5","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n\n"
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(sse)),
+		}}
+		svc := &OpenAIGatewayService{
+			cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+			httpUpstream: upstream,
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		c.Set("api_key", &APIKey{ID: apiKeyID})
+		// A previous attempt must not supply the selected account's namespace.
+		c.Set(codexAccountIdentitySourceContextKey, &Account{Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "stale-account"}})
+		payload := []byte(`{"type":"response.create","model":"gpt-5.5","store":false,"input":"hi"}`)
+		if bodySession {
+			var err error
+			payload, err = sjson.SetBytes(payload, "client_metadata.session_id", session)
+			require.NoError(t, err)
+		} else if session != "" {
+			c.Request.Header.Set("session-id", session)
+		}
+		// Match the ingress contract: scope each raw frame once before bridging.
+		_, err := svc.prepareCodexAccountIdentitySource(context.Background(), c, account)
+		require.NoError(t, err)
+		payload, err = applyCodexIdentityToWSPayload(c, account, payload)
+		require.NoError(t, err)
+		if account.GetCodexFingerprintMode() == codexFingerprintOff {
+			require.Nil(t, stagedCodexFingerprintIDs(c, account))
+		}
+		_, err = svc.proxyOpenAIWSHTTPBridgeTurn(
+			context.Background(), c, account, "test-token", payload, len(payload),
+			"gpt-5.5", "", "", "", "", 1,
+			func([]byte) error { return nil },
+		)
+		require.NoError(t, err)
+		require.NotNil(t, upstream.lastReq)
+		return upstream.lastReq, upstream.lastBody
+	}
+
+	full := newTestOAuthAccount(7101, map[string]any{"codex_fingerprint_mode": "full"})
+	for _, bodySession := range []bool{false, true} {
+		first, body := run(full, "client-session-a", 737, bodySession)
+		sessionID := first.Header.Get("session-id")
+		require.NotEmpty(t, sessionID)
+		require.NotEqual(t, "client-session-a", sessionID)
+		require.Empty(t, first.Header.Get("session_id"), "the final wire profile uses the hyphenated header")
+		require.Equal(t, sessionID, gjson.GetBytes(body, "client_metadata.session_id").String())
+		// This fork carries the device ID in client_metadata, never as an HTTP header.
+		require.Empty(t, first.Header.Get("x-codex-installation-id"))
+		installationID := gjson.GetBytes(body, "client_metadata.x-codex-installation-id").String()
+		require.NotEmpty(t, installationID)
+		repeated, _ := run(full, "client-session-a", 737, bodySession)
+		require.Equal(t, sessionID, repeated.Header.Get("session-id"), "a conversation stays stable across bridge turns")
+		otherSession, _ := run(full, "client-session-b", 737, bodySession)
+		require.NotEqual(t, sessionID, otherSession.Header.Get("session-id"))
+		otherKey, otherKeyBody := run(full, "client-session-a", 738, bodySession)
+		require.NotEqual(t, sessionID, otherKey.Header.Get("session-id"), "API keys must remain isolated")
+		require.Equal(t, installationID, gjson.GetBytes(otherKeyBody, "client_metadata.x-codex-installation-id").String(), "device identity remains account-scoped")
+		otherAccount := newTestOAuthAccount(7103, map[string]any{"codex_fingerprint_mode": "full", "codex_fingerprint_seed": "22222222-2222-4222-8222-222222222222"})
+		otherRequest, _ := run(otherAccount, "client-session-a", 737, bodySession)
+		require.NotEqual(t, sessionID, otherRequest.Header.Get("session-id"), "a stale attempt cannot share the old account namespace")
+	}
+
+	off := newTestOAuthAccount(7102, map[string]any{"codex_fingerprint_mode": "off"})
+	offRequest, offBody := run(off, "", 737, false)
+	// Native HTTP defaults still supply a per-request anonymous session in off
+	// mode. They must not converge separate requests into one account session.
+	require.NotEmpty(t, offRequest.Header.Get("session-id"))
+	require.Empty(t, offRequest.Header.Get("session_id"))
+	require.Equal(t, offRequest.Header.Get("session-id"), gjson.GetBytes(offBody, "client_metadata.session_id").String())
+	secondOffRequest, _ := run(off, "", 737, false)
+	require.NotEqual(t, offRequest.Header.Get("session-id"), secondOffRequest.Header.Get("session-id"))
 }

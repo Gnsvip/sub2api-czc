@@ -270,15 +270,23 @@ func (c *gatewayCache) GetReasoningContent(ctx context.Context, itemID string) (
 }
 
 const (
-	cyberSessionBlockPrefix         = "cyber_session_block:"
-	cyberSessionScopePrefix         = "cyber_session_scope:"
-	cyberSessionRedisCommandMaxKeys = 128
+	cyberSessionBlockPrefix             = "cyber_session_block:"
+	cyberSessionScopePrefix             = "cyber_session_scope:v2:"
+	cyberSessionLegacyScopePrefix       = "cyber_session_scope:"
+	cyberSessionTranscriptMaxLengths    = 1024
+	cyberSessionTranscriptLengthsPrefix = "cyber_session_transcript_lengths:"
+	cyberSessionRedisCommandMaxKeys     = 128
 )
 
+func cyberSessionTranscriptLengthsKey(apiKeyID int64) string {
+	return cyberSessionTranscriptLengthsPrefix + strconv.FormatInt(apiKeyID, 10)
+}
+
 // SetCyberSessionBlocked writes exact blocks in bounded transactions. The
-// coarse scope is activated only after all exact blocks have been stored.
-func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, scopeKey string, keys []string, ttl time.Duration) error {
-	if len(keys) == 0 {
+// transcript length index and the coarse scope are activated only after all
+// exact blocks have been stored.
+func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, block service.CyberSessionBlock, ttl time.Duration) error {
+	if len(block.Keys) == 0 {
 		return nil
 	}
 	exactKeys := make([]string, 0, cyberSessionRedisCommandMaxKeys)
@@ -294,7 +302,7 @@ func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, scopeKey stri
 		exactKeys = exactKeys[:0]
 		return err
 	}
-	for _, key := range keys {
+	for _, key := range block.Keys {
 		if key != "" {
 			exactKeys = append(exactKeys, key)
 			if len(exactKeys) == cyberSessionRedisCommandMaxKeys {
@@ -307,18 +315,78 @@ func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, scopeKey stri
 	if err := flush(); err != nil {
 		return err
 	}
-	if scopeKey != "" {
-		return c.rdb.Set(ctx, cyberSessionScopePrefix+scopeKey, "1", ttl).Err()
+	if block.ScopeKey == "" {
+		return nil
 	}
-	return nil
+	args := []any{ttl.Milliseconds(), cyberSessionTranscriptMaxLengths}
+	for _, length := range block.TranscriptLengths {
+		if length > 0 {
+			args = append(args, length)
+		}
+	}
+	return cyberSessionActivateScript.Run(ctx, c.rdb, []string{
+		cyberSessionScopePrefix + block.ScopeKey,
+		cyberSessionTranscriptLengthsKey(block.APIKeyID),
+	}, args...).Err()
 }
 
-func (c *gatewayCache) IsCyberSessionScopeActive(ctx context.Context, scopeKey string) (bool, error) {
-	n, err := c.rdb.Exists(ctx, cyberSessionScopePrefix+scopeKey).Result()
-	if err != nil {
-		return false, err
+// Keep the index bounded even if a source repeatedly creates different-length
+// blocks. Saturation switches to exact, batched prefix matching, never a deny.
+var cyberSessionActivateScript = redis.NewScript(`
+ local ttl = tonumber(ARGV[1])
+ local limit = tonumber(ARGV[2])
+ local previous = redis.call('PTTL', KEYS[2])
+ if redis.call('SISMEMBER', KEYS[2], '-1') == 0 then
+  for i = 3, #ARGV do
+   redis.call('SADD', KEYS[2], ARGV[i])
+   if redis.call('SCARD', KEYS[2]) > limit then
+    redis.call('DEL', KEYS[2])
+    redis.call('SADD', KEYS[2], '-1')
+    break
+   end
+  end
+ end
+ if redis.call('EXISTS', KEYS[2]) == 1 then
+  redis.call('PEXPIRE', KEYS[2], math.max(ttl, previous))
+ end
+ local scopeTTL = redis.call('PTTL', KEYS[1])
+ redis.call('SET', KEYS[1], '1', 'PX', math.max(ttl, scopeTTL))
+ return 1
+`)
+
+// cyberSessionTranscriptLengthsScript reads the API key's length index only
+// when the source scope is active, keeping inactive sources to one EXISTS.
+var cyberSessionTranscriptLengthsScript = redis.NewScript(`
+	if redis.call('EXISTS', KEYS[3]) == 1 then
+		return {'-1'}
+	end
+	if redis.call('EXISTS', KEYS[1]) == 0 then
+		return {}
+	end
+	return redis.call('SMEMBERS', KEYS[2])
+`)
+
+func (c *gatewayCache) CyberSessionTranscriptLengths(ctx context.Context, apiKeyID int64, scopeKey string) ([]int, error) {
+	if scopeKey == "" {
+		return nil, nil
 	}
-	return n > 0, nil
+	members, err := cyberSessionTranscriptLengthsScript.Run(ctx, c.rdb, []string{
+		cyberSessionScopePrefix + scopeKey,
+		cyberSessionTranscriptLengthsKey(apiKeyID),
+		cyberSessionLegacyScopePrefix + scopeKey,
+	}).StringSlice()
+	if err != nil {
+		return nil, err
+	}
+	lengths := make([]int, 0, len(members))
+	for _, member := range members {
+		length, err := strconv.Atoi(member)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cyber transcript length %q: %w", member, err)
+		}
+		lengths = append(lengths, length)
+	}
+	return lengths, nil
 }
 
 // FindCyberSessionBlocked checks bounded batches in caller order and stops at

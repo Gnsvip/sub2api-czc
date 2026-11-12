@@ -8,6 +8,7 @@ on:
       - 'backend/internal/handler/request_body_read_log*.go'
       - 'backend/internal/server/middleware/request_body_read_error.go'
       - 'backend/internal/server/middleware/group_model_allowlist_test.go'
+      - 'backend/internal/server/middleware/openai_fast_policy_forwarding_test.go'
       - 'backend/internal/service/openai_*timing*.go'
       - 'backend/internal/service/openai_compact_sse_keepalive*.go'
       - 'backend/internal/service/openai_gateway_response_handling.go'

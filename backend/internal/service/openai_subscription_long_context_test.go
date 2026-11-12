@@ -266,7 +266,8 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61TerraLongContextBoundary(t *testin
 					})
 					require.NoError(t, err)
 					wantLong := accountType == AccountTypeAPIKey && totalInput > 272000
-					wantInput, wantOutput := float64(totalInput)*1e-6, 1000*5e-6
+					// Preserve this fork's 2x base rate before long-context and priority multipliers.
+					wantInput, wantOutput := float64(totalInput)*2e-6, 1000*10e-6
 					if wantLong {
 						wantInput *= 2
 						wantOutput *= 1.5

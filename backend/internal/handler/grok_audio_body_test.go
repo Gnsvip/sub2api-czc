@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/userfacing"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -77,8 +78,8 @@ func TestGrokVoiceRequestBodyReadFailures(t *testing.T) {
 		wantStatus int
 		wantText   string
 	}{
-		{"timeout", iotest.ErrReader(timeoutErr), http.StatusRequestTimeout, "Timed out reading request body"},
-		{"truncated", iotest.ErrReader(io.ErrUnexpectedEOF), http.StatusBadRequest, "Failed to read request body"},
+		{"timeout", iotest.ErrReader(timeoutErr), http.StatusRequestTimeout, userfacing.RequestBodyIncomplete},
+		{"truncated", iotest.ErrReader(io.ErrUnexpectedEOF), http.StatusRequestTimeout, userfacing.RequestBodyIncomplete},
 		{"missing", nil, http.StatusBadRequest, "request body is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

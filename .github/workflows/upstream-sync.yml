@@ -35,6 +35,9 @@ jobs:
       - name: Compile all unit tests
         working-directory: backend
         run: go test -gcflags='github.com/Wei-Shaw/sub2api/...=-e' -tags=unit ./... -run '^$' > "$RUNNER_TEMP/compile.log" 2>&1
+      - name: Customized upstream compatibility regressions
+        working-directory: backend
+        run: go test -tags=unit ./internal/config ./internal/handler ./internal/handler/admin ./internal/server ./internal/service -run '^(TestValidateClaudeMimic|TestUpdateSettings.*ClaudeCodeVersion|TestGrokVoiceRequestBody|TestRequestBodyRead|TestOpenAIGatewayServiceRecordUsage_GPT61TerraLongContextBoundary|TestOpenAIResponsesInstructionsEcho|TestOpenAIGatewayService_OAuth.*Instructions|TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint|TestSelect.*ImageSize|TestSelectAccountWithScheduler.*SizeRouting|TestSelectAccountWithSchedulerForImages)' -count=1 -json > "$RUNNER_TEMP/compatibility-focused.jsonl"
       - name: Export generator and formatter changes
         if: always()
         run: git diff --binary > "$RUNNER_TEMP/generated.patch"
@@ -45,6 +48,7 @@ jobs:
           path: |
             ${{ runner.temp }}/generated.patch
             ${{ runner.temp }}/compile.log
+            ${{ runner.temp }}/compatibility-focused.jsonl
           retention-days: 7
   frontend:
     runs-on: ubuntu-latest

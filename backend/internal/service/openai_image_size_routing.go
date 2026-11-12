@@ -240,6 +240,7 @@ type openAIAccountSelectFunc func(ctx context.Context) (*AccountSelectionResult,
 // 先选不限档位的账号，再依次降级到允许 4K、2K、1K 的账号，跳过本轮未见到账号的层级。
 // 较早轮次抢到槽位的结果优先；某轮只能排队时把该账号留作后备并继续尝试后续层级，
 // 都抢不到槽位时返回最早的排队结果。返回的 LatencyMs 是各轮合计耗时。
+// 粘性命中的等待结果保留底层调度器的等待/逃逸决定，不再按尺寸偏好换号。
 func selectOpenAIAccountByImageSizePasses(ctx context.Context, selectFn openAIAccountSelectFunc) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	size, ok := openAIImageSizeRoutingFromContext(ctx)
 	if !ok {
@@ -266,7 +267,7 @@ func selectOpenAIAccountByImageSizePasses(ctx context.Context, selectFn openAIAc
 		selection, decision, err := selectFn(context.WithValue(ctx, openAIImageSizePassCtxKey{}, pass))
 		switch {
 		case err == nil && selection != nil && selection.Account != nil:
-			if selection.Acquired || selection.WaitPlan == nil {
+			if selection.Acquired || selection.WaitPlan == nil || selection.stickySessionHit || decision.StickySessionHit || decision.StickyPreviousHit {
 				return finish(selection, decision, nil)
 			}
 			if waiting == nil {

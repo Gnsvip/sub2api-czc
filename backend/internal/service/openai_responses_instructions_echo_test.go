@@ -58,7 +58,7 @@ func instructionsEchoForward(t *testing.T, account *Account, upstream *httpUpstr
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "OpenAI/Python 2.8.0")
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, tiboRouteDisabled: true}
 	result, err := svc.Forward(context.Background(), c, account, []byte(body))
 	return result, rec, err
 }

@@ -529,16 +529,21 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
-	// Codex fingerprint convergence, same as Forward / forwardOpenAIPassthrough. Builders only read
-	// staged IDs; without staging, the bridge sends no account-level session_id, so clients without
-	// prompt_cache_key get random upstream prompt-cache routing and rarely hit the cache.
+	// Use the same account/API-key namespace and body session evidence as HTTP
+	// forwarding. Resolve once so outbound headers and client_metadata agree.
+	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
+		return nil, fmt.Errorf("prepare http bridge codex identity: %w", err)
+	}
 	stageCodexFingerprintIDs(c, nil)
 	if account.UsesOpenAICodexProtocol() {
-		var clientHeaders http.Header
-		if c != nil && c.Request != nil {
-			clientHeaders = c.Request.Header
+		fpIDs := resolveCodexFingerprintIDsForRawBody(c, account, nil, body)
+		accountScopedBody, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		if scopeErr != nil {
+			return nil, fmt.Errorf("scope http bridge codex identity: %w", scopeErr)
 		}
-		fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+		if accountScoped {
+			body = accountScopedBody
+		}
 		if fpIDs != nil {
 			fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)
 			if fpErr != nil {
@@ -549,6 +554,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 		}
 		stageCodexFingerprintIDs(c, fpIDs)
+		stageCodexConvergenceBodyIdentityRaw(c, codexAccountIdentitySource(c, account), body)
 	}
 	grokIntentSourceBody := append([]byte(nil), body...)
 	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")

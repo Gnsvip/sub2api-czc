@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/userfacing"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -158,6 +159,6 @@ func TestHTTPServerBodyReadTimeoutAnthropicMessages(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &payload))
 	require.Equal(t, "invalid_request_error", payload.Error.Type)
-	require.Equal(t, "Timed out reading request body", payload.Error.Message)
+	require.Equal(t, userfacing.RequestBodyIncomplete, payload.Error.Message)
 	require.True(t, resp.Close, "connection with an unread body must not be reused")
 }

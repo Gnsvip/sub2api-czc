@@ -498,6 +498,9 @@ func pruneOpenAITiboWindow(times []time.Time, now time.Time) []time.Time {
 // DisableOpenAITiboRouteForTest keeps unit fixtures on the pre-Tibo path.
 func (s *OpenAIGatewayService) DisableOpenAITiboRouteForTest() {
 	if s != nil {
+		// Construction starts the probe loop. Join it before changing the
+		// fixture flag, so background reads cannot race with test setup.
+		s.StopOpenAICodexTicketHarvester()
 		s.tiboRouteDisabled = true
 	}
 }

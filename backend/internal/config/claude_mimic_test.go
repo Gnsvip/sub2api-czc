@@ -8,7 +8,7 @@ import (
 
 func validClaudeMimic() ClaudeMimicConfig {
 	return ClaudeMimicConfig{
-		UserAgentVersion:        "2.1.283",
+		UserAgentVersion:        "2.1.321",
 		StainlessOS:             "Linux",
 		StainlessArch:           "x64",
 		StainlessLang:           "js",

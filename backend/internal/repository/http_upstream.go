@@ -336,6 +336,7 @@ func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, 
 		cancel()
 		return resp, err
 	}
+	service.ObserveOpenAIUpstreamBody(ctx, resp)
 	decompressResponseBody(resp)
 	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil
@@ -1720,6 +1721,7 @@ func (s *httpUpstreamService) doCodexH1Uncontrolled(req *http.Request, proxyURL 
 		cancel()
 		return nil, err
 	}
+	service.ObserveOpenAIUpstreamBody(ctx, resp)
 	decompressResponseBody(resp)
 	resp.Request = req
 	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
@@ -1821,6 +1823,7 @@ func (s *httpUpstreamService) doCodexH2Uncontrolled(req *http.Request, proxyURL 
 	if body, ok := resp.Body.(interface{ ResponseComplete() bool }); ok {
 		complete = body.ResponseComplete
 	}
+	service.ObserveOpenAIUpstreamBody(ctx, resp)
 	decompressResponseBody(resp)
 	resp.Request = req
 	if stopOwnedAbort != nil {

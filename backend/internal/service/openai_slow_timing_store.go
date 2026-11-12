@@ -16,6 +16,7 @@ import (
 const (
 	slowTimingRetention    = time.Hour
 	slowTimingBucketLimit  = 128 << 10
+	slowTimingRecordLimit  = 16 << 10
 	slowTimingBucketLayout = "20060102T1504Z"
 )
 
@@ -153,7 +154,7 @@ func (s *openAISlowTimingStore) write(now time.Time, event map[string]any) {
 		event["dropped_since_last_record"] = s.dropped
 	}
 	line, err := json.Marshal(event)
-	if err != nil || len(line) > 16<<10 {
+	if err != nil || len(line) > slowTimingRecordLimit {
 		return
 	}
 	path := filepath.Join(s.dir, s.filePrefix()+now.UTC().Format(slowTimingBucketLayout)+".jsonl")

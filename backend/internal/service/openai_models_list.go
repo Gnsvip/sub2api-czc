@@ -17,7 +17,7 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
-	if account.IsExcelBPSEnabled() {
+	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
 		return s.fetchExcelBPSAccountModels(ctx, account)
 	}
 	return s.fetchNativeOpenAIModelsList(ctx, account)
@@ -244,6 +244,11 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			continue
 		}
 		target, matched := resolveRequestedModelInMapping(mapping, id)
+		// Native OAuth aliases remain disabled in this fork. Preserve each
+		// original catalog entry when the configured target is outside BPS.
+		if account.IsExcelBPSEnabled() && (!matched || !account.isExcelBPSUpstreamModelEnabled(target)) {
+			target, matched = id, true
+		}
 		raw, available := byID[strings.TrimSpace(target)]
 		if !matched || !available {
 			continue

@@ -93,6 +93,9 @@ func (s *OpenAIGatewayService) FetchExcelBPSModelsList(ctx context.Context, acco
 	if s == nil || s.httpUpstream == nil || account == nil || !account.IsOpenAI() || !account.IsExcelBPSEnabled() {
 		return nil, fmt.Errorf("excel BPS model discovery is unavailable")
 	}
+	if !s.excelBPSGloballyEnabled(ctx) {
+		return nil, infraerrors.ServiceUnavailable("EXCEL_BPS_DISABLED", "Enable BPS before model discovery")
+	}
 	token, err := s.getExcelBPSAccessToken(ctx, account)
 	if err != nil {
 		return nil, infraerrors.New(502, "EXCEL_BPS_MODELS_AUTH_UNAVAILABLE", "Excel BPS credentials are unavailable")

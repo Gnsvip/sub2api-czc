@@ -148,13 +148,7 @@ func (a *Account) excelBPSModelMapping() map[string]string {
 	if a == nil || !a.IsExcelBPSEnabled() {
 		return nil
 	}
-	raw := stringMappingFromRaw(a.Credentials["model_mapping"])
-	for alias, target := range raw {
-		if strings.TrimSpace(target) == "" || !a.isExcelBPSUpstreamModelEnabled(target) {
-			delete(raw, alias)
-		}
-	}
-	return raw
+	return stringMappingFromRaw(a.Credentials["model_mapping"])
 }
 func (a *Account) getExcelBPSMappedModel(model string) string {
 	if mapped, ok := resolveRequestedModelInMapping(a.excelBPSModelMapping(), model); ok {

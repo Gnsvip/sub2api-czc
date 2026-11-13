@@ -973,6 +973,21 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
+	if changed, err := normalizeBulkExcelBPSExtra(updates); err != nil {
+		return err
+	} else if changed {
+		original, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		candidate := *original
+		candidate.Extra = make(map[string]any, len(original.Extra)+len(updates))
+		maps.Copy(candidate.Extra, original.Extra)
+		maps.Copy(candidate.Extra, updates)
+		if err := s.validateExcelBPS403GroupSettings(ctx, &candidate); err != nil {
+			return err
+		}
+	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 

@@ -12,6 +12,7 @@ import (
 
 type bulkOpenAISettings struct {
 	bps                     bool
+	bpsCredentials          bool
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
@@ -20,7 +21,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.bps || s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.bps || s.bpsCredentials || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -34,6 +35,7 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 	if err != nil {
 		return settings, err
 	}
+	_, settings.bpsCredentials = input.Credentials["plan_type"]
 	if _, exists := input.Credentials["client_id"]; exists {
 		settings.bps = true
 	}
@@ -102,7 +104,7 @@ func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
 			return true, err
 		}
 	}
-	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreEncryptedContentKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoRecoverOn403Key, ExcelBPSAutoMoveOn403Key, "openai_excel_bps_mihomo", OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_ignore_images", ExcelBPSOmitUnsupportedToolsKey} {
+	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreEncryptedContentKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoRecoverOn403Key, ExcelBPSAutoMoveOn403Key, "openai_excel_bps_mihomo", OpenAIExcelBPSSessionProxyKey, ExcelBPSOmitUnsupportedToolsKey} {
 		if raw, exists := extra[key]; exists {
 			changed = true
 			if _, ok := raw.(bool); !ok {
@@ -274,7 +276,7 @@ func validateBulkOpenAISettingsTargets(
 			return invalidBulkOpenAITarget(accountID, "account does not exist")
 		}
 
-		if settings.bps {
+		if settings.bps || (settings.bpsCredentials && account.Extra[OpenAIExcelBPSEnabledKey] == true) {
 			if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() {
 				return invalidBulkOpenAITarget(accountID, "BPS settings require an OpenAI ChatGPT OAuth account")
 			}

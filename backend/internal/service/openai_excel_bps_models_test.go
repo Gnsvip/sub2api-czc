@@ -93,3 +93,14 @@ func TestExcelBPSSelectedCompactKeepsExcelModel(t *testing.T) {
 	a.Credentials["compact_model_mapping"] = map[string]any{"alias": "gpt-6-sol"}
 	require.Equal(t, "gpt-6-astra", resolveOpenAIAccountUpstreamModelForRequest(a, "alias", true))
 }
+
+func TestExcelBPSAliasesLeaveNativeOAuthUnchanged(t *testing.T) {
+	account := bpsUpstreamTestAccount()
+	account.Extra["openai_excel_bps_models"] = []string{"bps-target"}
+	account.Credentials["model_mapping"] = map[string]any{"bps-alias": "bps-target", "native-alias": "native-target"}
+	require.Equal(t, "bps-target", account.GetMappedModel("bps-alias"))
+	require.Equal(t, "native-alias", account.GetMappedModel("native-alias"))
+	require.Nil(t, account.GetModelMapping())
+	account.Extra["openai_excel_bps"] = false
+	require.Equal(t, "bps-alias", account.GetMappedModel("bps-alias"))
+}

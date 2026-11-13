@@ -87,7 +87,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					defer upstream.Close()
 					target, err := url.Parse(upstream.URL)
 					require.NoError(t, err)
-					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true"}}
+					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "false"}}
 					if mode != "" {
 						repo.values[SettingKeyExcelBPSImageMode] = mode
 					}
@@ -138,9 +138,9 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					require.Len(t, forwarded, 1)
 					require.Contains(t, string(<-forwarded), "https://images.example/photo.png")
 
-					// Unset configuration enables image support by default.
+					// Image support is opt-in in this deployment fork.
 					repo.mu.Lock()
-					delete(repo.values, SettingKeyExcelBPSImageRelayEnabled)
+					repo.values[SettingKeyExcelBPSImageRelayEnabled] = "true"
 					repo.mu.Unlock()
 					send(history, http.StatusOK)
 					require.Len(t, forwarded, 1)
@@ -186,7 +186,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 						require.Len(t, uploads, 1, "identical images share a native attachment")
 						require.Equal(t, pixels, <-uploads)
 					}
-					require.NoError(t, repo.SetMultiple(context.Background(), map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true"}))
+					require.NoError(t, repo.SetMultiple(context.Background(), map[string]string{SettingKeyExcelBPSImageRelayEnabled: "false"}))
 					send(history, http.StatusBadRequest)
 					require.Empty(t, forwarded)
 					require.Empty(t, uploads)

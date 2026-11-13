@@ -157,6 +157,8 @@ func TestExcelBPSMixedRoutesAndAliasesUseTheirOwnCatalog(t *testing.T) {
 	projected, err := projectAccountModelsBody(body, account, &Group{ID: 1, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"public-new"}}}, false)
 	require.NoError(t, err)
 	require.Contains(t, string(projected), "public-new")
+	require.Contains(t, string(projected), "gpt-native")
+	require.NotContains(t, string(projected), "native-alias")
 	// Group listing policy is enforced at the existing group merge boundary.
 	require.Contains(t, string(projected), "reasoning_efforts")
 }

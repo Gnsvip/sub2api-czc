@@ -80,7 +80,7 @@ func TestCreateMihomoStaticProxiesDeduplicatesAndPreservesAccountEndpoint(t *tes
 	require.Empty(t, result.Created)
 	require.Len(t, result.Existing, 2)
 	_, err = svc.UpdateProxy(t.Context(), 1, &UpdateProxyInput{Host: "another-exit"})
-	require.ErrorContains(t, err, "managed by the node")
+	require.ErrorContains(t, err, "MIHOMO_STATIC_ENDPOINT_IMMUTABLE")
 	updated, err := svc.UpdateProxy(t.Context(), 1, &UpdateProxyInput{Name: "renamed"})
 	require.NoError(t, err)
 	require.Equal(t, "renamed", updated.Name)

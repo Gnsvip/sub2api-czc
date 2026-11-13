@@ -11,7 +11,6 @@ export interface BPSSettings {
   autoMove: boolean
   targetGroup: number | ''
   omitTools: boolean
-  ignoreImages: boolean
   ignoreEncrypted: boolean
 }
 
@@ -29,7 +28,6 @@ export function readBPSSettings(extra: Record<string, unknown> = {}): BPSSetting
     autoMove: extra.openai_excel_bps_auto_move_on_403 === true,
     targetGroup: typeof extra.openai_excel_bps_403_target_group_id === 'number' ? extra.openai_excel_bps_403_target_group_id : '',
     omitTools: extra.openai_excel_bps_omit_unsupported_tools === true,
-    ignoreImages: extra.openai_excel_bps_ignore_images === true,
     ignoreEncrypted: extra.openai_excel_bps_ignore_encrypted_content === true
   }
 }
@@ -48,7 +46,6 @@ export function writeBPSSettings(value: BPSSettings): Record<string, unknown> {
     openai_excel_bps_auto_move_on_403: value.autoMove,
     openai_excel_bps_403_target_group_id: value.targetGroup === '' ? null : value.targetGroup,
     openai_excel_bps_omit_unsupported_tools: value.omitTools,
-    openai_excel_bps_ignore_images: value.ignoreImages,
     openai_excel_bps_ignore_encrypted_content: value.ignoreEncrypted
   }
 }

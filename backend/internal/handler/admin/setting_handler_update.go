@@ -519,6 +519,25 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	// Explicit zero is invalid; omitted image limits retain their saved/default value.
+	for name, value := range map[string]*int{
+		"ExcelBPSImageBodyLimitMiB":     req.ExcelBPSImageBodyLimitMiB,
+		"ExcelBPSImageBudgetMiB":        req.ExcelBPSImageBudgetMiB,
+		"ExcelBPSImageMaxRequests":      req.ExcelBPSImageMaxRequests,
+		"ExcelBPSImageMaxImageMiB":      req.ExcelBPSImageMaxImageMiB,
+		"ExcelBPSImageMaxImages":        req.ExcelBPSImageMaxImages,
+		"ExcelBPSImageWarningRemaining": req.ExcelBPSImageWarningRemaining,
+		"ExcelBPSImageCompactReserve":   req.ExcelBPSImageCompactReserve,
+		"ExcelBPSImageMaxTotalMiB":      req.ExcelBPSImageMaxTotalMiB,
+		"ExcelBPSImageStorageMiB":       req.ExcelBPSImageStorageMiB,
+		"ExcelBPSImageStorageEntries":   req.ExcelBPSImageStorageEntries,
+		"ExcelBPSImageTTLMinutes":       req.ExcelBPSImageTTLMinutes,
+	} {
+		if value != nil && *value <= 0 {
+			response.BadRequest(c, name+" must be positive")
+			return
+		}
+	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
 

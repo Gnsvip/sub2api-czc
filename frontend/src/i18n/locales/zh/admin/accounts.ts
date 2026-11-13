@@ -746,6 +746,11 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        excelBPS403Badge: 'BPS 403疑似被封excel',
+        excelBPS403BadgeNote: 'Excel / BPS 上游返回 HTTP 403（不代表已确认封禁），已按设置自动处理：',
+        excelBPS403BadgeDisabled: '{time} 关闭 Excel / BPS 协议，重新开启协议后解除',
+        excelBPS403BadgeMoved: '{time} 移入分组「{group}」，调整分组后解除',
+        excelBPS403BadgeLeftGroups: '{time} 退出所有分组，调整分组后解除',
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
         providerPreset: {

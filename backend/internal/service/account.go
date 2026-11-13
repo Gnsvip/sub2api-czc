@@ -928,6 +928,13 @@ func (a *Account) GetMappedModel(requestedModel string) string {
 // ResolveMappedModel 获取映射后的模型名，并返回是否命中了账号级映射。
 // matched=true 表示命中了精确映射或通配符映射，即使映射结果与原模型名相同。
 func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	// Only explicitly opted-in BPS targets use account aliases; native OAuth
+	// models retain this fork's unchanged-name policy.
+	if a.IsExcelBPSEnabled() {
+		if mapped, ok := resolveRequestedModelInMapping(a.excelBPSModelMapping(), requestedModel); ok && a.isExcelBPSUpstreamModelEnabled(mapped) {
+			return mapped, true
+		}
+	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
 		return requestedModel, false

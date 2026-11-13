@@ -622,6 +622,11 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        excelBPS403Badge: 'BPS 403: Excel possibly banned',
+        excelBPS403BadgeNote: 'Excel / BPS returned HTTP 403 (not a confirmed ban). Automatic actions taken:',
+        excelBPS403BadgeDisabled: '{time} turned off the Excel / BPS protocol; clears when the protocol is turned back on',
+        excelBPS403BadgeMoved: '{time} moved to group “{group}”; clears when the account’s groups change',
+        excelBPS403BadgeLeftGroups: '{time} left all groups; clears when the account’s groups change',
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         providerPreset: {

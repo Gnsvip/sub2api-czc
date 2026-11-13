@@ -407,7 +407,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if isExcelBPSClientCancellation(c, err) {
 			return clientCanceled()
 		}
-		return fail(502, "basispoints_auth_unavailable", "Excel OAuth credential is unavailable; see Credential Operations")
+		return fail(502, "basispoints_auth_unavailable", "Excel OAuth credential is unavailable; re-authorize Excel BPS in Account Management")
 	}
 	accountID := excelBPSAccountID(account, token)
 	if accountID == "" {

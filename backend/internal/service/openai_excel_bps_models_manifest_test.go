@@ -61,8 +61,8 @@ func TestExcelBPSManifestMixedRoutesAndExplicitRouting(t *testing.T) {
 	native.ID = 301
 	native.Extra["openai_excel_bps"] = false
 	for _, routed := range []bool{false, true} {
-		group := &Group{ID: 11, Platform: PlatformOpenAI, ModelRoutingEnabled: routed, ModelRouting: map[string][]int64{"public-astra": {native.ID}}}
-		body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"public-astra"}, []Account{bps, native}, group, nil, true)
+		group := &Group{ID: 11, Platform: PlatformOpenAI, ModelRoutingEnabled: routed, ModelRouting: map[string][]int64{"gpt-6-astra": {native.ID}}}
+		body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"gpt-6-astra"}, []Account{bps, native}, group, nil, true)
 		require.NoError(t, err)
 		model := decodeCodexManifestModels(t, body)[0]
 		if routed {
@@ -79,7 +79,7 @@ func TestExcelBPSManifestFetchedAndPinnedCatalogUseFinalETag(t *testing.T) {
 		account := excelBPSManifestAccount()
 		group := &Group{ID: 11, Platform: PlatformOpenAI}
 		group.CodexModelsManifestConfig.Enabled = pinned
-		svc := &OpenAIGatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{11: {account}}}}
+		svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{11: {account}}}}
 		cacheBody := []byte(source)
 		manifest := &OpenAIModelsResponse{Body: cacheBody, ETag: codexModelsManifestBodyETag(cacheBody)}
 		oldETag := manifest.ETag

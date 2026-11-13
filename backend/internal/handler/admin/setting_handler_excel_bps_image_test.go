@@ -91,7 +91,7 @@ func TestSettingsExcelBPSDefaultNativeModePersistsWithoutOrigin(t *testing.T) {
 	h.GetSettings(c)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "native", gjson.Get(rec.Body.String(), "data.excel_bps_image_mode").String())
-	require.True(t, gjson.Get(rec.Body.String(), "data.excel_bps_image_relay_enabled").Bool())
+	require.False(t, gjson.Get(rec.Body.String(), "data.excel_bps_image_relay_enabled").Bool())
 	rec = doUpdateSettings(t, h, map[string]any{"site_name": "save image defaults"}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "native", gjson.Get(rec.Body.String(), "data.excel_bps_image_mode").String())
@@ -99,6 +99,8 @@ func TestSettingsExcelBPSDefaultNativeModePersistsWithoutOrigin(t *testing.T) {
 	rec = doUpdateSettings(t, h, map[string]any{"site_name": "preserve native"}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "native", repo.values[service.SettingKeyExcelBPSImageMode])
+	rec = doUpdateSettings(t, h, map[string]any{"excel_bps_image_relay_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	for _, mode := range []string{"relay", "invalid"} {
 		rec = doUpdateSettings(t, h, map[string]any{"excel_bps_image_mode": mode}, nil)
 		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())

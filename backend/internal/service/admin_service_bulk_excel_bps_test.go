@@ -56,7 +56,6 @@ func TestAdminServiceBulkUpdateAccounts_ExcelBPSSettings(t *testing.T) {
 			extra: map[string]any{"openai_excel_bps": false, "openai_excel_bps_models": []string{"gpt-6-astra"}, "openai_excel_bps_cache_creation_as_input": true},
 			want:  map[string]any{"openai_excel_bps": false, "openai_excel_bps_models": nil, "openai_excel_bps_cache_creation_as_input": false},
 		},
-		{name: "ignore history images", extra: map[string]any{"openai_excel_bps_ignore_images": true}, want: map[string]any{"openai_excel_bps_ignore_images": true}},
 		{
 			name:  "billing only",
 			extra: map[string]any{"openai_excel_bps_cache_creation_as_input": false},

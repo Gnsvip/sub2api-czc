@@ -30,3 +30,17 @@ func excelBPSTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
 	s.settingService.settingRepo = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "true"}}
 	return s
 }
+
+func TestBPSDisabledDiscoveryDoesNotSendExcelCredentialsToCodex(t *testing.T) {
+	upstream := &httpUpstreamRecorder{}
+	svc := excelBPSTestService(upstream)
+	svc.settingService = &SettingService{settingRepo: &settingRepoStub{}}
+	account := bpsTestAccount()
+	_, err := svc.FetchExcelBPSModelsList(context.Background(), account)
+	require.Error(t, err)
+	_, err = svc.FetchOpenAIModelsList(context.Background(), account)
+	require.Error(t, err)
+	_, err = svc.FetchCodexModelsManifest(context.Background(), account, "", "")
+	require.Error(t, err)
+	require.Empty(t, upstream.requests)
+}

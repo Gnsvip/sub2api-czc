@@ -67,8 +67,8 @@ func validateOpenAIBPSSettings(account *Account) error {
 	if raw, exists := account.Extra[OpenAIExcelBPSModelsKey]; exists && raw == nil {
 		delete(account.Extra, OpenAIExcelBPSModelsKey)
 	}
-	invalid := func(message string) error { return infraerrors.BadRequest("OPENAI_BPS_SETTINGS_INVALID", message) }
-	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", ExcelBPSAutoRecoverOn403Key, "openai_excel_bps_ignore_images", "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools"} {
+	invalid := func(message string) error { return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", message) }
+	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", ExcelBPSAutoRecoverOn403Key, "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools"} {
 		if raw, exists := account.Extra[key]; exists {
 			if _, ok := raw.(bool); !ok {
 				return invalid(key + " must be a boolean")

@@ -344,6 +344,7 @@ func (s *deleteGroupAPIKeyRepoStub) ListKeysByGroupID(ctx context.Context, group
 }
 
 type proxyRepoStub struct {
+	getErr       error
 	deleteErr    error
 	countErr     error
 	accountCount int64
@@ -355,7 +356,10 @@ func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
 }
 
 func (s *proxyRepoStub) GetByID(ctx context.Context, id int64) (*Proxy, error) {
-	panic("unexpected GetByID call")
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return &Proxy{ID: id}, nil
 }
 
 func (s *proxyRepoStub) ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
@@ -743,7 +747,7 @@ func TestAdminService_DeleteProxy_Success(t *testing.T) {
 }
 
 func TestAdminService_DeleteProxy_Idempotent(t *testing.T) {
-	repo := &proxyRepoStub{}
+	repo := &proxyRepoStub{getErr: ErrProxyNotFound}
 	svc := &adminServiceImpl{proxyRepo: repo}
 
 	err := svc.DeleteProxy(context.Background(), 404)

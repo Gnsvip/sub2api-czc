@@ -27,15 +27,15 @@ func (a *Account) OpenAIAstraProbeIntervalMinutes() int {
 		}
 		n = int(v)
 	}
-	if n < 5 || n > 1440 {
+	if n < 1 || n > 1440 {
 		return 0
 	}
 	return n
 }
 
 func (s *adminServiceImpl) SetOpenAIAstraProbeInterval(ctx context.Context, id int64, minutes int) (*Account, error) {
-	if minutes != 0 && (minutes < 5 || minutes > 1440) {
-		return nil, infraerrors.BadRequest("ASTRA_PROBE_INTERVAL_INVALID", "Use 0 for the default, or 5–1440 minutes")
+	if minutes != 0 && (minutes < 1 || minutes > 1440) {
+		return nil, infraerrors.BadRequest("ASTRA_PROBE_INTERVAL_INVALID", "Use 0 for the default, or 1–1440 minutes")
 	}
 	a, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {

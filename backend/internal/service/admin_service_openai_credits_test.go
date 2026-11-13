@@ -105,14 +105,14 @@ func TestAdminService_SetOpenAIAstraProbeInterval(t *testing.T) {
 	account := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAIAstraProbeEnabledExtraKey: false, OpenAIAstraPolicyExtraKey: "history"}}
 	repo := newOpenAICreditsRepo(account)
 	svc := &adminServiceImpl{accountRepo: repo}
-	for _, minutes := range []int{0, 5, 30, 1440} {
+	for _, minutes := range []int{0, 1, 30, 1440} {
 		updated, err := svc.SetOpenAIAstraProbeInterval(context.Background(), 47, minutes)
 		require.NoError(t, err)
 		require.Equal(t, minutes, updated.OpenAIAstraProbeIntervalMinutes())
 		require.False(t, updated.IsOpenAIAstraProbeEnabled())
 		require.Equal(t, "history", updated.Extra[OpenAIAstraPolicyExtraKey])
 	}
-	for _, minutes := range []int{-1, 1, 4, 1441} {
+	for _, minutes := range []int{-1, 1441} {
 		_, err := svc.SetOpenAIAstraProbeInterval(context.Background(), 47, minutes)
 		require.Error(t, err)
 	}

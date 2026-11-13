@@ -923,7 +923,7 @@ export default {
         astraProbeInterval: '常规检测间隔（分钟）',
         astraProbeMinutes: '{minutes} 分钟',
         astraProbeDefault: '系统默认',
-        astraProbeIntervalHint: '5–1440 分钟；确认检测、限流和错误退避仍按原规则执行。',
+        astraProbeIntervalHint: '1–1440 分钟；确认检测、限流和错误退避仍按原规则执行。',
         astraProbeSaveFailed: 'Astra 检测设置保存失败，请重试',
         codexTiboSampleEmpty: '尚无探测',
         codexTiboRouteConfirmed: '已确认：{verdict}',

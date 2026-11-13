@@ -813,7 +813,7 @@ export default {
         astraProbeInterval: 'Regular probe interval (minutes)',
         astraProbeMinutes: '{minutes} min',
         astraProbeDefault: 'System default',
-        astraProbeIntervalHint: '5–1440 minutes; confirmation probes, rate limits and error backoff still apply.',
+        astraProbeIntervalHint: '1–1440 minutes; confirmation probes, rate limits and error backoff still apply.',
         astraProbeSaveFailed: 'Failed to save the Astra probe setting. Please retry.',
         codexTiboSampleEmpty: 'No probe yet',
         codexTiboRouteConfirmed: 'Confirmed: {verdict}',

@@ -125,7 +125,7 @@ func TestAccountHandler_AstraProbeInterval(t *testing.T) {
 	for _, tc := range []struct {
 		body   string
 		status int
-	}{{`{"interval_minutes":30}`, 200}, {`{"interval_minutes":0}`, 200}, {`{}`, 400}, {`{"interval_minutes":5.5}`, 400}, {`{"interval_minutes":"30"}`, 400}} {
+	}{{`{"interval_minutes":30}`, 200}, {`{"interval_minutes":1}`, 200}, {`{"interval_minutes":0}`, 200}, {`{}`, 400}, {`{"interval_minutes":5.5}`, 400}, {`{"interval_minutes":"30"}`, 400}} {
 		svc := &astraProbeAdminStub{}
 		h := &AccountHandler{adminService: svc}
 		router := gin.New()

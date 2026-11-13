@@ -37,7 +37,7 @@
       <button type="button" data-testid="astra-probe-interval" class="text-blue-600 disabled:opacity-50" :disabled="probeSaving || probeRunning" :title="t('admin.accounts.openai.astraProbeInterval')" @click.stop="editingInterval = !editingInterval">{{ t('admin.accounts.openai.astraProbeMinutes', { minutes: probeIntervalMinutes }) }}</button>
       <button type="button" data-testid="astra-probe-run" class="text-blue-600 disabled:opacity-50" :disabled="probeSaving || probeRunning" @click.stop="emit('run-probe')">{{ t(probeRunning ? 'admin.accounts.openai.astraProbeRunning' : 'admin.accounts.openai.astraProbeRun') }}</button>
       <form v-if="editingInterval" class="flex w-full flex-wrap items-center gap-1" @submit.prevent="saveInterval">
-        <input v-model.number="intervalDraft" class="input w-20 text-xs" data-testid="astra-probe-interval-input" type="number" min="5" max="1440" step="1" required :disabled="probeSaving || probeRunning" :aria-label="t('admin.accounts.openai.astraProbeInterval')" />
+        <input v-model.number="intervalDraft" class="input w-20 text-xs" data-testid="astra-probe-interval-input" type="number" min="1" max="1440" step="1" required :disabled="probeSaving || probeRunning" :aria-label="t('admin.accounts.openai.astraProbeInterval')" />
         <button type="submit" data-testid="astra-probe-interval-save" :disabled="probeSaving || probeRunning">{{ t('common.save') }}</button>
         <button type="button" data-testid="astra-probe-interval-default" :disabled="probeSaving || probeRunning" @click.stop="emit('set-interval', 0)">{{ t('admin.accounts.openai.astraProbeDefault') }}</button>
         <span class="w-full text-gray-400">{{ t('admin.accounts.openai.astraProbeIntervalHint') }}</span>
@@ -77,7 +77,7 @@ const editingInterval = ref(false)
 const intervalDraft = ref(props.probeIntervalMinutes)
 watch(() => props.probeIntervalMinutes, value => { intervalDraft.value = value })
 function saveInterval() {
-  if (Number.isInteger(intervalDraft.value) && intervalDraft.value >= 5 && intervalDraft.value <= 1440) emit('set-interval', intervalDraft.value)
+  if (Number.isInteger(intervalDraft.value) && intervalDraft.value >= 1 && intervalDraft.value <= 1440) emit('set-interval', intervalDraft.value)
 }
 const latestSampleAt = computed(() => {
   const times = [props.lastSampleAt, ...props.samples.map(sample => sample.at)]

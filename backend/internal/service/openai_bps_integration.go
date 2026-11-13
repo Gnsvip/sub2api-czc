@@ -107,6 +107,9 @@ func writeOpenAICompactSSEFailureMessageParam(c *gin.Context, statusCode int, er
 }
 
 func (s *OpenAIGatewayService) excelBPSGloballyEnabled(ctx context.Context) bool {
+	if enabled, ok := ctx.Value(excelBPSRoutingContextKey{}).(bool); ok {
+		return enabled
+	}
 	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
 		return false
 	}
@@ -114,4 +117,57 @@ func (s *OpenAIGatewayService) excelBPSGloballyEnabled(ctx context.Context) bool
 	defer cancel()
 	value, err := s.settingService.settingRepo.GetValue(ctx, SettingKeyExcelBPSEnabled)
 	return err == nil && value == "true"
+}
+
+type excelBPSRoutingContextKey struct{}
+
+func (s *OpenAIGatewayService) withExcelBPSRoutingContext(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(excelBPSRoutingContextKey{}).(bool); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, excelBPSRoutingContextKey{}, s.excelBPSGloballyEnabled(ctx))
+}
+
+// Keep the shared account snapshot immutable. Disabling BPS removes its model,
+// transport and cooldown policy together, while retaining the saved options.
+func (s *OpenAIGatewayService) accountForExcelBPSRouting(ctx context.Context, account *Account) *Account {
+	if s == nil || account == nil || !account.IsOpenAIOAuth() {
+		return account
+	}
+	disabled := !s.excelBPSGloballyEnabled(ctx)
+	if account.excelBPSRoutingDisabled == disabled {
+		return account
+	}
+	view := *account
+	view.excelBPSRoutingDisabled = disabled
+	return &view
+}
+
+func (s *OpenAIGatewayService) accountsForExcelBPSRouting(ctx context.Context, accounts []Account) []Account {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	views := make([]Account, len(accounts))
+	for i := range accounts {
+		views[i] = *s.accountForExcelBPSRouting(ctx, &accounts[i])
+	}
+	return views
+}
+
+// Catalog aliases apply only to the explicitly selected BPS models.
+func resolveExcelBPSCatalogMappedModel(account *Account, model string) (string, bool) {
+	if account == nil {
+		return model, false
+	}
+	if account.IsExcelBPSEnabledForModel(model) {
+		return resolveRequestedModelInMapping(account.excelBPSModelMapping(), model)
+	}
+	return account.ResolveMappedModel(model)
+}
+
+func (s *OpenAIGatewayService) loadCodexGroupCatalogRoutingAccounts(ctx context.Context, groupID int64) ([]Account, []Account, error) {
+	visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, groupID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	return s.accountsForExcelBPSRouting(ctx, visible), s.accountsForExcelBPSRouting(ctx, catalog), nil
 }

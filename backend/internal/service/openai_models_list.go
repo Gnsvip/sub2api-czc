@@ -17,6 +17,8 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	account = s.accountForExcelBPSRouting(ctx, account)
 	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
 		return s.fetchExcelBPSAccountModels(ctx, account)
 	}
@@ -306,6 +308,8 @@ func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Acco
 // An authoritative empty catalog is success, including after group filtering.
 func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, group *Group, maxAccountSwitches int, ifNoneMatch string) (*OpenAIModelsResponse, *Account, error) {
 	fetch := func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+		ctx = s.withExcelBPSRoutingContext(ctx)
+		account = s.accountForExcelBPSRouting(ctx, account)
 		response, err := s.FetchOpenAIModelsList(ctx, account)
 		if err != nil {
 			return nil, err

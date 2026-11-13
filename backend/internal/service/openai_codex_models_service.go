@@ -131,7 +131,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		return nil, false, nil
 	}
 
-	visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, catalog, err := s.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -192,7 +192,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
-	visible, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, accounts, err := s.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -328,7 +328,7 @@ func openAIConfiguredCodexModelIDsForGroup(accounts []Account, group *Group) []s
 			if account.Platform != PlatformOpenAI {
 				continue
 			}
-			mappedModel, matched := account.ResolveMappedModel(selectedModel)
+			mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, selectedModel)
 			if !matched || strings.TrimSpace(mappedModel) == "" {
 				continue
 			}
@@ -1135,7 +1135,7 @@ func uniqueCodexMappedModel(accounts []Account, platform string, modelID string)
 		if !codexAccountServesPlatformModel(account, platform, modelID) {
 			continue
 		}
-		mappedModel, matched := account.ResolveMappedModel(modelID)
+		mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, modelID)
 		mappedModel = strings.TrimSpace(mappedModel)
 		if !matched || mappedModel == "" {
 			continue
@@ -1724,6 +1724,8 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	account = s.accountForExcelBPSRouting(ctx, account)
 	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
 		return s.fetchExcelBPSCodexManifest(ctx, account, ifNoneMatch)
 	}

@@ -17,6 +17,9 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	if account.isBPSCredential() {
+		return nil, fmt.Errorf("BPS model discovery is unavailable; configure and test the desired model on the account")
+	}
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}

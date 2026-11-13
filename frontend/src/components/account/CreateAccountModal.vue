@@ -3757,7 +3757,7 @@
     <div v-else class="space-y-5">
       <label v-if="form.platform === 'openai'" class="block">
         <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
-        <select v-model="openaiOAuthFlow" class="input" data-testid="openai-oauth-flow" @change="openaiOAuth.resetState(); oauthFlowRef?.reset()">
+        <select v-model="openaiOAuthFlow" class="input" :disabled="openaiOAuth.loading.value" data-testid="openai-oauth-flow" @change="openaiOAuth.resetState(); oauthFlowRef?.reset()">
           <option value="openai">Codex</option>
           <option value="excel_bps">Excel BPS</option>
         </select>

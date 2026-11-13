@@ -283,6 +283,19 @@ func TestBPSRejectUnsupportedBeforeSending(t *testing.T) {
 	}
 }
 
+func TestBPSAdminConnectionTestUsesBPSRoute(t *testing.T) {
+	body := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n"
+	up := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}}
+	gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: up}
+	svc := &AccountTestService{openaiGatewayService: gateway}
+	c, rec := bpsTestContext(`{}`)
+	require.NoError(t, svc.testOpenAIAccountConnection(c, bpsTestAccount(), "gpt-6.1-sol", "Reply OK", AccountTestModeDefault))
+	require.Equal(t, "bps.openai.com", up.lastReq.URL.Host)
+	require.Contains(t, rec.Body.String(), `"text":"OK"`)
+	require.Contains(t, rec.Body.String(), `"success":true`)
+	require.Len(t, up.requests, 1)
+}
+
 func TestBPSOAuthSeparateAuthorization(t *testing.T) {
 	svc := NewOpenAIOAuthService(nil, &openaiOAuthClientAuthURLStub{})
 	defer svc.Stop()

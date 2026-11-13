@@ -945,6 +945,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if err := validateRetiredOpenAIRequestModel(account, modelID, false, account.GetMappedModel(modelID)); err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
+	if account.isBPSCredential() {
+		return s.testBPSAccountConnection(c, account, modelID, prompt, mode)
+	}
 
 	_ = s.openaiGatewayService != nil &&
 		s.openaiGatewayService.openAITiboEffective(account.ID, openAITiboRouteHTTP, time.Now()) == openAITiboHealthy

@@ -1,3 +1,13 @@
+# Local integration scope
+
+This is the protocol package from ranxi2001/sub2api v2.21.1. The notes below
+describe capabilities of that source package and its original gateway.
+This fork enables only the integration documented in
+[`docs/bps-session-proxies.md`](../../../../docs/bps-session-proxies.md):
+HTTP Responses, independent Excel OAuth and opt-in static session proxies.
+Image relays, repair callbacks, model-catalog overrides and encrypted-history
+retry described below are **not enabled** by this gateway.
+
 # Structured output compatibility
 
 The adapter accepts Responses requests using text.format.type=json_object or

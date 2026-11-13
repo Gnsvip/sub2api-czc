@@ -3,16 +3,69 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
 func (s *OpenAIGatewayService) SetBPSProxyRepository(repo ProxyRepository) { s.bpsProxyRepo = repo }
+
+// The admin connectivity check follows the same BPS credential, proxy and
+// response validation path. Its bounded capture translates the final answer to
+// the existing admin test event format without sending Excel tokens to Codex.
+func (s *AccountTestService) testBPSAccountConnection(c *gin.Context, account *Account, model, prompt, mode string) error {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	if s.openaiGatewayService == nil {
+		return s.sendErrorAndEnd(c, "BPS gateway is unavailable")
+	}
+	if mode == AccountTestModeCompact || isOpenAIImageModel(model) {
+		return s.sendErrorAndEnd(c, "BPS connection test supports text Responses only")
+	}
+	if model == "" {
+		model = openai.DefaultTestModel
+		if models, err := bpsModelList(account.Extra[OpenAIExcelBPSModelsKey]); err == nil && len(models) > 0 {
+			model = models[0]
+		}
+	}
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "Reply with OK."
+	}
+	payload := map[string]any{"model": model, "input": prompt, "stream": false}
+	applyIntelligentPayloadPrompt(c.Request.Context(), payload)
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to encode BPS test request")
+	}
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
+	internal := c.Copy()
+	capture := &responsesWebSearchRoundWriter{header: make(http.Header), status: http.StatusOK, size: -1}
+	internal.Writer = capture
+	_, err = s.openaiGatewayService.forwardBPS(c.Request.Context(), internal, account, encoded, time.Now())
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+	if capture.err != nil {
+		return s.sendErrorAndEnd(c, "BPS test response exceeded the buffer limit")
+	}
+	for _, item := range gjson.GetBytes(capture.body.Bytes(), "output").Array() {
+		for _, part := range item.Get("content").Array() {
+			if part.Get("type").String() == "output_text" {
+				s.sendEvent(c, TestEvent{Type: "content", Text: part.Get("text").String()})
+			}
+		}
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
 
 func bpsRequestScope(c *gin.Context, accountID int64, body []byte) string {
 	keyID := getAPIKeyIDFromContext(c)
@@ -38,16 +91,23 @@ func bpsRequestError(c *gin.Context, status int, code, message string) error {
 }
 
 func bpsUnsupportedHistory(value gjson.Result) bool {
-	if value.IsObject() {
-		if value.Get("encrypted_content").Exists() || value.Get("type").String() == "compaction" || value.Get("type").String() == "compaction_trigger" {
+	for _, item := range value.Array() {
+		switch item.Get("type").String() {
+		case "compaction", "compaction_trigger", "encrypted_content":
 			return true
 		}
+		if item.Get("encrypted_content").Exists() {
+			return true
+		}
+		for _, field := range []string{"content", "output"} {
+			for _, part := range item.Get(field).Array() {
+				if part.Get("type").String() == "encrypted_content" {
+					return true
+				}
+			}
+		}
 	}
-	blocked := false
-	if value.IsArray() || value.IsObject() {
-		value.ForEach(func(_, child gjson.Result) bool { blocked = bpsUnsupportedHistory(child); return !blocked })
-	}
-	return blocked
+	return false
 }
 
 func (s *OpenAIGatewayService) forwardBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time) (*OpenAIForwardResult, error) {

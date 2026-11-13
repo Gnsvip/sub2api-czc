@@ -37,10 +37,14 @@ jobs:
           base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
           git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.go' | xargs -0 -r gofmt -w
           git diff --binary > "$RUNNER_TEMP/bps-format.patch"
-      - name: Protocol and account routing regressions
+      - name: Protocol regressions
         working-directory: backend
         run: |
           go test -race ./internal/service/basispoints -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
+      - name: Account routing regressions
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
           go test -race -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler/admin -run '^(TestBPS|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*BulkOpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
       - name: Compile shared packages and verify dependency wiring
         working-directory: backend

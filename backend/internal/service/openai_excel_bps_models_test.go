@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -98,10 +99,31 @@ func TestExcelBPSAliasesLeaveNativeOAuthUnchanged(t *testing.T) {
 	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_models"] = []string{"bps-target"}
 	account.Credentials["model_mapping"] = map[string]any{"bps-alias": "bps-target", "native-alias": "native-target"}
-	require.Equal(t, "bps-target", account.GetMappedModel("bps-alias"))
+	require.Equal(t, "bps-alias", account.GetMappedModel("bps-alias"))
 	require.Equal(t, "bps-target", account.getExcelBPSMappedModel("bps-alias"))
 	require.Equal(t, "native-alias", account.GetMappedModel("native-alias"))
 	require.Nil(t, account.GetModelMapping())
 	account.Extra["openai_excel_bps"] = false
 	require.Equal(t, "bps-alias", account.GetMappedModel("bps-alias"))
+}
+
+func TestExcelBPSGlobalDisablePreservesNativeRequest(t *testing.T) {
+	account := bpsUpstreamTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"gpt-6.1-sol": "gpt-6-astra"}
+	account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
+	wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native\",\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+	svc := excelBPSTestService(upstream)
+	svc.settingService = &SettingService{settingRepo: &settingRepoStub{}}
+	svc.excelBPSCooldownUntil.Store(account.ID, time.Now().Add(time.Minute))
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-6.1-sol","stream":true,"input":"test"}`))
+	require.NoError(t, err)
+	require.Equal(t, "chatgpt.com", upstream.lastReq.URL.Host)
+	require.Contains(t, string(upstream.lastBody), `"model":"gpt-6.1-sol"`)
+	require.True(t, account.IsExcelBPSEnabled(), "the shared account is not mutated")
+	view := svc.accountForExcelBPSRouting(context.Background(), account)
+	require.False(t, svc.isExcelBPSCoolingDown(view, "gpt-6.1-sol"))
+	require.Equal(t, "gpt-6.1-sol", resolveOpenAIAccountUpstreamModelForRequest(view, "gpt-6.1-sol", false))
 }

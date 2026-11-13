@@ -898,7 +898,8 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		return BuildCodexModelsManifest(modelIDs)
 	}
 
-	_, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	routing := &OpenAIGatewayService{accountRepo: s.accountRepo, settingService: s.settingService}
+	_, catalog, err := routing.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}
@@ -1186,7 +1187,8 @@ func groupCodexModelSupportsImageInput(
 			continue
 		}
 		candidates++
-		if !accountCodexModelSupportsImageInput(account, account.GetMappedModel(upstreamModel)) {
+		mappedModel, _ := resolveExcelBPSCatalogMappedModel(account, upstreamModel)
+		if !accountCodexModelSupportsImageInput(account, mappedModel) {
 			return false
 		}
 	}

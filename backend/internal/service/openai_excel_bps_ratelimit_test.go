@@ -459,6 +459,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ExcelBPSCooldownSkipsOn
 			cfg.Gateway.Scheduling.LoadBatchEnabled = true
 			svc := &OpenAIGatewayService{
 				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+				settingService:     bpsEnabledTestSettings(),
 				cache:              &schedulerTestGatewayCache{},
 				cfg:                cfg,
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced)),
@@ -487,6 +488,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ExcelBPSCooldownSkipsOn
 			selection, err := selectModel("gpt-5.1")
 			require.NoError(t, err, "models these accounts forward natively stay schedulable")
 			require.NotNil(t, selection.Account)
+			// Turning off the system switch also removes BPS cooldown filtering.
+			svc.settingService = &SettingService{settingRepo: &settingRepoStub{}}
+			selection, err = selectModel("gpt-6-astra")
+			require.NoError(t, err)
+			require.False(t, selection.Account.IsExcelBPSEnabled())
+			require.True(t, accounts[0].IsExcelBPSEnabled(), "saved account options stay unchanged")
 		})
 	}
 }

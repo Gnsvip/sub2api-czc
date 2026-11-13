@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"log"
 	"net/http"
 	"time"
@@ -127,7 +128,13 @@ func provideCleanup(
 	billingOutboxWorker *service.BillingOutboxWorker,
 	runtime *workerruntime.Runtime,
 ) func() {
+	openAIGateway.StartBPSWarmPool()
+	openAIGateway.StartBPS403Recovery()
 	return func() {
+		openAIGateway.StopBPS403Recovery()
+		openAIGateway.StopBPSWarmPool()
+		_ = openAIGateway.CloseExcelBPSImages()
+		mihomo.CloseAll()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

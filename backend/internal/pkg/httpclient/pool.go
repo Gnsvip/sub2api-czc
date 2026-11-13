@@ -83,6 +83,20 @@ func GetClient(opts Options) (*http.Client, error) {
 	return client, nil
 }
 
+func EvictProxyClients(proxyURL string) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return
+	}
+	prefix := proxyURL + "|"
+	sharedClients.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
+			sharedClients.Delete(key)
+		}
+		return true
+	})
+}
+
 func buildClient(opts Options) (*http.Client, error) {
 	transport, err := buildTransport(opts)
 	if err != nil {

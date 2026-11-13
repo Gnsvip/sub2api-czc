@@ -37,7 +37,7 @@
                   <Icon :name="tab.icon" size="sm" />
                 </span>
                 <span class="settings-tab-label">{{
-                  t(`admin.settings.tabs.${tab.key}`)
+                  tab.key === "bps" ? "Excel BPS" : tab.key === "mihomo" ? "Mihomo" : t(`admin.settings.tabs.${tab.key}`)
                 }}</span>
               </button>
             </div>
@@ -45,6 +45,8 @@
         </div>
 
         <!-- Tab: Security — Admin API Key -->
+        <BPSSettings v-if="activeTab === 'bps'" />
+        <MihomoSettings v-if="activeTab === 'mihomo'" />
         <div v-show="activeTab === 'security'" class="space-y-6">
           <AdminAccessKeysSettings />
           <!-- 已有全权密钥只提供轮换和删除入口。 -->
@@ -9016,6 +9018,8 @@ import {
   isStepUpBlocked,
   stepUpBlockReason,
 } from "@/composables/useStepUp";
+import BPSSettings from "./settings/BPSSettings.vue";
+import MihomoSettings from "./settings/MihomoSettings.vue";
 import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeysSettings.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
@@ -9061,6 +9065,8 @@ const paymentMethodsHref = computed(() =>
 );
 
 type SettingsTab =
+ | "bps"
+ | "mihomo"
   | "general"
   | "agreement"
   | "features"
@@ -9073,6 +9079,8 @@ type SettingsTab =
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
+ { key: "bps" as SettingsTab, icon: "server" as const },
+ { key: "mihomo" as SettingsTab, icon: "server" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },

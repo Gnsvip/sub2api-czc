@@ -17,6 +17,15 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	account = s.accountForExcelBPSRouting(ctx, account)
+	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
+		return s.fetchExcelBPSAccountModels(ctx, account)
+	}
+	return s.fetchNativeOpenAIModelsList(ctx, account)
+}
+
+func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -25,7 +34,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		if s.settingService != nil {
 			clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
 		}
-		response, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		response, err := s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +182,11 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 // projectAccountModelAliases retains the source entry's metadata, never changes
 // the shared response, and never synthesizes models absent from this account.
 func projectAccountModelAliases(body []byte, account *Account, group *Group, codex bool) ([]byte, error) {
-	if account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
+	mapping := account.GetModelMapping()
+	if account.IsExcelBPSEnabled() {
+		mapping = account.excelBPSModelMapping()
+	}
+	if account.IsOpenAIPassthroughEnabled() || len(mapping) == 0 {
 		return body, nil
 	}
 	field, idField := "data", "id"
@@ -213,8 +226,8 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			candidates = append(candidates, id)
 		}
 	}
-	aliases := make([]string, 0, len(account.GetModelMapping()))
-	for alias := range account.GetModelMapping() {
+	aliases := make([]string, 0, len(mapping))
+	for alias := range mapping {
 		aliases = append(aliases, alias)
 	}
 	sort.Strings(aliases)
@@ -232,7 +245,12 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		target, matched := account.ResolveMappedModel(id)
+		target, matched := resolveRequestedModelInMapping(mapping, id)
+		// Native OAuth aliases remain disabled in this fork. Preserve each
+		// original catalog entry when the configured target is outside BPS.
+		if account.IsExcelBPSEnabled() && (!matched || !account.isExcelBPSUpstreamModelEnabled(target)) {
+			target, matched = id, true
+		}
 		raw, available := byID[strings.TrimSpace(target)]
 		if !matched || !available {
 			continue
@@ -290,6 +308,8 @@ func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Acco
 // An authoritative empty catalog is success, including after group filtering.
 func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, group *Group, maxAccountSwitches int, ifNoneMatch string) (*OpenAIModelsResponse, *Account, error) {
 	fetch := func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+		ctx = s.withExcelBPSRoutingContext(ctx)
+		account = s.accountForExcelBPSRouting(ctx, account)
 		response, err := s.FetchOpenAIModelsList(ctx, account)
 		if err != nil {
 			return nil, err

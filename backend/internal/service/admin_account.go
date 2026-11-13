@@ -334,6 +334,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateExcelBPS403GroupSettings(ctx, duplicate); err != nil {
+		return nil, err
+	}
 	// A copied credential must be reviewed before it can share live traffic with its source.
 	duplicate.Schedulable = false
 	if s.accountDuplicateRepo == nil {
@@ -443,6 +446,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	if err := validateOpenAIBPSSettings(account); err != nil {
+		return nil, err
+	}
 	applyOpenAIOAuthCreateDefaults(account, input.ConcurrencyProvided)
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -546,6 +552,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	account, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
@@ -874,6 +883,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -934,6 +946,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	delete(updates, ExcelBPSCredentialStateExtraKey)
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	// Managed provider presets must be changed through UpdateAccount so the
@@ -961,12 +974,28 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
+	if changed, err := normalizeBulkExcelBPSExtra(updates); err != nil {
+		return err
+	} else if changed {
+		original, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		candidate := *original
+		candidate.Extra = make(map[string]any, len(original.Extra)+len(updates))
+		maps.Copy(candidate.Extra, original.Extra)
+		maps.Copy(candidate.Extra, updates)
+		if err := s.validateExcelBPS403GroupSettings(ctx, &candidate); err != nil {
+			return err
+		}
+	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	delete(input.Extra, ExcelBPSCredentialStateExtraKey)
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
@@ -1034,6 +1063,22 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if openAISettings.any() {
 		if err := validateBulkOpenAISettingsTargets(input, openAISettings, targetsByID); err != nil {
 			return nil, err
+		}
+	}
+
+	if openAISettings.bps {
+		for _, original := range targetsByID {
+			candidate := *original
+			candidate.Extra = make(map[string]any, len(original.Extra)+len(input.Extra))
+			for k, v := range original.Extra {
+				candidate.Extra[k] = v
+			}
+			for k, v := range input.Extra {
+				candidate.Extra[k] = v
+			}
+			if err := s.validateExcelBPSGroupPolicy(ctx, &candidate); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if input.ProbeEnabled != nil {

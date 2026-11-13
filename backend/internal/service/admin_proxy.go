@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,7 +108,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
-	if proxy.MihomoNodeID != "" && ((input.Protocol != "" && input.Protocol != proxy.Protocol) || (input.Host != "" && input.Host != proxy.Host) || (input.Port != 0 && input.Port != proxy.Port) || input.Username != "" || input.Password != "") {
+	if proxy.MihomoNodeID != "" && ((input.Protocol != "" && input.Protocol != proxy.Protocol) || (input.Host != "" && input.Host != proxy.Host) || (input.Port != 0 && input.Port != proxy.Port) || (input.Username != nil && *input.Username != proxy.Username) || (input.Password != nil && *input.Password != proxy.Password)) {
 		return nil, infraerrors.BadRequest("MIHOMO_STATIC_ENDPOINT_IMMUTABLE", "A managed node endpoint cannot be changed")
 	}
 

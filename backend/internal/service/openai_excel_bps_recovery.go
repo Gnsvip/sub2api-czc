@@ -146,6 +146,9 @@ func (s *OpenAIGatewayService) StopBPS403Recovery() {
 }
 
 func (s *OpenAIGatewayService) syncExcelBPS403Recovery(ctx context.Context) {
+	if !s.excelBPSGloballyEnabled(ctx) {
+		return
+	}
 	defer func() {
 		if recover() != nil {
 			logger.FromContext(ctx).Error("excel_bps.recovery_scan_panicked")

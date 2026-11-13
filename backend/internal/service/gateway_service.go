@@ -786,6 +786,9 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
+	if e != nil && (e.Reason == ExcelBPSRateLimitedReason || e.IsExcelBPSImageAdmissionRejection()) {
+		return false
+	}
 	if e == nil {
 		return false
 	}

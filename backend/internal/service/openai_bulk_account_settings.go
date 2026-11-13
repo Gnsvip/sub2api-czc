@@ -28,7 +28,7 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 		return settings, nil
 	}
 	stripRemovedOpenAIExcelBPSExtra(input.Extra)
-	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSModelsKey, OpenAIExcelBPSSessionProxyKey} {
+	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSModelsKey, OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", ExcelBPSAutoRecoverOn403Key, "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools", "openai_excel_bps_proxy_source", "openai_excel_bps_403_target_group_id", "openai_excel_bps_403_recovery_interval_minutes"} {
 		if _, exists := input.Extra[key]; exists {
 			settings.bps = true
 		}
@@ -86,8 +86,6 @@ func stripRemovedOpenAIExcelBPSExtra(extra map[string]any) {
 		return
 	}
 	for _, key := range []string{
-		"openai_excel_bps_cache_creation_as_input",
-		"openai_excel_bps_auto_disable_on_403",
 		"codex_tibo_verdict:bps",
 	} {
 		delete(extra, key)

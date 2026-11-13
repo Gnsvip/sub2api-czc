@@ -65,7 +65,7 @@ func bpsModelList(raw any) ([]string, error) {
 
 func validateOpenAIBPSSettings(account *Account) error {
 	invalid := func(message string) error { return infraerrors.BadRequest("OPENAI_BPS_SETTINGS_INVALID", message) }
-	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSSessionProxyKey} {
+	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", ExcelBPSAutoRecoverOn403Key, "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools"} {
 		if raw, exists := account.Extra[key]; exists {
 			if _, ok := raw.(bool); !ok {
 				return invalid(key + " must be a boolean")
@@ -77,11 +77,18 @@ func validateOpenAIBPSSettings(account *Account) error {
 	}
 	enabled, _ := account.Extra[OpenAIExcelBPSEnabledKey].(bool)
 	pooled, _ := account.Extra[OpenAIExcelBPSSessionProxyKey].(bool)
-	if enabled && !account.isBPSCredential() {
-		return invalid("BPS requires a separately authorized Excel OAuth account")
+	if enabled && (!QualityBPSEligible(account) || account.IsOpenAIPersonalAccessToken()) {
+		return invalid("BPS requires a non-free OpenAI ChatGPT OAuth account")
 	}
 	if pooled && !enabled {
 		return invalid("BPS session proxy requires BPS to be enabled")
 	}
-	return nil
+
+	if raw, exists := account.Extra[ExcelBPSProxySourceKey]; exists && raw != "mihomo" && raw != "ip_pool" {
+		return invalid("BPS proxy source must be mihomo or ip_pool")
+	}
+	if err := validateExcelBPS403RecoveryExtra(account.Extra); err != nil {
+		return err
+	}
+	return validateExcelBPS403GroupExtra(account.Extra)
 }

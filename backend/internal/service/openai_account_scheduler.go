@@ -2639,7 +2639,7 @@ func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} 
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport, requestedModel ...string) bool {
-	if account.isBPSCredential() {
+	if account.isBPSCredential() || (len(requestedModel) > 0 && account.IsExcelBPSEnabledForModel(requestedModel[0])) {
 		return requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE
 	}
 	if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
@@ -2667,6 +2667,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 }
 
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
+	if !success && len(observedErr) > 0 && errors.Is(observedErr[0], errExcelBPSProxyUnavailable) {
+		return false
+	}
 	if account == nil {
 		return false
 	}

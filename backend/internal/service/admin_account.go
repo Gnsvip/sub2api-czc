@@ -334,6 +334,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateExcelBPS403GroupSettings(ctx, duplicate); err != nil {
+		return nil, err
+	}
 	// A copied credential must be reviewed before it can share live traffic with its source.
 	duplicate.Schedulable = false
 	if s.accountDuplicateRepo == nil {
@@ -443,7 +446,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
-	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
+	if err := validateOpenAIBPSSettings(account); err != nil {
 		return nil, err
 	}
 	applyOpenAIOAuthCreateDefaults(account, input.ConcurrencyProvided)
@@ -549,6 +552,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	account, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {

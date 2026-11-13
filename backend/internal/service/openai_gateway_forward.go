@@ -148,7 +148,15 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	clearOpenAIResponsesNamespaceNames(c)
 	setCodexToolNameReverse(c, nil)
 	rememberOpenAIResponsesClientInstructions(c, body)
-	if !account.isBPSCredential() && !account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) {
+	useBPS := account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) && s.excelBPSGloballyEnabled(ctx)
+	if useBPS && account.excelBPSNativeFallbackReason(body) != "" && !account.IsExcelOAuth() {
+		useBPS = false
+	}
+	if c.GetBool(bpsAccountProbeRequiredContextKey) && !useBPS {
+		return nil, errors.New("BPS tool probe cannot fall back to a native route")
+	}
+
+	if !account.isBPSCredential() && !useBPS {
 		if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 			return nil, err
 		}
@@ -190,7 +198,7 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
-	if account.isBPSCredential() || account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) {
+	if account.isBPSCredential() || useBPS {
 		return s.forwardBPS(ctx, c, account, body, startTime)
 	}
 	managedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())

@@ -1695,6 +1695,20 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+
+	if failoverErr.IsExcelBPSImageAdmissionRejection() {
+		errType := "server_error"
+		if failoverErr.ClientStatusCode == http.StatusRequestEntityTooLarge {
+			errType = "invalid_request_error"
+		}
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, errType, string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
+		return
+	}
+	if failoverErr.Reason == service.ExcelBPSRateLimitedReason {
+		applyFailoverRetryAfter(c, failoverErr)
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, "rate_limit_error", string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
+		return
+	}
 	applyFailoverRetryAfter(c, failoverErr)
 	if failoverErr != nil && failoverErr.IsOpenAIRequestBodyTooLarge() {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
@@ -3733,6 +3747,20 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		}
 		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
 		h.handleStreamingAwareErrorWithCode(c, status, "upstream_error", service.OpenAIImagesInsufficientBalanceCode, message, streamStarted, false)
+		return
+	}
+
+	if failoverErr.IsExcelBPSImageAdmissionRejection() {
+		errType := "server_error"
+		if failoverErr.ClientStatusCode == http.StatusRequestEntityTooLarge {
+			errType = "invalid_request_error"
+		}
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, errType, string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
+		return
+	}
+	if failoverErr.Reason == service.ExcelBPSRateLimitedReason {
+		applyFailoverRetryAfter(c, failoverErr)
+		h.handleStreamingAwareErrorWithCode(c, failoverErr.ClientStatusCode, "rate_limit_error", string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
 		return
 	}
 	applyFailoverRetryAfter(c, failoverErr)

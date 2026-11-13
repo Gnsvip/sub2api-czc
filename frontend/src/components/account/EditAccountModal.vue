@@ -2035,6 +2035,25 @@
         </div>
       </div>
 
+      <div v-if="account?.platform === 'openai' && account?.type === 'oauth'" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2">
+          <input v-model="bpsEnabled" type="checkbox" :disabled="!isExcelBPSCredential" data-testid="bps-enabled" />
+          <span>{{ t('admin.accounts.openai.bpsEnabled') }}</span>
+        </label>
+        <p v-if="!isExcelBPSCredential" class="text-xs text-gray-500">{{ t('admin.accounts.openai.bpsCredentialHint') }}</p>
+        <template v-if="bpsEnabled && isExcelBPSCredential">
+          <label class="block">
+            <span class="input-label">{{ t('admin.accounts.openai.bpsModels') }}</span>
+            <input v-model="bpsModels" class="input" data-testid="bps-models" :placeholder="t('admin.accounts.openai.bpsModelsHint')" />
+          </label>
+          <label class="flex items-center gap-2">
+            <input v-model="bpsSessionProxy" type="checkbox" data-testid="bps-session-proxy" />
+            <span>{{ t('admin.accounts.openai.bpsSessionProxy') }}</span>
+          </label>
+          <p class="text-xs text-gray-500">{{ t('admin.accounts.openai.bpsSessionProxyHint') }}</p>
+        </template>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -4228,6 +4247,10 @@ const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
+const bpsEnabled = ref(false)
+const bpsSessionProxy = ref(false)
+const bpsModels = ref('')
+const isExcelBPSCredential = computed(() => props.account?.credentials?.client_id === 'app_fnr0pYvVwwFDocDumLG3H2Bp')
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -4760,6 +4783,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
+  bpsEnabled.value = extra?.openai_excel_bps === true
+  bpsSessionProxy.value = extra?.openai_excel_bps_session_proxy === true
+  bpsModels.value = Array.isArray(extra?.openai_excel_bps_models) ? extra.openai_excel_bps_models.filter((v): v is string => typeof v === 'string').join(', ') : ''
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -6295,8 +6321,11 @@ const handleSubmit = async () => {
         delete newExtra.openai_passthrough
         delete newExtra.openai_oauth_passthrough
       }
-      delete newExtra.openai_excel_bps
-      delete newExtra.openai_excel_bps_models
+      if (isExcelBPSCredential.value) {
+        newExtra.openai_excel_bps = bpsEnabled.value
+        newExtra.openai_excel_bps_session_proxy = bpsEnabled.value && bpsSessionProxy.value
+        newExtra.openai_excel_bps_models = [...new Set(bpsModels.value.split(/[,，\s]+/).filter(Boolean))]
+      }
       delete newExtra.openai_excel_bps_cache_creation_as_input
       delete newExtra.openai_excel_bps_auto_disable_on_403
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项

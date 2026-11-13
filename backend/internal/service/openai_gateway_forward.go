@@ -148,12 +148,14 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	clearOpenAIResponsesNamespaceNames(c)
 	setCodexToolNameReverse(c, nil)
 	rememberOpenAIResponsesClientInstructions(c, body)
-	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
-		return nil, err
+	if !account.isBPSCredential() {
+		if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
+			return nil, err
+		}
+		restoreClientSession := stageCodexHTTPClientSession(c, account, body)
+		defer restoreClientSession()
+		s.codexWireProfileForRequest(c, account, body)
 	}
-	restoreClientSession := stageCodexHTTPClientSession(c, account, body)
-	defer restoreClientSession()
-	s.codexWireProfileForRequest(c, account, body)
 	startTime := time.Now()
 	body, stripErr := StripOpenAIImageGenerationToolsForGroup(apiKeyGroup(getAPIKeyFromContext(c)), body)
 	if stripErr != nil {
@@ -187,6 +189,9 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 			},
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
+	}
+	if account.isBPSCredential() {
+		return s.forwardBPS(ctx, c, account, body, startTime)
 	}
 	managedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	managedNonReasoning := false
@@ -1836,6 +1841,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	if account.isBPSCredential() {
+		return nil, fmt.Errorf("Excel OAuth credentials cannot be sent through the Codex route")
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

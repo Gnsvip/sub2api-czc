@@ -756,6 +756,14 @@ export default {
           alibabaQwen: '阿里云千问',
           forceNonReasoning: '此服务商预设将强制使用非推理模式'
         },
+        bpsAuthFlow: '授权类型',
+        bpsAuthHint: '使用独立 Excel 授权；创建后默认关闭 BPS，请在编辑账号中开启。粘贴完整回调 URL 兑换。',
+        bpsEnabled: '启用 Excel BPS（默认关闭）',
+        bpsCredentialHint: '需新建账号并选择 Excel BPS 授权，普通 Codex 凭据不能直接切换。',
+        bpsModels: 'BPS 模型范围',
+        bpsModelsHint: '模型名用逗号分隔，留空不额外限制',
+        bpsSessionProxy: '按会话分配多个代理出口',
+        bpsSessionProxyHint: '使用 IP 管理中启用且未过期的代理。同会话固定出口，不同会话分散；空池不直连，账号并发限制不变。',
         oauthPassthrough: '自动透传（仅替换认证）',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',

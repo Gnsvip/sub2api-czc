@@ -61,6 +61,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.isBPSCredential() {
+		return nil, bpsRequestError(c, 400, "bps_responses_only", "This Excel BPS account supports HTTP /v1/responses only")
+	}
 	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
 }
 

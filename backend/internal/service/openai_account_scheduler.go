@@ -2639,6 +2639,9 @@ func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} 
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport, requestedModel ...string) bool {
+	if account.isBPSCredential() {
+		return requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE
+	}
 	if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 		return true
 	}

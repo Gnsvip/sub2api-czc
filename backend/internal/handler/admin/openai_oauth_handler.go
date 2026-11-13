@@ -106,6 +106,7 @@ func NewOpenAIOAuthHandler(
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL
 type OpenAIGenerateAuthURLRequest struct {
+	Flow        string `json:"flow"`
 	ProxyID     *int64 `json:"proxy_id"`
 	RedirectURI string `json:"redirect_uri"`
 }
@@ -119,11 +120,18 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req = OpenAIGenerateAuthURLRequest{}
 	}
 
+	platform := oauthPlatformFromPath(c)
+	if req.Flow == "excel_bps" {
+		platform = "excel_bps"
+	} else if req.Flow != "" && req.Flow != "openai" {
+		response.Error(c, http.StatusBadRequest, "Invalid OAuth flow")
+		return
+	}
 	result, err := h.openaiOAuthService.GenerateAuthURL(
 		c.Request.Context(),
 		req.ProxyID,
 		req.RedirectURI,
-		oauthPlatformFromPath(c),
+		platform,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)

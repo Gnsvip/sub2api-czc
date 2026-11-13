@@ -39,6 +39,9 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	if account == nil {
 		return openAIWSHTTPDecision("account_missing")
 	}
+	if account.isBPSCredential() {
+		return openAIWSHTTPDecision("bps_http_only")
+	}
 	if !account.IsOpenAI() {
 		return openAIWSHTTPDecision("platform_not_openai")
 	}

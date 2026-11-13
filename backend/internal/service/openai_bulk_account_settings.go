@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -9,6 +10,7 @@ import (
 )
 
 type bulkOpenAISettings struct {
+	bps                     bool
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
@@ -17,7 +19,7 @@ type bulkOpenAISettings struct {
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.bps || s.longContextBilling || s.endpointCapabilities || s.responsesMode
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -26,6 +28,14 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 		return settings, nil
 	}
 	stripRemovedOpenAIExcelBPSExtra(input.Extra)
+	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSModelsKey, OpenAIExcelBPSSessionProxyKey} {
+		if _, exists := input.Extra[key]; exists {
+			settings.bps = true
+		}
+	}
+	if _, exists := input.Credentials["client_id"]; exists {
+		settings.bps = true
+	}
 
 	if _, exists := input.Extra[openAILongContextBillingEnabledKey]; exists {
 		settings.longContextBilling = true
@@ -76,8 +86,6 @@ func stripRemovedOpenAIExcelBPSExtra(extra map[string]any) {
 		return
 	}
 	for _, key := range []string{
-		"openai_excel_bps",
-		"openai_excel_bps_models",
 		"openai_excel_bps_cache_creation_as_input",
 		"openai_excel_bps_auto_disable_on_403",
 		"codex_tibo_verdict:bps",
@@ -178,6 +186,20 @@ func validateBulkOpenAISettingsTargets(
 			return invalidBulkOpenAITarget(accountID, "account does not exist")
 		}
 
+		if settings.bps {
+			candidate := *account
+			candidate.Extra = maps.Clone(account.Extra)
+			if candidate.Extra == nil {
+				candidate.Extra = make(map[string]any)
+			}
+			for key, value := range input.Extra {
+				candidate.Extra[key] = value
+			}
+			candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+			if err := validateOpenAIBPSSettings(&candidate); err != nil {
+				return err
+			}
+		}
 		if settings.longContextBilling {
 			if account.Platform != PlatformOpenAI || !supportsOpenAILongContextBilling(account.Type) {
 				return invalidBulkOpenAITarget(accountID, "long-context billing requires an OpenAI OAuth, setup-token, or API-key account")

@@ -194,6 +194,9 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	if a.isBPSCredential() && !a.isBPSEnabled() {
+		return false
+	}
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -1409,6 +1412,9 @@ func isCodexOAuthAccount(a *Account) bool {
 // cli-chat-proxy 报 "version (none)" 426)。Codex 保真仅适用 openai(或
 // platform 缺省视为 openai 的 legacy 账号);其余 OAuth 平台一律排除。
 func (a *Account) UsesOpenAICodexProtocol() bool {
+	if a.isBPSCredential() {
+		return false
+	}
 	if a == nil {
 		return false
 	}

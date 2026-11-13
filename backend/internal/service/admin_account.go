@@ -443,6 +443,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	if err := validateOpenAIBPSSettings(account); err != nil {
+		return nil, err
+	}
 	applyOpenAIOAuthCreateDefaults(account, input.ConcurrencyProvided)
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -874,6 +877,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	if err := validateOpenAIBPSSettings(account); err != nil {
+		return nil, err
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {

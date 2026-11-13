@@ -82,6 +82,9 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 		redirectURI = openai.DefaultRedirectURI
 	}
 	normalizedPlatform := normalizeOpenAIOAuthPlatform(platform)
+	if normalizedPlatform == openai.OAuthPlatformExcel {
+		redirectURI = openai.ExcelRedirectURI
+	}
 	clientID, _ := openai.OAuthClientConfigByPlatform(normalizedPlatform)
 
 	// Store session
@@ -163,7 +166,7 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 
 	// Use redirect URI from session or input
 	redirectURI := session.RedirectURI
-	if input.RedirectURI != "" {
+	if input.RedirectURI != "" && session.ClientID != openai.ExcelClientID {
 		redirectURI = input.RedirectURI
 	}
 	clientID := strings.TrimSpace(session.ClientID)
@@ -327,6 +330,9 @@ func openAIAccessTokenExpiresAt(account *Account) *time.Time {
 // 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
 // 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
 func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
+	if tokenInfo != nil && tokenInfo.ClientID == openai.ExcelClientID {
+		return
+	}
 	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {
 		return
 	}
@@ -611,5 +617,8 @@ func (s *OpenAIOAuthService) Stop() {
 }
 
 func normalizeOpenAIOAuthPlatform(platform string) string {
+	if platform == openai.OAuthPlatformExcel {
+		return openai.OAuthPlatformExcel
+	}
 	return openai.OAuthPlatformOpenAI
 }

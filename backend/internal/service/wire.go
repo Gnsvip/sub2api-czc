@@ -458,6 +458,7 @@ func ProvideOpenAIRequestTimezoneRefreshWorker(
 ) *OpenAIRequestTimezoneRefreshWorker {
 	// Keep resolver wiring in the provider so Wire regeneration preserves the
 	// gateway's egress-timezone behavior alongside the refresh worker.
+	gateway.SetBPSProxyRepository(proxyRepo)
 	gateway.SetRequestTimezoneResolver(ProvideOpenAIRequestTimezoneResolver(latencyCache, cfg))
 	w := NewOpenAIRequestTimezoneRefreshWorker(prober, proxyRepo, latencyCache, openAIRequestTimezoneRefreshInterval)
 	w.Start()

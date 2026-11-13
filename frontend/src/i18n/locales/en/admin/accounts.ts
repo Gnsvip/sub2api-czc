@@ -632,6 +632,14 @@ export default {
           alibabaQwen: 'Alibaba Qwen',
           forceNonReasoning: 'Non-reasoning mode is enforced by this provider preset'
         },
+        bpsAuthFlow: 'Authorization type',
+        bpsAuthHint: 'Uses separate Excel authorization. BPS remains off after creation; enable it in Edit account. Paste the full callback URL to exchange the code.',
+        bpsEnabled: 'Enable Excel BPS (off by default)',
+        bpsCredentialHint: 'Create an account using Excel BPS authorization. Codex credentials cannot be switched directly.',
+        bpsModels: 'BPS models',
+        bpsModelsHint: 'Comma-separated model names; empty adds no restriction',
+        bpsSessionProxy: 'Assign proxy exits by session',
+        bpsSessionProxyHint: 'Uses enabled, unexpired proxies from IP management. Sessions keep their exit; different sessions spread across exits. No direct fallback; account concurrency stays unchanged.',
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',

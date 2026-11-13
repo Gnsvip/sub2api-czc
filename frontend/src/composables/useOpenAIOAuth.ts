@@ -52,7 +52,8 @@ export function useOpenAIOAuth() {
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
     proxyId?: number | null,
-    redirectUri?: string
+    redirectUri?: string,
+    flow: 'openai' | 'excel_bps' = 'openai'
   ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
@@ -61,7 +62,7 @@ export function useOpenAIOAuth() {
     error.value = ''
 
     try {
-      const payload: Record<string, unknown> = {}
+      const payload: Record<string, unknown> = { flow }
       if (proxyId) {
         payload.proxy_id = proxyId
       }

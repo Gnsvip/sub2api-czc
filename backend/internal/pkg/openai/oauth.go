@@ -38,6 +38,10 @@ const (
 const (
 	// OAuthPlatformOpenAI uses OpenAI Codex-compatible OAuth client.
 	OAuthPlatformOpenAI = "openai"
+	OAuthPlatformExcel  = "excel_bps"
+	ExcelClientID       = "app_fnr0pYvVwwFDocDumLG3H2Bp"
+	ExcelAuthorizeURL   = "https://auth.openai.com/api/accounts/authorize"
+	ExcelRedirectURI    = "https://bps.openai.com/basispoints/extension/360590d7-f8f9-4d88-bf75-0edfe0a4b9f3/auth/callback"
 )
 
 // OAuthSession stores OAuth flow state for OpenAI
@@ -177,6 +181,15 @@ func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 
 // BuildAuthorizationURLForPlatform builds authorization URL by platform.
 func BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, platform string) string {
+	if platform == OAuthPlatformExcel {
+		params := url.Values{
+			"client_id": {ExcelClientID}, "response_type": {"code"}, "redirect_uri": {ExcelRedirectURI},
+			"scope": {"openid offline_access email profile organization.read"}, "state": {state},
+			"code_challenge": {codeChallenge}, "code_challenge_method": {"S256"},
+			"audience": {"https://api.openai.com/v1"}, "platform": {"PC"},
+		}
+		return ExcelAuthorizeURL + "?" + params.Encode()
+	}
 	if redirectURI == "" {
 		redirectURI = DefaultRedirectURI
 	}
@@ -202,6 +215,9 @@ func BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, platfor
 
 // OAuthClientConfigByPlatform returns oauth client_id and whether codex simplified flow should be enabled.
 func OAuthClientConfigByPlatform(platform string) (clientID string, codexFlow bool) {
+	if platform == OAuthPlatformExcel {
+		return ExcelClientID, false
+	}
 	return ClientID, true
 }
 

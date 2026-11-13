@@ -15,6 +15,9 @@ const OpenAIAstraPolicyExtraKey = "codex_tibo_verdict:http"
 const OpenAIAstraProbeEnabledExtraKey = "openai_astra_probe_enabled"
 
 func (a *Account) IsOpenAIAstraProbeEnabled() bool {
+	if a.isBPSCredential() {
+		return false
+	}
 	if !isOpenAITiboAccount(a) {
 		return false
 	}

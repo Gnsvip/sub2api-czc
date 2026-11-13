@@ -71,15 +71,17 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: backend
         run: |
-          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|TestOpenAIBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
       - name: Compile shared packages and verify dependency wiring
         working-directory: backend
         run: |
           go build ./internal/...
           go generate ./cmd/server
           git diff --binary -- cmd/server/wire_gen.go >> "$RUNNER_TEMP/bps-generated.patch"
-      - name: Require committed formatting
-        run: test ! -s "$RUNNER_TEMP/bps-format.patch"
+      - name: Require committed formatting and generated bindings
+        run: |
+          test ! -s "$RUNNER_TEMP/bps-format.patch"
+          test ! -s "$RUNNER_TEMP/bps-generated.patch"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -75,6 +75,7 @@ JPEG、透明背景、流式、多图/mask 编辑等不适用请求保留原生 
 
 新增迁移：
 
+- `275_mihomo_static_nodes.sql`：IP 管理中的 Mihomo 静态节点配置。
 - `276_excel_bps_independent_grant.sql`：独立 Excel grant。
 - `277_excel_bps_authorization_queue.sql`：自动授权配置与任务。
 - `278_excel_bps_auto_policy.sql`：独立自动策略状态，不能经普通账号 Extra 伪造恢复快照。

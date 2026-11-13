@@ -22,6 +22,37 @@ import (
 const excelBPSInvalidCiphertext = `{"error":{"code":"invalid_encrypted_content","message":"private upstream diagnostic"}}`
 const excelBPSInvalidCiphertextNoCode = `{"error":{"message":"The encrypted content fixture...end could not be verified. Reason: Encrypted content could not be decrypted or parsed."}}`
 
+// Adapted from the pinned upstream gateway regression. Even the lossy historical
+// compatibility option must never discard the current encrypted assignment.
+func TestExcelBPSRejectsNewEncryptedAssignmentBeforeAnySubmission(t *testing.T) {
+	for _, ignore := range []bool{false, true} {
+		for _, top := range []bool{false, true} {
+			t.Run(fmt.Sprintf("ignore=%t/top=%t", ignore, top), func(t *testing.T) {
+				upstream := &httpUpstreamRecorder{}
+				svc := excelBPSTestService(upstream)
+				account := bpsUpstreamTestAccount()
+				account.Extra[ExcelBPSIgnoreEncryptedContentKey] = ignore
+				extra := ""
+				content := `[{"type":"input_text","text":"Header"},{"type":"encrypted_content","data":"SYNTHETIC_PRIVATE"}]`
+				if top {
+					extra = `,"encrypted_content":"SYNTHETIC_PRIVATE"`
+					content = `[{"type":"input_text","text":"Header"}]`
+				}
+				body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","input":[{"type":"agent_message","content":%s%s},{"type":"additional_tools","tools":[]}]}`, content, extra))
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(body))
+				_, err := svc.Forward(context.Background(), c, account, body)
+				require.Error(t, err)
+				require.Equal(t, 400, rec.Code)
+				require.Empty(t, upstream.requests)
+				require.Contains(t, rec.Body.String(), "new encrypted agent assignment")
+				require.NotContains(t, rec.Body.String(), "SYNTHETIC_PRIVATE")
+			})
+		}
+	}
+}
+
 func TestExcelBPSInvalidEncryptedContentClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw string

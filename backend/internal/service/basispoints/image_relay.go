@@ -15,6 +15,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,7 +78,10 @@ type relayImage struct {
 }
 
 func ValidateImageRelayOrigin(baseURL string) error {
-	if err := urlvalidator.ValidateHTTPSOrigin(baseURL); err != nil {
+	_, validErr := urlvalidator.ValidateHTTPSURL(baseURL, urlvalidator.ValidationOptions{})
+	u, parseErr := url.Parse(baseURL)
+	if validErr != nil || parseErr != nil || u == nil || u.User != nil ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" {
 		return fmt.Errorf("BPS image relay requires an HTTPS public origin without credentials, path, query or fragment")
 	}
 	return nil

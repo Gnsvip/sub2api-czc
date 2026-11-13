@@ -760,6 +760,9 @@ func (s *httpUpstreamService) getOrCreateClient(proxyURL string, accountID int64
 func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, markInFlight bool, enforceLimit bool) (*upstreamClientEntry, error) {
 	// 获取隔离模式
 	isolation := s.getIsolationMode()
+	if profile == service.HTTPUpstreamProfileBPS {
+		isolation = config.ConnectionPoolIsolationAccountProxy
+	}
 	// 标准化代理 URL 并解析
 	proxyKey, parsedProxy, err := normalizeProxyURL(proxyURL)
 	if err != nil {
@@ -1106,7 +1109,7 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
-	if profile == service.HTTPUpstreamProfileLongStream {
+	if profile == service.HTTPUpstreamProfileLongStream || profile == service.HTTPUpstreamProfileBPS {
 		return upstreamProtocolModeLongStreamH2
 	}
 	if profile == service.HTTPUpstreamProfileGrok {

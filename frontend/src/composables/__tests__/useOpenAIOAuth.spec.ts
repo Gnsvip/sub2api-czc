@@ -36,6 +36,22 @@ vi.mock('@/api/admin', () => ({
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { adminAPI } from '@/api/admin'
 
+describe('useOpenAIOAuth authorization flow', () => {
+  it('defaults to Codex and requests Excel only when explicitly selected', async () => {
+    const response = { auth_url: 'https://auth.openai.com/oauth/authorize?state=test-state', session_id: 'sid' }
+    vi.mocked(adminAPI.accounts.generateAuthUrl).mockResolvedValue(response)
+    const oauth = useOpenAIOAuth()
+    expect(await oauth.generateAuthUrl()).toBe(true)
+    expect(adminAPI.accounts.generateAuthUrl).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { flow: 'openai' })
+    expect(await oauth.generateAuthUrl(7, undefined, 'excel_bps')).toBe(true)
+    expect(adminAPI.accounts.generateAuthUrl).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { flow: 'excel_bps', proxy_id: 7 })
+    expect(oauth.oauthState.value).toBe('test-state')
+    oauth.resetState()
+    expect(oauth.sessionId.value).toBe('')
+    expect(oauth.oauthState.value).toBe('')
+  })
+})
+
 describe('useOpenAIOAuth.buildCredentials', () => {
   it('should keep client_id when token response contains it', () => {
     const oauth = useOpenAIOAuth()

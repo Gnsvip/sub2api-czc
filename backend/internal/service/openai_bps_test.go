@@ -113,9 +113,8 @@ func bpsTestAccount() *Account {
 }
 
 func bpsTestContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	r := httptest.NewRecorder()
-	c, _ = gin.CreateTestContext(r)
+	c, _ := gin.CreateTestContext(r)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	return c, r
 }
@@ -126,6 +125,8 @@ func TestBPSRequestScope(t *testing.T) {
 	a := bpsRequestScope(c, 1, []byte(`{"input":"first"}`))
 	require.Equal(t, a, bpsRequestScope(c, 1, []byte(`{"input":"second"}`)))
 	require.NotEqual(t, a, bpsRequestScope(c, 2, []byte(`{}`)))
+	c.Set("api_key", &APIKey{ID: 37})
+	require.NotEqual(t, a, bpsRequestScope(c, 1, []byte(`{}`)))
 	x, _ := bpsTestContext(`{}`)
 	y, _ := bpsTestContext(`{}`)
 	require.NotEqual(t, bpsRequestScope(x, 1, nil), bpsRequestScope(y, 1, nil))
@@ -147,6 +148,17 @@ func TestBPSDefaultOffAndSettingsValidation(t *testing.T) {
 	require.True(t, a.UsesOpenAICodexProtocol())
 	a.Extra = map[string]any{OpenAIExcelBPSEnabledKey: "true"}
 	require.Error(t, validateOpenAIBPSSettings(a))
+}
+
+func TestBPSBulkSettingsRequireExcelCredentials(t *testing.T) {
+	a := bpsTestAccount()
+	input := &BulkUpdateAccountsInput{AccountIDs: []int64{a.ID}, Extra: map[string]any{OpenAIExcelBPSSessionProxyKey: true}}
+	settings, err := normalizeBulkOpenAISettings(input)
+	require.NoError(t, err)
+	require.True(t, settings.any())
+	require.NoError(t, validateBulkOpenAISettingsTargets(input, settings, map[int64]*Account{a.ID: a}))
+	a.Credentials["client_id"] = openai.ClientID
+	require.Error(t, validateBulkOpenAISettingsTargets(input, settings, map[int64]*Account{a.ID: a}))
 }
 
 type bpsProxySourceStub struct {
@@ -184,6 +196,7 @@ func TestBPSForwardNoReplayAndNoDirectFallback(t *testing.T) {
 				require.NotEmpty(t, proxy)
 				require.Equal(t, "bps.openai.com", r.URL.Host)
 				require.Empty(t, r.Header.Get("Cookie"))
+				require.Equal(t, HTTPUpstreamProfileBPS, HTTPUpstreamProfileFromContext(r.Context()))
 				if failure == "transport" {
 					return nil, errors.New("connection lost")
 				}
@@ -208,6 +221,27 @@ func TestBPSForwardNoReplayAndNoDirectFallback(t *testing.T) {
 			}
 			for _, b := range svc.bpsSessions.bindings {
 				require.Zero(t, b.active)
+			}
+		})
+	}
+}
+
+func TestBPSForwardRouteAndDisabledBoundary(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			a := bpsTestAccount()
+			a.Extra[OpenAIExcelBPSEnabledKey] = enabled
+			body := []byte(`{"model":"gpt-6.1-sol","input":"hello"}`)
+			c, _ := bpsTestContext(string(body))
+			up := &httpUpstreamRecorder{err: errors.New("stop after capturing route")}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: up}
+			_, err := svc.Forward(context.Background(), c, a, body)
+			require.Error(t, err)
+			if enabled {
+				require.Len(t, up.requests, 1)
+				require.Equal(t, "bps.openai.com", up.lastReq.URL.Host)
+			} else {
+				require.Empty(t, up.requests)
 			}
 		})
 	}

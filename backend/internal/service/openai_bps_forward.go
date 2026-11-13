@@ -112,7 +112,7 @@ func (s *OpenAIGatewayService) forwardBPS(ctx context.Context, c *gin.Context, a
 }
 
 func (s *OpenAIGatewayService) sendBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, bridge *basispoints.Bridge, model string, stream bool, token, accountID, proxyURL string, start time.Time, proxyFailed *bool) (*OpenAIForwardResult, error) {
-	requestCtx, cancel := context.WithCancel(WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileLongStream)))
+	requestCtx, cancel := context.WithCancel(WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileBPS)))
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, basispoints.ResponsesURL, bytes.NewReader(body))
 	if err != nil {
@@ -131,8 +131,13 @@ func (s *OpenAIGatewayService) sendBPS(ctx context.Context, c *gin.Context, acco
 	traceOpenAIUpstream(ctx, c, account, 1, req)
 	timing := newOpenAIForwardTiming(c, req, account)
 	req = req.WithContext(timing.context(req.Context()))
+	stopKeepalive := func() {}
+	if stream && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		stopKeepalive = startOpenAISSEKeepalive(c, time.Duration(s.cfg.Gateway.StreamKeepaliveInterval)*time.Second)
+	}
 	sent := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	stopKeepalive()
 	timing.markResponse(resp, err)
 	traceOpenAIUpstreamResult(c, account, 1, resp, err)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())

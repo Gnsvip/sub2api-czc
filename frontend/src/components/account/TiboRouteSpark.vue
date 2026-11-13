@@ -31,14 +31,26 @@
         :title="slotTitle(slot)"
       />
     </span>
+    <time v-if="latestSampleAt" :datetime="latestSampleAt" :title="formatDateTime(latestSampleAt)" class="text-gray-400" data-testid="astra-probe-time">{{ formatDateTime(latestSampleAt, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) }}</time>
     <span v-if="probeEnabled === false" class="text-gray-400" data-testid="astra-probe-disabled">{{ t('admin.accounts.openai.astraProbeDisabled') }}</span>
+    <template v-if="probeEnabled !== undefined">
+      <button type="button" data-testid="astra-probe-interval" class="text-blue-600 disabled:opacity-50" :disabled="probeSaving || probeRunning" :title="t('admin.accounts.openai.astraProbeInterval')" @click.stop="editingInterval = !editingInterval">{{ t('admin.accounts.openai.astraProbeMinutes', { minutes: probeIntervalMinutes }) }}</button>
+      <button type="button" data-testid="astra-probe-run" class="text-blue-600 disabled:opacity-50" :disabled="probeSaving || probeRunning" @click.stop="emit('run-probe')">{{ t(probeRunning ? 'admin.accounts.openai.astraProbeRunning' : 'admin.accounts.openai.astraProbeRun') }}</button>
+      <form v-if="editingInterval" class="flex w-full flex-wrap items-center gap-1" @submit.prevent="saveInterval">
+        <input v-model.number="intervalDraft" class="input w-20 text-xs" data-testid="astra-probe-interval-input" type="number" min="5" max="1440" step="1" required :disabled="probeSaving || probeRunning" :aria-label="t('admin.accounts.openai.astraProbeInterval')" />
+        <button type="submit" data-testid="astra-probe-interval-save" :disabled="probeSaving || probeRunning">{{ t('common.save') }}</button>
+        <button type="button" data-testid="astra-probe-interval-default" :disabled="probeSaving || probeRunning" @click.stop="emit('set-interval', 0)">{{ t('admin.accounts.openai.astraProbeDefault') }}</button>
+        <span class="w-full text-gray-400">{{ t('admin.accounts.openai.astraProbeIntervalHint') }}</span>
+      </form>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { TiboRouteVerdict } from '@/types'
+import { formatDateTime } from '@/utils/format'
 
 const props = withDefaults(defineProps<{
   model: string
@@ -47,14 +59,31 @@ const props = withDefaults(defineProps<{
   compact?: boolean
   probeEnabled?: boolean
   probeSaving?: boolean
+  probeRunning?: boolean
+  probeIntervalMinutes?: number
+  lastSampleAt?: string
 }>(), {
   samples: () => [],
   compact: true,
   probeEnabled: undefined,
   probeSaving: false,
+  probeRunning: false,
+  probeIntervalMinutes: 10,
 })
 
-const emit = defineEmits<{ 'toggle-probe': [] }>()
+const emit = defineEmits<{ 'toggle-probe': []; 'run-probe': []; 'set-interval': [minutes: number] }>()
+
+const editingInterval = ref(false)
+const intervalDraft = ref(props.probeIntervalMinutes)
+watch(() => props.probeIntervalMinutes, value => { intervalDraft.value = value })
+function saveInterval() {
+  if (Number.isInteger(intervalDraft.value) && intervalDraft.value >= 5 && intervalDraft.value <= 1440) emit('set-interval', intervalDraft.value)
+}
+const latestSampleAt = computed(() => {
+  const times = [props.lastSampleAt, ...props.samples.map(sample => sample.at)]
+    .filter((at): at is string => !!at && Number.isFinite(Date.parse(at)))
+  return times.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
+})
 
 const { t } = useI18n()
 const sampleLimit = 24

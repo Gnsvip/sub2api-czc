@@ -1,0 +1,5 @@
+--- a/aifxo.com
++++ b/aifxo.com
+@@ -124 +124 @@
+-        sub_filter '</body>' '<script id="aifxo-hide-footer-links" src="/custom/hide-footer-links.js?v=20261109-remove-purchase-link"></script><script defer src="/custom/modeltrace.js?v=v0.2.70"></script></body>';
++        sub_filter '</body>' '<script id="aifxo-hide-footer-links" src="/custom/hide-footer-links.js?v=20261109-remove-purchase-link"></script></body>';

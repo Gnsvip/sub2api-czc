@@ -1,0 +1,90 @@
+name: Astra probe controls
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/internal/service/*astra*'
+      - 'backend/internal/service/*tibo*'
+      - 'backend/internal/service/admin_service*'
+      - 'backend/internal/handler/admin/account*'
+      - 'backend/internal/repository/account_repo*'
+      - 'backend/internal/repository/scheduler_cache.go'
+      - 'backend/internal/server/routes/admin.go'
+      - 'frontend/**'
+      - '.github/workflows/astra-probe-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: astra-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOMEMLIMIT: 3GiB
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check Go formatting
+        run: |
+          base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
+          git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.go' | xargs -0 -r gofmt -w
+          git diff --exit-code
+      - name: Astra scheduling, manual probe, admin and persistence regressions
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run '^(TestTibo|TestOpenAITibo|TestOpenAIAstra|TestOpenAICodexAux|TestAdminService_SetOpenAIAstraProbe|TestAccountHandler_AstraProbe|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|Test.*SchedulerExtra)' -count=1 -json > "$RUNNER_TEMP/astra-tests.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: astra-backend-validation
+          path: ${{ runner.temp }}/astra-tests.jsonl
+          retention-days: 7
+  frontend-and-embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run lint:check
+      - run: pnpm --dir frontend run build
+      - name: Frontend regressions
+        working-directory: frontend
+        run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/astra-frontend-tests.json"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compile Linux amd64 with fresh embedded frontend
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -tags embed -trimpath -o "$RUNNER_TEMP/astra-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: astra-frontend-validation
+          path: ${{ runner.temp }}/astra-frontend-tests.json
+          retention-days: 7

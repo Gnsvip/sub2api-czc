@@ -38,10 +38,10 @@ func (s *OpenAIGatewayService) openAITiboProbeSem() chan struct{} {
 // process-wide semaphore full). account may be nil for background probes; the
 // probe then reloads the authoritative account. Caller holds state.mu.
 func (s *OpenAIGatewayService) startOpenAITiboProbeLocked(state *openAITiboAccountState, route openAITiboRoute, account *Account, blocking bool, cfg openAITiboSettings, now time.Time) <-chan struct{} {
-	return s.startOpenAITiboProbeCtxLocked(context.Background(), state, route, account, blocking, cfg, now)
+	return s.startOpenAITiboProbeCtxLocked(context.Background(), state, route, account, blocking, cfg, now, false)
 }
 
-func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, blocking bool, cfg openAITiboSettings, now time.Time) <-chan struct{} {
+func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, blocking bool, cfg openAITiboSettings, now time.Time, manual bool) <-chan struct{} {
 	if account != nil && !account.IsOpenAIAstraProbeEnabled() {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Cont
 	s.openaiTiboProbeWG.Add(1)
 	go func() {
 		defer s.openaiTiboProbeWG.Done()
-		s.runOpenAITiboProbe(parent, state, route, snapshot, acquired)
+		s.runOpenAITiboProbe(parent, state, route, snapshot, acquired, manual)
 	}()
 	return done
 }
@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) startOpenAITiboProbeCtxLocked(parent context.Cont
 // runOpenAITiboProbe runs detached from any request (a cancelled request must
 // not discard the verdict); parent is the harvester context for tick probes
 // and context.Background otherwise.
-func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, acquired bool) {
+func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state *openAITiboAccountState, route openAITiboRoute, account *Account, acquired bool, manual bool) {
 	ctx, cancel := context.WithTimeout(parent, openAITiboProbeTimeout)
 	defer cancel()
 	if parent.Err() != nil {
@@ -121,6 +121,9 @@ func (s *OpenAIGatewayService) runOpenAITiboProbe(parent context.Context, state 
 			return
 		}
 		if account == nil {
+			if manual {
+				latest = manualOpenAITiboAccount(latest)
+			}
 			if hold := s.openAITiboHoldFor(s.withOpenAIQuotaAutoPauseContext(ctx), latest, time.Now()); hold.parked || !hold.until.IsZero() {
 				// Ineligible, rate-limited or disabled accounts are not sampled; keep
 				// the last definitive sparkline until they are eligible again.
@@ -188,12 +191,13 @@ func (s *OpenAIGatewayService) abortOpenAITiboProbe(state *openAITiboAccountStat
 // recordOpenAITiboSample applies one probe sample: vote, schedule, persist a
 // changed or aging confirmed verdict, and log flips.
 func (s *OpenAIGatewayService) recordOpenAITiboSample(state *openAITiboAccountState, route openAITiboRoute, account *Account, sample openAITiboProbeSample) {
-	cfg := s.openAITiboRouteConfig()
+	cfg := s.openAITiboConfigForAccount(account)
 	now := time.Now()
 	state.mu.Lock()
 	r := state.route(route)
 	before := r.effective(now, cfg)
 	transition := r.observe(sample, now, cfg)
+	r.interval = cfg.interval
 	r.scheduleNext(route, now, cfg)
 	done := r.done
 	r.inflight, r.done = false, nil
@@ -443,12 +447,12 @@ func (s *OpenAIGatewayService) enrollOpenAITiboAccounts(ctx context.Context) {
 		s.openaiTiboEnrolledAt.Store(last)
 		return
 	}
-	cfg := s.openAITiboRouteConfig()
 	enrolled, held := 0, 0
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	listed := make(map[int64]struct{}, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
+		cfg := s.openAITiboConfigForAccount(account)
 		if !s.openAITiboRouteApplies(account) {
 			continue
 		}
@@ -470,6 +474,7 @@ func (s *OpenAIGatewayService) enrollOpenAITiboAccounts(ctx context.Context) {
 		state.http.applyHold(hold)
 		firstSeen := state.http.nextProbeAt.IsZero() && state.http.lastSampleAt.IsZero() && state.http.verdict == ""
 		s.seedOpenAITiboStateLocked(state, account.Extra, now, cfg)
+		s.configureOpenAITiboIntervalLocked(state, account, cfg)
 		if firstSeen && (state.http.nextProbeAt.IsZero() || !state.http.nextProbeAt.After(now)) {
 			state.http.nextProbeAt = now.Add(openAITiboStartupDelay(cfg))
 		}
@@ -553,7 +558,7 @@ func (s *OpenAIGatewayService) probeOpenAITiboRoutes(ctx context.Context) {
 		state.mu.Lock()
 		defer state.mu.Unlock()
 		if state.http.due(now) {
-			s.startOpenAITiboProbeCtxLocked(ctx, state, openAITiboRouteHTTP, nil, false, cfg, now)
+			s.startOpenAITiboProbeCtxLocked(ctx, state, openAITiboRouteHTTP, nil, false, cfg, now, false)
 		}
 		return true
 	})
@@ -630,11 +635,14 @@ func (st *openAITiboStats) noteServed(degraded bool, cfg openAITiboSettings) {
 
 // OpenAITiboRouteStatus is the admin view of one route's Tibo state.
 type OpenAITiboRouteStatus struct {
-	Route     string     `json:"route"`
-	Verdict   string     `json:"verdict"`
-	Confirmed string     `json:"confirmed,omitempty"`
-	CheckedAt *time.Time `json:"checked_at,omitempty"`
-	FlippedAt *time.Time `json:"flipped_at,omitempty"`
+	Route                string     `json:"route"`
+	Verdict              string     `json:"verdict"`
+	Confirmed            string     `json:"confirmed,omitempty"`
+	CheckedAt            *time.Time `json:"checked_at,omitempty"`
+	LastSampleAt         *time.Time `json:"last_sample_at,omitempty"`
+	ProbeIntervalMinutes int        `json:"probe_interval_minutes"`
+	Probing              bool       `json:"probing"`
+	FlippedAt            *time.Time `json:"flipped_at,omitempty"`
 	// NextProbeAt is when the route next probes, including any account hold;
 	// absent while parked.
 	NextProbeAt *time.Time `json:"next_probe_at,omitempty"`
@@ -681,7 +689,7 @@ func (s *OpenAIGatewayService) openAITiboRouteStatuses(account *Account, now tim
 	out := make([]OpenAITiboRouteStatus, 0, len(routes))
 	state := s.loadOpenAITiboAccountState(account.ID)
 	for _, route := range routes {
-		item := OpenAITiboRouteStatus{Route: string(route), Verdict: string(openAITiboUnknown)}
+		item := OpenAITiboRouteStatus{Route: string(route), Verdict: string(openAITiboUnknown), ProbeIntervalMinutes: int(s.openAITiboConfigForAccount(account).interval / time.Minute)}
 		if state != nil {
 			state.mu.Lock()
 			r := state.route(route)
@@ -692,6 +700,7 @@ func (s *OpenAIGatewayService) openAITiboRouteStatuses(account *Account, now tim
 				item.HeldUntil = openAITiboTimePtr(r.holdUntil)
 			}
 			item.Parked, item.ClientErrorStreak = r.parked, r.clientErrorStreak
+			item.LastSampleAt, item.Probing = openAITiboTimePtr(r.lastSampleAt), r.inflight
 			for _, vote := range r.pending {
 				item.PendingVotes = append(item.PendingVotes, string(vote))
 			}
@@ -725,6 +734,9 @@ func (s *OpenAIGatewayService) openAITiboRouteStatuses(account *Account, now tim
 					item.RecentSamples = append(item.RecentSamples, OpenAITiboSampleStatus{Verdict: string(sample.Verdict), At: openAITiboTimePtr(sample.At)})
 				}
 			}
+		}
+		if item.LastSampleAt == nil && len(item.RecentSamples) > 0 {
+			item.LastSampleAt = item.RecentSamples[len(item.RecentSamples)-1].At
 		}
 		out = append(out, item)
 	}

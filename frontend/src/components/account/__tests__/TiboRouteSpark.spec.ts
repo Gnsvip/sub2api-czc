@@ -64,3 +64,19 @@ it('describes 24 Tibo samples and xhigh probes in both locales', () => {
     expect(locale.accounts.openai.codexTiboRouteDesc).toContain('astra / xhigh')
   }
 })
+
+it('shows the newest timestamp and emits interval/default actions without changing the switch', async () => {
+  const wrapper = mount(TiboRouteSpark, { props: { model: 'gpt-6-astra', verdict: 'healthy', probeEnabled: false, probeIntervalMinutes: 30,
+    lastSampleAt: '2026-11-13T02:00:00Z', samples: [{ verdict: 'healthy', at: '2026-11-12T01:00:00Z' }, { verdict: 'healthy', at: 'invalid' }] } })
+  expect(wrapper.get('[data-testid="astra-probe-time"]').attributes('datetime')).toBe('2026-11-13T02:00:00Z')
+  await wrapper.get('[data-testid="astra-probe-interval"]').trigger('click')
+  await wrapper.get('[data-testid="astra-probe-interval-input"]').setValue(4)
+  await wrapper.get('form').trigger('submit')
+  expect(wrapper.emitted('set-interval')).toBeUndefined()
+  await wrapper.get('[data-testid="astra-probe-interval-input"]').setValue(60)
+  await wrapper.get('form').trigger('submit')
+  await wrapper.get('[data-testid="astra-probe-interval-default"]').trigger('click')
+  expect(wrapper.emitted('set-interval')).toEqual([[60], [0]])
+  expect(wrapper.emitted('toggle-probe')).toBeUndefined()
+  wrapper.unmount()
+})

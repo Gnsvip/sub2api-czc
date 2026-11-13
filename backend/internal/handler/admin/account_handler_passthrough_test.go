@@ -116,3 +116,29 @@ func TestAccountHandler_Create_AnthropicAPIKeyPassthroughExtraForwarded(t *testi
 	require.NotNil(t, created.Extra)
 	require.Equal(t, true, created.Extra["anthropic_passthrough"])
 }
+
+func (s *astraProbeAdminStub) SetOpenAIAstraProbeInterval(_ context.Context, id int64, minutes int) (*service.Account, error) {
+	s.calls++
+	return &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAIAstraProbeIntervalExtraKey: minutes}}, nil
+}
+func TestAccountHandler_AstraProbeInterval(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{{`{"interval_minutes":30}`, 200}, {`{"interval_minutes":0}`, 200}, {`{}`, 400}, {`{"interval_minutes":5.5}`, 400}, {`{"interval_minutes":"30"}`, 400}} {
+		svc := &astraProbeAdminStub{}
+		h := &AccountHandler{adminService: svc}
+		router := gin.New()
+		router.PUT("/accounts/:id/astra-probe/interval", h.SetOpenAIAstraProbeInterval)
+		req := httptest.NewRequest(http.MethodPut, "/accounts/12/astra-probe/interval", bytes.NewBufferString(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		require.Equal(t, tc.status, rec.Code, rec.Body.String())
+		if tc.status == 200 {
+			require.Equal(t, 1, svc.calls)
+		} else {
+			require.Zero(t, svc.calls)
+		}
+	}
+}

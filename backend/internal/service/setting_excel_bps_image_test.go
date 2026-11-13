@@ -235,3 +235,29 @@ func TestExcelBPSImageLimitsHotReload(t *testing.T) {
 	_, err = settings.GetExcelBPSImageRelaySettings(ctx)
 	require.Error(t, err)
 }
+
+func (r *excelBPSImageSettingsRepo) Set(ctx context.Context, key, value string) error {
+	return r.SetMultiple(ctx, map[string]string{key: value})
+}
+func TestExcelBPSDefaultsAreOnlyATemplate(t *testing.T) {
+	repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "false"}}
+	svc := NewOpenAIOAuthService(nil, nil)
+	svc.excelGrants = &OpenAIExcelOAuthService{settings: repo}
+	defaults, err := svc.ExcelBPSDefaults(t.Context())
+	require.NoError(t, err)
+	require.True(t, defaults.IgnoreEncryptedContent)
+	require.True(t, defaults.AutoDisableOn403)
+	defaults.SessionProxy = true
+	defaults.ProxySource = "ip_pool"
+	require.NoError(t, svc.SaveExcelBPSDefaults(t.Context(), defaults))
+	loaded, err := svc.ExcelBPSDefaults(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, defaults, loaded)
+	require.Equal(t, "false", repo.values[SettingKeyExcelBPSEnabled])
+	require.Len(t, repo.values, 2)
+	defaults.ProxySource = "direct"
+	require.Error(t, svc.SaveExcelBPSDefaults(t.Context(), defaults))
+	loaded, err = svc.ExcelBPSDefaults(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "ip_pool", loaded.ProxySource)
+}

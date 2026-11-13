@@ -70,7 +70,7 @@ export function bpsDefaultsPayload(v: BPSSettings): BPSDefaults {
  omit_unsupported_tools:v.omitTools,ignore_encrypted_content:v.ignoreEncrypted}
 }
 export function fromBPSDefaults(d: BPSDefaults): BPSSettings {
- return {enabled:true,allModels:d.all_models,models:[...d.models],sessionProxy:d.session_proxy,proxySource:d.proxy_source,
+ return {enabled:true,allModels:d.all_models,models:Array.isArray(d.models)?[...d.models]:[],sessionProxy:d.session_proxy,proxySource:d.proxy_source,
  cacheCreationAsInput:d.cache_creation_as_input,autoDisable:d.auto_disable_on_403,autoRecover:d.auto_recover_on_403,
  recoveryMinutes:d.recovery_interval_minutes,autoMove:d.auto_move_on_403,targetGroup:d.target_group_id<0?'':d.target_group_id,
  omitTools:d.omit_unsupported_tools,ignoreEncrypted:d.ignore_encrypted_content}

@@ -94,4 +94,4 @@ implementation is imported.
 
 ## Session-proxy port to Gnsvip/sub2api-czc
 
-Protocol source: ranxi2001/sub2api v2.21.1, commit 11f250894eab310cbd4508946c44c9e2a3a2eb48. The local gateway and bounded static-proxy session scheduler are adapted for this fork; Mihomo, multi-auth, deployment, ticket and Cookie WS systems are not imported.
+Protocol source: ranxi2001/sub2api v2.21.1, commit 11f250894eab310cbd4508946c44c9e2a3a2eb48. The local gateway, Mihomo/static session scheduling, independent Excel grants, worker integration, image paths and automatic BPS policy are adapted for this fork. The separate generalized multi-auth, SIWC, credential-shadow, deployment, and Cookie WS systems are not imported. See docs/bps-session-proxies.md for the integration boundaries.

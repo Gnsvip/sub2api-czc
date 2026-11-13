@@ -1,3 +1,5 @@
+import BPSAccountSettings from '../BPSAccountSettings.vue'
+import { readBPSSettings, initialBPSDefaults, bpsDefaultsPayload } from '../bpsSettings'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import BPSAutomaticAuthorization from '../BPSAutomaticAuthorization.vue'
@@ -33,4 +35,16 @@ describe('BPS automatic authorization', () => {
     expect((wrapper.get('[aria-label="登录邮箱"]').element as HTMLInputElement).value).not.toBe('old@example.com')
     wrapper.unmount()
   })
+})
+
+it('does not apply a delayed default template after switching account forms', async () => {
+ let resolve!: (value: unknown) => void
+ api.get.mockReturnValueOnce(new Promise(r => { resolve=r }))
+ const wrapper=mount(BPSAccountSettings,{props:{modelValue:readBPSSettings({}),groups:[]},global:{stubs:{ModelWhitelistSelector:true}}})
+ await wrapper.findAll('button').find(button=>button.text()==='应用已保存模板')!.trigger('click')
+ await wrapper.setProps({modelValue:readBPSSettings({openai_excel_bps_models:['other-account-model']})})
+ resolve({data:bpsDefaultsPayload(initialBPSDefaults())});await flushPromises()
+ expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+ expect(wrapper.findAll('button')[0]!.attributes('disabled')).toBeUndefined()
+ wrapper.unmount()
 })

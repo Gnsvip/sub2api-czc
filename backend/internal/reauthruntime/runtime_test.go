@@ -162,3 +162,40 @@ func TestManagedProcessGetsOnlyWorkerEnvironmentAndStops(t *testing.T) {
 	m.Stop()
 	require.Equal(t, "stopped", m.Status().State)
 }
+
+// Opt-in download/self-check only. It never calls claim or logs into OpenAI.
+func TestExcelBPSPinnedRuntimeReleaseSelfCheck(t *testing.T) {
+	if os.Getenv("BPS_RUNTIME_SMOKE") != "1" {
+		t.Skip("opt-in pinned release download/self-check")
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("Linux amd64 release")
+	}
+	const expected = "825697a600a3b7ebffa9477f5684aca06c70ba448b28e4280ec89d55611749cc"
+	m := New(t.TempDir(), "2.21.1", "http://127.0.0.1:1", strings.Repeat("test-only-", 8))
+	// Verify the reviewed asset digest before any archive content is executed.
+	m.client = &http.Client{Timeout: 5 * time.Minute, Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
+		resp, err := http.DefaultTransport.RoundTrip(req)
+		if err != nil {
+			return nil, err
+		}
+		if req.URL.Host == "api.github.com" && resp.StatusCode == http.StatusOK {
+			data, e := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+			_ = resp.Body.Close()
+			if e != nil {
+				return nil, e
+			}
+			require.Contains(t, string(data), "sha256:"+expected, "upstream runtime was replaced; review before updating pin")
+			resp.Body = io.NopCloser(bytes.NewReader(data))
+		}
+		return resp, nil
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	dir, err := m.prepare(ctx)
+	require.NoError(t, err)
+	digest, err := os.ReadFile(filepath.Join(dir, "ready"))
+	require.NoError(t, err)
+	require.Equal(t, expected, string(digest))
+	require.Equal(t, "idle", m.Status().State, "self-check must not start a live worker")
+}

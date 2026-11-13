@@ -62,6 +62,11 @@ jobs:
         working-directory: backend
         run: |
           go test -race ./internal/service/basispoints ./internal/mihomo ./internal/reauthruntime ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
+      - name: Pinned Excel runtime self-check (no login)
+        working-directory: backend
+        env:
+          BPS_RUNTIME_SMOKE: '1'
+        run: go test ./internal/reauthruntime -run '^TestExcelBPSPinnedRuntimeReleaseSelfCheck$' -count=1 -timeout=9m -json > "$RUNNER_TEMP/bps-runtime-tests.jsonl"
       - name: Account routing regressions
         if: ${{ !cancelled() }}
         working-directory: backend

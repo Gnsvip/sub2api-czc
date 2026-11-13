@@ -90,7 +90,14 @@ func TestBulkUpdateExcelBPSExtra(t *testing.T) {
 					expression = "(" + expression + ") - '" + key + "'"
 				}
 			}
-			require.Equal(t, "UPDATE accounts SET extra = "+expression+", updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL", query)
+			if _, changesProtocol := tt.extra["openai_excel_bps"]; changesProtocol {
+				require.Contains(t, query, expression, "preserve the existing model/switch/403 update semantics")
+				require.Contains(t, query, "g.account_id=accounts.id")
+				require.Contains(t, query, "openai_excel_bps_authorization_pending")
+				require.Contains(t, query, "WHERE id = ANY($2) AND deleted_at IS NULL")
+			} else {
+				require.Equal(t, "UPDATE accounts SET extra = "+expression+", updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL", query)
+			}
 			payload, ok := exec.execArgs[0][0].([]byte)
 			require.True(t, ok)
 			want, err := json.Marshal(tt.extra)

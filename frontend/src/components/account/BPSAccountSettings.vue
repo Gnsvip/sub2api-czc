@@ -46,7 +46,7 @@
 
 <script setup lang="ts">
 import ModelWhitelistSelector from './ModelWhitelistSelector.vue'
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import apiClient from '@/api/client'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { fromBPSDefaults, initialBPSDefaults, type BPSDefaults, type BPSSettings } from './bpsSettings'
@@ -54,11 +54,12 @@ const value = defineModel<BPSSettings>({ required: true })
 withDefaults(defineProps<{ groups: { id: number; name: string; platform: string }[]; recoveryPending?: boolean; templateControls?: boolean; policyControls?: boolean; optionsOnly?: boolean }>(), {templateControls:true,policyControls:true,optionsOnly:false})
 const loadingTemplate=ref(false), templateError=ref('')
 let generation=0
+watch(value, (next, previous)=>{if(next!==previous){generation++;loadingTemplate.value=false;templateError.value=''}},{flush:'sync'})
 onBeforeUnmount(()=>{generation++})
 function applyInitial(){generation++;loadingTemplate.value=false;templateError.value='';value.value={...initialBPSDefaults(),autoPolicy:value.value.autoPolicy}}
 async function applyTemplate(){
- const version=++generation;loadingTemplate.value=true;templateError.value=''
- try {const {data}=await apiClient.get<BPSDefaults>('/admin/openai/bps-defaults');if(version===generation)value.value={...fromBPSDefaults(data),autoPolicy:value.value.autoPolicy}}
+ const version=++generation, snapshot=JSON.stringify(value.value);loadingTemplate.value=true;templateError.value=''
+ try {const {data}=await apiClient.get<BPSDefaults>('/admin/openai/bps-defaults');if(version===generation){if(JSON.stringify(value.value)===snapshot)value.value={...fromBPSDefaults(data),autoPolicy:value.value.autoPolicy};else templateError.value='表单已修改，请重新应用模板'}}
  catch(e){if(version===generation)templateError.value=extractApiErrorMessage(e,'读取模板失败')}
  finally{if(version===generation)loadingTemplate.value=false}
 }

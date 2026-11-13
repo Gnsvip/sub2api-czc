@@ -332,4 +332,31 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 		require.Equal(t, "value", keep)
 	})
 
+	t.Run("partial and bulk activation prepares pending atomically", func(t *testing.T) {
+		for i, scenario := range []string{"missing", "ready", "disabled", "legacy"} {
+			id := int64(500 + i)
+			native := string(primaryJSON)
+			if scenario == "legacy" {
+				native = `{"client_id":"app_fnr0pYvVwwFDocDumLG3H2Bp"}`
+			}
+			_, e := db.Exec(`INSERT INTO accounts(id,credentials,extra) VALUES($1,$2::jsonb,'{"keep":"value","openai_excel_bps_authorization_pending":true}')`, id, native)
+			require.NoError(t, e)
+			if scenario == "ready" {
+				_, e = db.Exec(`INSERT INTO openai_excel_oauth_credentials(account_id,credentials_ciphertext) VALUES($1,'grant')`, id)
+				require.NoError(t, e)
+			}
+			payload := `{"openai_excel_bps":true}`
+			if scenario == "disabled" {
+				payload = `{"openai_excel_bps":false}`
+			}
+			_, e = db.Exec(`UPDATE accounts SET extra=`+excelBPSPendingExtraSQL("COALESCE(extra,'{}'::jsonb)||$1::jsonb")+` WHERE id=$2`, payload, id)
+			require.NoError(t, e)
+			var pending bool
+			var keep string
+			require.NoError(t, db.QueryRow(`SELECT COALESCE(extra->>'openai_excel_bps_authorization_pending','false')::boolean,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&pending, &keep))
+			require.Equal(t, scenario == "missing", pending, scenario)
+			require.Equal(t, "value", keep)
+		}
+	})
+
 }

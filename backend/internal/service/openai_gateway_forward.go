@@ -152,7 +152,7 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	setCodexToolNameReverse(c, nil)
 	rememberOpenAIResponsesClientInstructions(c, body)
 	useBPS := account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) && s.excelBPSGloballyEnabled(ctx)
-	if c.GetBool(bpsAccountProbeRequiredContextKey) && !useBPS {
+	if c.GetBool(bpsAccountProbeRequiredContextKey) && (!useBPS || account.excelBPSNativeFallbackReason(body) != "") {
 		return nil, errors.New("BPS tool probe cannot fall back to a native route")
 	}
 

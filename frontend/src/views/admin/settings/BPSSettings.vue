@@ -26,6 +26,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'
+import { excelBPSImageLimits as cap } from '@/utils/excelBPSImageLimits'
 const { locale } = useI18n()
 const text = (zh: string, en: string) => locale.value.startsWith('zh') ? zh : en
 const loading=ref(true), saving=ref(false), saved=ref(false), error=ref('')
@@ -37,17 +38,17 @@ const form=reactive<Record<string, string | number | boolean>>({
  excel_bps_image_warning_remaining:8, excel_bps_image_compact_reserve:3,
 })
 const limits=[
- {key:'excel_bps_image_body_limit_mib',zh:'请求大小（MiB）',en:'Request limit (MiB)',min:1,max:1024},
- {key:'excel_bps_image_budget_mib',zh:'并发内存预算（MiB）',en:'Memory budget (MiB)',min:1,max:16384},
- {key:'excel_bps_image_max_requests',zh:'图片并发请求',en:'Concurrent image requests',min:1,max:4096},
- {key:'excel_bps_image_max_image_mib',zh:'单图大小（MiB）',en:'Per-image limit (MiB)',min:1,max:100},
- {key:'excel_bps_image_max_images',zh:'单次图片数',en:'Images per request',min:1,max:100},
- {key:'excel_bps_image_max_total_mib',zh:'图片总大小（MiB）',en:'Total images (MiB)',min:1,max:1024},
- {key:'excel_bps_image_storage_mib',zh:'临时存储（MiB）',en:'Relay storage (MiB)',min:1,max:16384},
- {key:'excel_bps_image_storage_entries',zh:'临时图片条目数',en:'Relay entries',min:1,max:100000},
- {key:'excel_bps_image_ttl_minutes',zh:'临时图片保留（分钟）',en:'Relay retention (minutes)',min:1,max:1440},
- {key:'excel_bps_image_warning_remaining',zh:'剩余多少张时提醒',en:'Warn at remaining slots',min:1,max:100},
- {key:'excel_bps_image_compact_reserve',zh:'预留压缩图片数',en:'Reserved compact slots',min:1,max:100},
+ {key:'excel_bps_image_body_limit_mib',zh:'请求大小（MiB）',en:'Request limit (MiB)',min:1,max:cap.bodyMiB},
+ {key:'excel_bps_image_budget_mib',zh:'并发内存预算（MiB）',en:'Memory budget (MiB)',min:cap.minBudgetMiB,max:cap.budgetMiB},
+ {key:'excel_bps_image_max_requests',zh:'图片并发请求',en:'Concurrent image requests',min:1,max:cap.requests},
+ {key:'excel_bps_image_max_image_mib',zh:'单图大小（MiB）',en:'Per-image limit (MiB)',min:1,max:cap.imageMiB},
+ {key:'excel_bps_image_max_images',zh:'单次图片数',en:'Images per request',min:1,max:cap.images},
+ {key:'excel_bps_image_max_total_mib',zh:'图片总大小（MiB）',en:'Total images (MiB)',min:1,max:cap.totalMiB},
+ {key:'excel_bps_image_storage_mib',zh:'临时存储（MiB）',en:'Relay storage (MiB)',min:1,max:cap.storageMiB},
+ {key:'excel_bps_image_storage_entries',zh:'临时图片条目数',en:'Relay entries',min:1,max:cap.storageEntries},
+ {key:'excel_bps_image_ttl_minutes',zh:'临时图片保留（分钟）',en:'Relay retention (minutes)',min:1,max:cap.ttlMinutes},
+ {key:'excel_bps_image_warning_remaining',zh:'剩余多少张时提醒',en:'Warn at remaining slots',min:1,max:cap.images},
+ {key:'excel_bps_image_compact_reserve',zh:'预留压缩图片数',en:'Reserved compact slots',min:1,max:cap.images},
 ]
 onMounted(async()=>{try{const {data}=await apiClient.get<Record<string,unknown>>('/admin/settings');for(const key of Object.keys(form)){if(typeof data[key]===typeof form[key])form[key]=data[key] as string|number|boolean}}catch{error.value=text('加载失败，请重试','Failed to load settings')}finally{loading.value=false}})
 async function save(){saving.value=true;saved.value=false;error.value='';try{await apiClient.put('/admin/settings',{...form});saved.value=true}catch(e){const detail=e as {response?:{data?:{message?:string}}};error.value=detail.response?.data?.message||text('保存失败，请检查设置','Could not save settings')}finally{saving.value=false}}

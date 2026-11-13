@@ -17,8 +17,9 @@
       <p v-if="value.autoMove" class="text-xs text-gray-500">替换全部原分组；恢复 BPS 时不会还原分组。</p>
       <label class="flex items-center gap-2"><input v-model="value.cacheCreationAsInput" type="checkbox" />缓存创建按普通输入计费</label>
       <label class="flex items-center gap-2"><input v-model="value.omitTools" type="checkbox" />忽略 BPS 不支持的托管工具</label>
+      <label class="flex items-center gap-2"><input v-model="value.ignoreImages" type="checkbox" />图片支持关闭时忽略历史图片输入</label>
       <label class="flex items-center gap-2"><input v-model="value.ignoreEncrypted" type="checkbox" />用缺失提示替代不支持的加密历史</label>
-      <p v-if="value.ignoreEncrypted || value.omitTools" class="text-xs text-amber-600">这些兼容选项会省略不支持的历史内容或工具，默认关闭。</p>
+      <p v-if="value.ignoreEncrypted || value.omitTools || value.ignoreImages" class="text-xs text-amber-600">这些兼容选项会省略不支持的历史内容或工具，默认关闭。</p>
     </template>
   </fieldset>
 </template>

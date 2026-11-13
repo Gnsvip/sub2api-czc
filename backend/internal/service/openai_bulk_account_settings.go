@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -28,16 +29,10 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 		return settings, nil
 	}
 	stripRemovedOpenAIExcelBPSExtra(input.Extra)
-	for _, key := range []string{OpenAIExcelBPSEnabledKey, OpenAIExcelBPSModelsKey, OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", "openai_excel_bps_auto_move_on_403", ExcelBPSAutoRecoverOn403Key, "openai_excel_bps_ignore_encrypted_content", "openai_excel_bps_omit_unsupported_tools", "openai_excel_bps_proxy_source", "openai_excel_bps_403_target_group_id", "openai_excel_bps_403_recovery_interval_minutes"} {
-		if _, exists := input.Extra[key]; exists {
-			settings.bps = true
-		}
-	}
-
-	if settings.bps {
-		if err := validateExcelBPS403RecoveryExtra(input.Extra); err != nil {
-			return settings, err
-		}
+	var err error
+	settings.bps, err = normalizeBulkExcelBPSExtra(input.Extra)
+	if err != nil {
+		return settings, err
 	}
 	if _, exists := input.Credentials["client_id"]; exists {
 		settings.bps = true
@@ -96,6 +91,95 @@ func stripRemovedOpenAIExcelBPSExtra(extra map[string]any) {
 	} {
 		delete(extra, key)
 	}
+}
+
+// A nil model scope removes the key (all models); an empty list selects no models.
+func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
+	changed := false
+	if _, exists := extra[ExcelBPS403RecoveryIntervalMinutesKey]; exists {
+		changed = true
+		if err := validateExcelBPS403RecoveryExtra(extra); err != nil {
+			return true, err
+		}
+	}
+	for _, key := range []string{"openai_excel_bps", ExcelBPSIgnoreEncryptedContentKey, "openai_excel_bps_cache_creation_as_input", "openai_excel_bps_auto_disable_on_403", ExcelBPSAutoRecoverOn403Key, ExcelBPSAutoMoveOn403Key, "openai_excel_bps_mihomo", OpenAIExcelBPSSessionProxyKey, "openai_excel_bps_ignore_images", ExcelBPSOmitUnsupportedToolsKey} {
+		if raw, exists := extra[key]; exists {
+			changed = true
+			if _, ok := raw.(bool); !ok {
+				return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", key+" must be a boolean")
+			}
+		}
+	}
+	if raw, exists := extra[ExcelBPS403TargetGroupIDKey]; exists {
+		changed = true
+		if _, ok := excelBPS403GroupID(raw); raw != nil && !ok {
+			return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", ExcelBPS403TargetGroupIDKey+" must be a nonnegative integer")
+		}
+	}
+	if raw, exists := extra["openai_excel_bps_models"]; exists {
+		changed = true
+		if raw != nil {
+			models := make([]string, 0)
+			switch values := raw.(type) {
+			case []string:
+				models = append(models, values...)
+			case []any:
+				for _, value := range values {
+					model, ok := value.(string)
+					if !ok {
+						return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "openai_excel_bps_models must be an array of strings or null")
+					}
+					models = append(models, model)
+				}
+			default:
+				return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "openai_excel_bps_models must be an array of strings or null")
+			}
+			normalized := make([]string, 0, len(models))
+			seen := make(map[string]bool, len(models))
+			for _, model := range models {
+				model = strings.TrimSpace(model)
+				if model != "" && !seen[model] {
+					normalized = append(normalized, model)
+					seen[model] = true
+				}
+			}
+			extra["openai_excel_bps_models"] = normalized
+		}
+	}
+	if enabled, exists := extra["openai_excel_bps"].(bool); exists && !enabled {
+		extra["openai_excel_bps_models"] = nil
+		if _, exists := extra["openai_excel_bps_mihomo"]; exists {
+			extra["openai_excel_bps_mihomo"] = false
+		}
+		extra["openai_excel_bps_cache_creation_as_input"] = false
+		if _, exists := extra[ExcelBPSAutoRecoverOn403Key]; exists {
+			extra[ExcelBPSAutoRecoverOn403Key] = false
+		}
+		if _, exists := extra[ExcelBPSIgnoreEncryptedContentKey]; exists {
+			extra[ExcelBPSIgnoreEncryptedContentKey] = false
+		}
+		if _, exists := extra["openai_excel_bps_auto_disable_on_403"]; exists {
+			extra["openai_excel_bps_auto_disable_on_403"] = false
+		}
+		if _, exists := extra[ExcelBPSAutoMoveOn403Key]; exists {
+			extra[ExcelBPSAutoMoveOn403Key] = false
+		}
+		if _, exists := extra[ExcelBPS403TargetGroupIDKey]; exists {
+			extra[ExcelBPS403TargetGroupIDKey] = nil
+		}
+	}
+	if raw, exists := extra[ExcelBPSProxySourceKey]; exists {
+		changed = true
+		if raw != ExcelBPSProxySourceMihomo && raw != ExcelBPSProxySourceIPPool {
+			return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "BPS proxy source must be mihomo or ip_pool")
+		}
+	}
+	if extra["openai_excel_bps"] == false {
+		if _, exists := extra[OpenAIExcelBPSSessionProxyKey]; exists {
+			extra[OpenAIExcelBPSSessionProxyKey] = false
+		}
+	}
+	return changed, nil
 }
 
 func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
@@ -191,6 +275,9 @@ func validateBulkOpenAISettingsTargets(
 		}
 
 		if settings.bps {
+			if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() {
+				return invalidBulkOpenAITarget(accountID, "BPS settings require an OpenAI ChatGPT OAuth account")
+			}
 			candidate := *account
 			candidate.Extra = maps.Clone(account.Extra)
 			if candidate.Extra == nil {

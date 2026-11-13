@@ -139,14 +139,16 @@ func TestBPSForwardResponsesAndUsage(t *testing.T) {
 }
 
 func TestBPSRejectUnsupportedBeforeSending(t *testing.T) {
-	for _, input := range []string{`[{"type":"reasoning","encrypted_content":"ciphertext"}]`, `[{"type":"compaction_trigger"}]`} {
+	for _, input := range []string{`[{"role":"user","content":[{"type":"encrypted_content","encrypted_content":"ciphertext"}]}]`, `[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"ciphertext","format":"wav"}}]}]`} {
 		body := []byte(`{"model":"gpt-6.1-sol","input":` + input + `}`)
 		c, rec := bpsTestContext(string(body))
-		svc := excelBPSTestService(&httpUpstreamRecorder{})
+		upstream := &httpUpstreamRecorder{}
+		svc := excelBPSTestService(upstream)
 		_, err := svc.forwardBPS(context.Background(), c, bpsTestAccount(), body, time.Now())
 		require.Error(t, err)
 		require.Equal(t, 400, rec.Code)
 		require.NotContains(t, rec.Body.String(), "ciphertext")
+		require.Empty(t, upstream.requests)
 	}
 }
 

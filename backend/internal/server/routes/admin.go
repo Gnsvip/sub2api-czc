@@ -915,6 +915,9 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
+		openai.GET("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.ExcelLoginStatus)
+		openai.PUT("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.SaveExcelLogin)
+		openai.POST("/accounts/:id/excel-login/run", h.Admin.OpenAIOAuth.QueueExcelLogin)
 		openai.GET("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.ExcelAuthorizationState)
 		openai.POST("/accounts/:id/excel-authorization/start", h.Admin.OpenAIOAuth.BeginExcelAuthorization)
 		openai.POST("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.CompleteExcelAuthorization)

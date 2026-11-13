@@ -154,7 +154,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	openAIOAuthClient := repository.NewOpenAIOAuthClient()
 	privacyClientFactory := providePrivacyClientFactory()
 	openAIExcelOAuthRepository := repository.NewOpenAIExcelOAuthRepository(db)
-	openAIOAuthService := service.ProvideOpenAIOAuthService(proxyRepository, openAIOAuthClient, privacyClientFactory, openAIExcelOAuthRepository, accountRepository, secretEncryptor, configConfig)
+	openAIOAuthService := service.ProvideOpenAIOAuthService(proxyRepository, openAIOAuthClient, privacyClientFactory, openAIExcelOAuthRepository, accountRepository, secretEncryptor, configConfig, settingRepository)
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, tokenCache, openAIOAuthService, oAuthRefreshAPI)
 	grokOAuthClient := repository.NewGrokOAuthClient()
 	grokOAuthService := service.ProvideGrokOAuthService(proxyRepository, grokOAuthClient, configConfig, redisClient)

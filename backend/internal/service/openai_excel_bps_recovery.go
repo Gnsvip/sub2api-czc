@@ -132,6 +132,9 @@ func (s *OpenAIGatewayService) StartBPS403Recovery() {
 }
 
 func (s *OpenAIGatewayService) StopBPS403Recovery() {
+	if g := s.excelGrants(); g != nil {
+		defer g.oauth.StopExcelLoginWorker()
+	}
 	if s == nil {
 		return
 	}
@@ -154,6 +157,14 @@ func (s *OpenAIGatewayService) syncExcelBPS403Recovery(ctx context.Context) {
 			logger.FromContext(ctx).Error("excel_bps.recovery_scan_panicked")
 		}
 	}()
+	if g := s.excelGrants(); g != nil {
+		queueCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+		err := g.oauth.SyncMissingExcelLogins(queueCtx)
+		stop()
+		if err != nil {
+			logger.FromContext(ctx).Warn("excel_bps.authorization_queue_failed")
+		}
+	}
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	accounts, err := s.accountRepo.ListByPlatform(queryCtx, PlatformOpenAI)
 	cancel()

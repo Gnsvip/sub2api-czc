@@ -11,6 +11,7 @@ import (
 	"fmt"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/reauthruntime"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,9 @@ type OpenAIExcelOAuthRepository interface {
 }
 
 type OpenAIExcelOAuthService struct {
+	settings                SettingRepository
+	loginWorker             *reauthruntime.Manager
+	loginWorkerToken        string
 	repo                    OpenAIExcelOAuthRepository
 	accounts                AccountRepository
 	oauth                   *OpenAIOAuthService

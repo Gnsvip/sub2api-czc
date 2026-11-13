@@ -8,6 +8,7 @@
       <input v-model="callback" class="input" autocomplete="off" placeholder="粘贴完整回调 URL" aria-label="Excel 授权回调 URL" />
       <button type="button" class="btn btn-primary" :disabled="busy || !callback" @click="complete">保存独立授权</button>
     </template>
+    <BPSAutomaticAuthorization :account-id="accountId" />
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
   </div>
 </template>
@@ -15,6 +16,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import apiClient from '@/api/client'
+import BPSAutomaticAuthorization from './BPSAutomaticAuthorization.vue'
 
 const props = defineProps<{ accountId: number }>()
 const state = ref<{ status: string } | null>(null)

@@ -24,6 +24,103 @@ type excelGrantReader struct {
 	account *Account
 }
 
+type excelLoginTestRepo struct {
+	*excelReauthTestRepo
+	ExcelLoginRepository
+	config   *ExcelLoginConfig
+	task     *ExcelLoginTask
+	claimed  int
+	failures []string
+}
+
+func (r *excelLoginTestRepo) GetExcelLoginConfig(context.Context, int64) (*ExcelLoginConfig, error) {
+	if r.config == nil {
+		return nil, nil
+	}
+	v := *r.config
+	return &v, nil
+}
+func (r *excelLoginTestRepo) GetExcelLoginTask(context.Context, int64) (*ExcelLoginTask, error) {
+	return r.task, nil
+}
+func (r *excelLoginTestRepo) SaveExcelLoginConfig(_ context.Context, c *ExcelLoginConfig, expected int64) (bool, error) {
+	if (r.config == nil && expected != 0) || (r.config != nil && r.config.Revision != expected) {
+		return false, nil
+	}
+	v := *c
+	v.Revision = expected + 1
+	r.config = &v
+	return true, nil
+}
+func (r *excelLoginTestRepo) ClaimExcelLogin(context.Context, string) (*ExcelLoginTask, error) {
+	r.claimed++
+	return r.task, nil
+}
+func (r *excelLoginTestRepo) FailExcelLogin(_ context.Context, _ int64, _, code string) (bool, error) {
+	r.failures = append(r.failures, code)
+	return true, nil
+}
+func TestExcelLoginConfigAndWorkerBoundaries(t *testing.T) {
+	grant, reader, base := newExcelGrantTestService(t)
+	repo := &excelLoginTestRepo{excelReauthTestRepo: base}
+	grant.repo = repo
+	oauth := grant.oauth
+	grant.settings = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "true"}}
+	input := ExcelLoginInput{Enabled: true, Password: "private-password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
+	state, err := oauth.SaveExcelLogin(context.Background(), 42, input)
+	require.NoError(t, err)
+	require.True(t, state.Config.PasswordConfigured)
+	require.True(t, state.Config.TOTPConfigured)
+	encoded, err := json.Marshal(state)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), input.Password)
+	require.NotContains(t, string(encoded), input.TOTPSecret)
+	require.NotContains(t, string(encoded), "encrypted:")
+	_, err = oauth.SaveExcelLogin(context.Background(), 42, input)
+	require.Error(t, err, "stale settings revision")
+	input.Revision = 1
+	input.Password = ""
+	input.TOTPSecret = ""
+	input.ClearTOTP = true
+	state, err = oauth.SaveExcelLogin(context.Background(), 42, input)
+	require.NoError(t, err)
+	require.True(t, state.Config.PasswordConfigured)
+	require.False(t, state.Config.TOTPConfigured)
+	repo.task = &ExcelLoginTask{ID: 8, AccountID: 42, ConfigRevision: 2, Status: "running"}
+	grant.settings = &settingRepoStub{}
+	claim, err := oauth.ClaimExcelLogin(context.Background(), "worker")
+	require.NoError(t, err)
+	require.Nil(t, claim)
+	require.Zero(t, repo.claimed)
+	grant.settings = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "true"}}
+	claim, err = oauth.ClaimExcelLogin(context.Background(), "worker")
+	require.NoError(t, err)
+	require.Equal(t, "excel", claim.OAuthProfile)
+	require.Equal(t, "local_worker", claim.Engine)
+	require.Equal(t, "private-password", claim.Password)
+	require.Empty(t, claim.TOTPSecret)
+	require.Equal(t, reader.account.GetCredential("chatgpt_account_id"), claim.ExpectedWorkspace)
+	repo.task.ConfigRevision = 1
+	claim, err = oauth.ClaimExcelLogin(context.Background(), "worker")
+	require.NoError(t, err)
+	require.Nil(t, claim)
+	require.Contains(t, repo.failures, "config_changed")
+	require.NoError(t, oauth.FailExcelLogin(context.Background(), 8, "worker", "unlabelled PRIVATE SECRET"))
+	require.Equal(t, "worker_failed", repo.failures[len(repo.failures)-1])
+	grant.loginWorkerToken = strings.Repeat("test", 16)
+	require.False(t, oauth.ExcelLoginWorkerAuthenticated(""))
+	require.False(t, oauth.ExcelLoginWorkerAuthenticated("wrong"))
+	require.True(t, oauth.ExcelLoginWorkerAuthenticated(grant.loginWorkerToken))
+	input.Revision = 2
+	input.TOTPSecret = "123456"
+	_, err = oauth.SaveExcelLogin(context.Background(), 42, input)
+	require.Error(t, err)
+	input.TOTPSecret = ""
+	input.LoginEmail = "other@example.com"
+	_, err = oauth.SaveExcelLogin(context.Background(), 42, input)
+	require.Error(t, err)
+}
+
 func (r *excelGrantReader) GetByID(context.Context, int64) (*Account, error) { return r.account, nil }
 
 type excelGrantCipher struct{}

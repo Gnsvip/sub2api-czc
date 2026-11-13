@@ -22,6 +22,20 @@ env:
 
 jobs:
   backend:
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bps_ci
+          POSTGRES_PASSWORD: bps_ci_test_only
+          POSTGRES_DB: bps_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bps_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      BPS_TEST_POSTGRES_DSN: postgres://bps_ci:bps_ci_test_only@localhost:5432/bps_ci?sslmode=disable
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -42,15 +56,17 @@ jobs:
           base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
           git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.go' | xargs -0 -r gofmt -w
           git diff --binary > "$RUNNER_TEMP/bps-format.patch"
+      - name: Excel worker regressions
+        run: python3 -m unittest tools.test_openai_excel_oauth_adapter tools.test_openai_oauth_reauth_worker tools.test_openai_oauth_reauth_runtime_controls tools.test_openai_oauth_reauth_engines
       - name: Protocol regressions
         working-directory: backend
         run: |
-          go test -race ./internal/service/basispoints ./internal/mihomo ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
+          go test -race ./internal/service/basispoints ./internal/mihomo ./internal/reauthruntime ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
       - name: Account routing regressions
         if: ${{ !cancelled() }}
         working-directory: backend
         run: |
-          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin -run '^(TestBPS|TestExcelOAuth|TestExcelBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
       - name: Compile shared packages and verify dependency wiring
         working-directory: backend
         run: |

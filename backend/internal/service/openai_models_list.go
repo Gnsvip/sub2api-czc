@@ -180,7 +180,11 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 // projectAccountModelAliases retains the source entry's metadata, never changes
 // the shared response, and never synthesizes models absent from this account.
 func projectAccountModelAliases(body []byte, account *Account, group *Group, codex bool) ([]byte, error) {
-	if account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
+	mapping := account.GetModelMapping()
+	if account.IsExcelBPSEnabled() {
+		mapping = account.excelBPSModelMapping()
+	}
+	if account.IsOpenAIPassthroughEnabled() || len(mapping) == 0 {
 		return body, nil
 	}
 	field, idField := "data", "id"
@@ -220,8 +224,8 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			candidates = append(candidates, id)
 		}
 	}
-	aliases := make([]string, 0, len(account.GetModelMapping()))
-	for alias := range account.GetModelMapping() {
+	aliases := make([]string, 0, len(mapping))
+	for alias := range mapping {
 		aliases = append(aliases, alias)
 	}
 	sort.Strings(aliases)
@@ -239,7 +243,7 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		target, matched := account.ResolveMappedModel(id)
+		target, matched := resolveRequestedModelInMapping(mapping, id)
 		raw, available := byID[strings.TrimSpace(target)]
 		if !matched || !available {
 			continue

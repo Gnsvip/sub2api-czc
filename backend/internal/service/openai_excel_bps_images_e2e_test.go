@@ -87,7 +87,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					defer upstream.Close()
 					target, err := url.Parse(upstream.URL)
 					require.NoError(t, err)
-					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "false"}}
+					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true"}}
 					if mode != "" {
 						repo.values[SettingKeyExcelBPSImageMode] = mode
 					}
@@ -186,7 +186,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 						require.Len(t, uploads, 1, "identical images share a native attachment")
 						require.Equal(t, pixels, <-uploads)
 					}
-					require.NoError(t, repo.SetMultiple(context.Background(), map[string]string{SettingKeyExcelBPSImageRelayEnabled: "false"}))
+					require.NoError(t, repo.SetMultiple(context.Background(), map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true"}))
 					send(history, http.StatusBadRequest)
 					require.Empty(t, forwarded)
 					require.Empty(t, uploads)

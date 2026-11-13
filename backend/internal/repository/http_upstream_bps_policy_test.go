@@ -70,7 +70,7 @@ func TestBPSFallbackBoundariesAndExpiry(t *testing.T) {
 				svc.mu.Lock()
 				svc.bpsHTTP2Fallbacks[key] = bpsHTTP2Fallback{expiresAt: time.Now().Add(-time.Second), started: true}
 				svc.mu.Unlock()
-				require.Equal(t, upstreamProtocolModeBPSH2, svc.resolveProtocolMode(service.HTTPUpstreamProfileExcelBPS, tc.proxy, nil))
+				require.Equal(t, upstreamProtocolModeBPSH2, svc.resolveProtocolMode(service.HTTPUpstreamProfileBPS, tc.proxy, nil))
 			}
 		})
 	}

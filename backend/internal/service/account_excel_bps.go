@@ -41,7 +41,7 @@ func (a *Account) IsExcelBPSMihomoEnabled() bool {
 }
 
 // ExcelBPSProxySourceKey selects the pool behind the BPS session proxy toggle:
-// the managed Mihomo kernel (default) or the admin proxy list (IP 管理).
+// the managed Mihomo kernel (default) or the admin proxy list (IP 绠＄悊).
 const ExcelBPSProxySourceKey = "openai_excel_bps_proxy_source"
 
 const (
@@ -100,7 +100,7 @@ func (a *Account) IsExcelBPSEnabledForModel(requestedModel string) bool {
 	if !a.IsExcelBPSEnabled() {
 		return false
 	}
-	return a.isExcelBPSUpstreamModelEnabled(a.GetMappedModel(requestedModel))
+	return a.isExcelBPSUpstreamModelEnabled(a.getExcelBPSMappedModel(requestedModel))
 }
 
 // IsExcelBPSImagesEnabledForModel routes image generation through BPS only
@@ -110,7 +110,7 @@ func (a *Account) IsExcelBPSImagesEnabledForModel(requestedModel string) bool {
 	if !a.IsExcelBPSEnabled() || a.isExcelBPSAllModelsEnabled() {
 		return false
 	}
-	model := a.GetMappedModel(requestedModel)
+	model := a.getExcelBPSMappedModel(requestedModel)
 	return usesCodexDirectImages(model) && excelBPSImagesSupportedModel(model) && a.isExcelBPSUpstreamModelEnabled(model)
 }
 
@@ -141,4 +141,24 @@ func (a *Account) isExcelBPSUpstreamModelEnabled(model string) bool {
 		}
 	}
 	return false
+}
+
+// BPS retains explicit upstream aliases without changing native Codex mapping.
+func (a *Account) excelBPSModelMapping() map[string]string {
+	if a == nil || !a.IsExcelBPSEnabled() {
+		return nil
+	}
+	raw := stringMappingFromRaw(a.Credentials["model_mapping"])
+	for alias, target := range raw {
+		if strings.TrimSpace(target) == "" || !a.isExcelBPSUpstreamModelEnabled(target) {
+			delete(raw, alias)
+		}
+	}
+	return raw
+}
+func (a *Account) getExcelBPSMappedModel(model string) string {
+	if mapped, ok := resolveRequestedModelInMapping(a.excelBPSModelMapping(), model); ok {
+		return mapped
+	}
+	return model
 }

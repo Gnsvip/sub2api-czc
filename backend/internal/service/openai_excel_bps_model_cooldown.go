@@ -59,7 +59,7 @@ func (s *OpenAIGatewayService) isExcelBPSModelCoolingDown(account *Account, requ
 	if s == nil || account == nil || !account.IsExcelBPSEnabledForModel(requestedModel) {
 		return false
 	}
-	key := excelBPSModelKey{account.ID, account.GetMappedModel(requestedModel)}
+	key := excelBPSModelKey{account.ID, account.getExcelBPSMappedModel(requestedModel)}
 	cache := &s.excelBPSModelCooldowns
 	cache.mu.Lock()
 	defer cache.mu.Unlock()

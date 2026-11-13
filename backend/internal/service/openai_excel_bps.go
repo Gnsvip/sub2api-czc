@@ -233,7 +233,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		return nil, &excelBPSForwardError{code: code}
 	}
 	originalModel := gjson.GetBytes(body, "model").String()
-	model := account.GetMappedModel(originalModel)
+	model := account.getExcelBPSMappedModel(originalModel)
 	stream := gjson.GetBytes(body, "stream").Bool()
 	clientCanceled := func() (*OpenAIForwardResult, error) {
 		StopOpenAICompactSSEKeepaliveCommitted(c)
@@ -690,6 +690,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// BPS and Codex share quota. Refresh at the HTTP boundary even if the client
 	// disconnects or a later stream/protocol error prevents normal completion.
 	s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
+	responseServiceTier := extractOpenAIServiceTierFromBody(upstreamBody)
 	converted := bridge.StreamWithRepairs(requestCtx, resp.Body, func(repairCtx context.Context, failed map[string]any, validation error) (map[string]any, error) {
 
 		correctedBody, err := basispoints.BuildToolRepairRequest(upstreamBody, failed, validation)
@@ -785,7 +786,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// The bridge sees the body after group policy mapping. Keep the original
 	// client effort for usage display, and the BPS-normalized effort for billing.
 	requestedEffort := coalesceRequestedReasoningEffort(RequestedReasoningEffortFromContext(ctx), &bridge.RequestedEffort)
-	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, ServiceTier: extractOpenAIServiceTierFromBody(upstreamBody), RequestID: resp.Header.Get("x-request-id")}
+	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, ServiceTier: responseServiceTier, RequestID: resp.Header.Get("x-request-id")}
 	if stream {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")

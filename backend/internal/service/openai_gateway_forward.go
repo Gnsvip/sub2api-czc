@@ -130,6 +130,9 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	traceOpenAIInbound(ctx, c, account, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	// Clear route headers left by an earlier account attempt, as upstream does.
+	c.Writer.Header().Del("X-Codex2API-Basispoints-Bypass")
+	c.Writer.Header().Del("X-Codex2API-Upstream")
 	// The handler reuses one context and response writer across failover
 	// attempts; routing records from a previous account must not describe
 	// this attempt.
@@ -149,9 +152,6 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	setCodexToolNameReverse(c, nil)
 	rememberOpenAIResponsesClientInstructions(c, body)
 	useBPS := account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) && s.excelBPSGloballyEnabled(ctx)
-	if useBPS && account.excelBPSNativeFallbackReason(body) != "" && !account.IsExcelOAuth() {
-		useBPS = false
-	}
 	if c.GetBool(bpsAccountProbeRequiredContextKey) && !useBPS {
 		return nil, errors.New("BPS tool probe cannot fall back to a native route")
 	}

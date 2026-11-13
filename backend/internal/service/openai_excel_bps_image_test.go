@@ -38,7 +38,7 @@ func TestExcelBPSInlineImageForwardAndFetch(t *testing.T) {
 				router.GET(basispoints.ImageRelayPath+":token", svc.ServeExcelBPSImage)
 				server := httptest.NewTLSServer(router)
 				defer server.Close()
-				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageMode: ExcelBPSImageModeRelay, SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: server.URL}}, svc.cfg)
+				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageMode: ExcelBPSImageModeRelay, SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example"}}, svc.cfg)
 				body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%v,"input":[{"role":"user","content":[{"type":"input_text","text":"describe"},{"type":"input_image","image_url":%q,"detail":"high"}]}]}`, stream, dataURL))
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
@@ -56,8 +56,8 @@ func TestExcelBPSInlineImageForwardAndFetch(t *testing.T) {
 						}
 					}
 				}
-				require.True(t, strings.HasPrefix(imageURL, server.URL+basispoints.ImageRelayPath), imageURL)
-				resp, err := server.Client().Get(imageURL)
+				require.True(t, strings.HasPrefix(imageURL, "https://images.example"+basispoints.ImageRelayPath), imageURL)
+				resp, err := server.Client().Get(strings.Replace(imageURL, "https://images.example", server.URL, 1))
 				require.NoError(t, err)
 				defer func() { _ = resp.Body.Close() }()
 				fetched, err := io.ReadAll(resp.Body)

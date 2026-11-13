@@ -105,7 +105,7 @@ func TestBPSHTTP2PrematureCloseFallsBackWithoutReplaying(t *testing.T) {
 			svc, ok := NewHTTPUpstream(nil).(*httpUpstreamService)
 			require.True(t, ok)
 			// Run unchanged on production baseline, which routed BPS as long_stream.
-			profile := service.HTTPUpstreamProfile("excel_bps")
+			profile := service.HTTPUpstreamProfileBPS
 			ctx := service.WithHTTPUpstreamProfile(t.Context(), profile)
 			if service.HTTPUpstreamProfileFromContext(ctx) != profile {
 				profile = service.HTTPUpstreamProfileLongStream

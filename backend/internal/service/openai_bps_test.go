@@ -142,7 +142,7 @@ func TestBPSRejectUnsupportedBeforeSending(t *testing.T) {
 	for _, input := range []string{`[{"type":"reasoning","encrypted_content":"ciphertext"}]`, `[{"type":"compaction_trigger"}]`} {
 		body := []byte(`{"model":"gpt-6.1-sol","input":` + input + `}`)
 		c, rec := bpsTestContext(string(body))
-		svc := &OpenAIGatewayService{}
+		svc := excelBPSTestService(&httpUpstreamRecorder{})
 		_, err := svc.forwardBPS(context.Background(), c, bpsTestAccount(), body, time.Now())
 		require.Error(t, err)
 		require.Equal(t, 400, rec.Code)

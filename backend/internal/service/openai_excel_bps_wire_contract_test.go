@@ -80,6 +80,7 @@ func TestExcelBPSWireTierPolicyAndModelEvidence(t *testing.T) {
 				}
 				svc := excelBPSTestService(nil)
 				svc.settingService = newOpenAIGatewayServiceWithSettings(t, settings).settingService
+				svc.settingService.settingRepo.(*settingRepoStub).values[SettingKeyExcelBPSEnabled] = "true"
 				wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_wire\",\"status\":\"completed\",\"model\":\"gpt-5.6-luna\",\"service_tier\":\"default\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n"
 				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}}
 				svc.httpUpstream = upstream

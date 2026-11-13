@@ -1833,6 +1833,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 	upstreamModel := account.GetMappedModel(requestModel)
+	if account.IsExcelBPSImagesEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) {
+		upstreamModel = account.getExcelBPSMappedModel(requestModel)
+	}
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"net/http"
@@ -170,4 +171,40 @@ func (s *OpenAIGatewayService) loadCodexGroupCatalogRoutingAccounts(ctx context.
 	}
 	ctx = s.withExcelBPSRoutingContext(ctx)
 	return s.accountsForExcelBPSRouting(ctx, visible), s.accountsForExcelBPSRouting(ctx, catalog), nil
+}
+
+// Persist the requested option but leave native routing active until a separate
+// Excel grant exists. Token/client errors never trigger native credential mixing.
+func (s *OpenAIGatewayService) PrepareExcelBPSActivation(ctx context.Context, account *Account) error {
+	if account == nil || account.Extra["openai_excel_bps"] != true || account.IsExcelOAuth() {
+		if account != nil {
+			delete(account.Extra, ExcelBPSAuthorizationPendingKey)
+		}
+		return nil
+	}
+	if account.ID == 0 {
+		account.Extra[ExcelBPSAuthorizationPendingKey] = true
+		return nil
+	}
+	grants := s.excelGrants()
+	if grants == nil {
+		return infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_UNAVAILABLE", "Excel authorization storage is unavailable")
+	}
+	_, credentials, _, err := grants.readExcelGrant(ctx, account)
+	if infraerrors.Reason(err) == "OPENAI_EXCEL_AUTH_REQUIRED" {
+		account.Extra[ExcelBPSAuthorizationPendingKey] = true
+		return nil
+	}
+	if err == nil {
+		var info *OpenAITokenInfo
+		info, err = decodeExcelOAuthTokenInfo(credentials, true)
+		if err == nil {
+			err = validateExcelIdentity(account, info)
+		}
+	}
+	if err != nil {
+		return infraerrors.ServiceUnavailable("OPENAI_EXCEL_AUTH_UNAVAILABLE", "Review this account's Excel authorization before enabling BPS")
+	}
+	delete(account.Extra, ExcelBPSAuthorizationPendingKey)
+	return nil
 }

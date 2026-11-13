@@ -103,7 +103,15 @@ func (r *openAIExcelOAuthRepository) QueueExcelLogin(ctx context.Context, id int
 	return task, nil
 }
 func (r *openAIExcelOAuthRepository) ListMissingExcelLogins(ctx context.Context) ([]int64, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a JOIN openai_excel_login_configs c ON c.account_id=a.id LEFT JOIN openai_excel_oauth_credentials g ON g.account_id=a.id WHERE a.deleted_at IS NULL AND a.status='active' AND c.enabled AND COALESCE(a.extra->>'openai_excel_bps','false')='true' AND g.account_id IS NULL ORDER BY a.id LIMIT 50`)
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a JOIN openai_excel_login_configs c ON c.account_id=a.id
+ LEFT JOIN openai_excel_oauth_credentials g ON g.account_id=a.id
+ WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.status='active'
+ AND COALESCE(a.credentials->>'plan_type','') NOT ILIKE 'free'
+ AND c.enabled AND c.password_ciphertext<>'' AND COALESCE(a.extra->>'openai_excel_bps','false')='true' AND g.account_id IS NULL
+ AND NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND
+ (t.status IN ('queued','running') OR (t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '15 minutes')))
+ AND (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.config_revision=c.revision AND t.status='failed')<3
+ ORDER BY a.id LIMIT 50`)
 	if err != nil {
 		return nil, err
 	}
@@ -191,4 +199,80 @@ func (r *openAIExcelOAuthRepository) FinishExcelLogin(ctx context.Context, id in
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// Resume an explicit reauthorization after restart even when an old grant still exists.
+func (r *openAIExcelOAuthRepository) HasActiveExcelLogins(ctx context.Context) (bool, error) {
+	_, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code='timeout',updated_at=NOW() WHERE status IN ('queued','running') AND created_at<NOW()-INTERVAL '30 minutes'`)
+	if err != nil {
+		return false, err
+	}
+	var active bool
+	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM openai_excel_login_tasks t JOIN openai_excel_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id WHERE t.status IN ('queued','running') AND c.enabled AND c.revision=t.config_revision AND a.deleted_at IS NULL AND a.status='active')`).Scan(&active)
+	return active, err
+}
+
+// Bring pre-existing switches into the same automatic preparation state. The
+// bounded transaction also invalidates scheduler snapshots before login runs.
+func (r *openAIExcelOAuthRepository) PrepareMissingExcelRoutes(ctx context.Context) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `WITH candidates AS (
+ SELECT a.id FROM accounts a WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth'
+ AND a.extra->'openai_excel_bps'='true'::jsonb
+ AND COALESCE(a.extra->'openai_excel_bps_authorization_pending','false'::jsonb)<>'true'::jsonb
+ AND COALESCE(a.credentials->>'client_id','')<>'app_fnr0pYvVwwFDocDumLG3H2Bp'
+ AND NOT EXISTS(SELECT 1 FROM openai_excel_oauth_credentials e WHERE e.account_id=a.id AND e.credentials_ciphertext<>'')
+ ORDER BY a.id LIMIT 50 FOR UPDATE OF a SKIP LOCKED)
+ UPDATE accounts SET extra=extra||'{"openai_excel_bps_authorization_pending":true}'::jsonb,updated_at=NOW()
+ WHERE id IN (SELECT id FROM candidates) RETURNING id`)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	// A save racing the successful callback may carry an older preparation
+	// marker. Reconcile it from the persisted grant without another login.
+	readyRows, err := tx.QueryContext(ctx, `UPDATE accounts a SET extra=extra-'openai_excel_bps_authorization_pending',updated_at=NOW()
+ WHERE a.id IN (SELECT b.id FROM accounts b WHERE b.deleted_at IS NULL
+ AND b.extra->'openai_excel_bps'='true'::jsonb AND b.extra->'openai_excel_bps_authorization_pending'='true'::jsonb
+ AND EXISTS(SELECT 1 FROM openai_excel_oauth_credentials e WHERE e.account_id=b.id AND e.credentials_ciphertext<>'')
+ ORDER BY b.id LIMIT 50 FOR UPDATE OF b SKIP LOCKED) RETURNING a.id`)
+	if err != nil {
+		return err
+	}
+	for readyRows.Next() {
+		var id int64
+		if err := readyRows.Scan(&id); err != nil {
+			_ = readyRows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = readyRows.Err()
+	_ = readyRows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

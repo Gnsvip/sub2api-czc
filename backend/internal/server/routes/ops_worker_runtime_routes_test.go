@@ -51,3 +51,14 @@ func TestWorkerRuntimeStatusRouteRequiresAdminAuthentication(t *testing.T) {
 		})
 	}
 }
+
+func TestExcelLoginWorkerRoutesRegisterWithoutConflict(t *testing.T) {
+	router := gin.New()
+	h := &handler.Handlers{Admin: &handler.AdminHandlers{OpenAIOAuth: &adminhandler.OpenAIOAuthHandler{}}}
+	require.NotPanics(t, func() { RegisterExcelLoginWorkerRoutes(router.Group("/api/v1"), h) })
+	for _, path := range []string{"claim", "runtime-settings", "totp-claim", "session-export/claim", "123/progress", "123/credentials"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/internal/openai-reauth/"+path, nil))
+		require.Equal(t, http.StatusUnauthorized, recorder.Code, path)
+	}
+}

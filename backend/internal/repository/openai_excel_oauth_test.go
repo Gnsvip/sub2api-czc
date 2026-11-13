@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -98,16 +98,20 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL is supplied by BPS Actions")
 	}
-	cfg, err := pgx.ParseConfig(dsn)
+	cfg, err := url.Parse(dsn)
 	require.NoError(t, err)
-	admin := stdlib.OpenDB(*cfg)
+	admin, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
 	defer admin.Close()
 	schema := "bps_" + fmt.Sprintf("%x", uuid.New())
 	_, err = admin.Exec(`CREATE SCHEMA ` + schema)
 	require.NoError(t, err)
 	defer func() { _, _ = admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) }()
-	cfg.RuntimeParams["search_path"] = schema
-	db := stdlib.OpenDB(*cfg)
+	params := cfg.Query()
+	params.Set("search_path", schema)
+	cfg.RawQuery = params.Encode()
+	db, err := sql.Open("postgres", cfg.String())
+	require.NoError(t, err)
 	defer db.Close()
 	ctx := context.Background()
 	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
@@ -257,4 +261,53 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 		}
 		require.Equal(t, 1, n)
 	})
+	t.Run("missing route preparation and ready reconciliation", func(t *testing.T) {
+		_, e := db.Exec(`INSERT INTO accounts(id,credentials,extra) VALUES(110,$1,'{"openai_excel_bps":true}')`, string(primaryJSON))
+		require.NoError(t, e)
+		require.NoError(t, repo.PrepareMissingExcelRoutes(ctx))
+		var pending bool
+		require.NoError(t, db.QueryRow(`SELECT COALESCE(extra->>'openai_excel_bps_authorization_pending','false')::boolean FROM accounts WHERE id=110`).Scan(&pending))
+		require.True(t, pending)
+		_, e = db.Exec(`INSERT INTO openai_excel_oauth_credentials(account_id,credentials_ciphertext) VALUES(110,'ready')`)
+		require.NoError(t, e)
+		require.NoError(t, repo.PrepareMissingExcelRoutes(ctx))
+		require.NoError(t, db.QueryRow(`SELECT COALESCE(extra->>'openai_excel_bps_authorization_pending','false')::boolean FROM accounts WHERE id=110`).Scan(&pending))
+		require.False(t, pending)
+	})
+	t.Run("failed accounts do not starve queue", func(t *testing.T) {
+		// More than one scan page of exhausted configurations must not hide later accounts.
+		_, e := db.Exec(`INSERT INTO accounts(id,credentials,extra) SELECT n,$1::jsonb,'{"openai_excel_bps":true}'::jsonb FROM generate_series(200,260) n`, string(primaryJSON))
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO openai_excel_login_configs(account_id,enabled,login_email,password_ciphertext) SELECT n,true,'user@example.com','encrypted' FROM generate_series(200,260) n`)
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO openai_excel_login_tasks(account_id,config_revision,expected_credentials_hash,expected_grant_hash,status,updated_at) SELECT a.id,1,'','', 'failed',NOW()-INTERVAL '1 hour' FROM accounts a CROSS JOIN generate_series(1,3) WHERE a.id BETWEEN 200 AND 259`)
+		require.NoError(t, e)
+		ids, e := repo.ListMissingExcelLogins(ctx)
+		require.NoError(t, e)
+		require.Contains(t, ids, int64(260))
+		require.NotContains(t, ids, int64(200))
+	})
+	t.Run("restart resumes explicit reauthorization with existing grant", func(t *testing.T) {
+		_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE status IN ('queued','running')`)
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO accounts(id,credentials,extra) VALUES(300,$1,'{}')`, string(primaryJSON))
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO openai_excel_oauth_credentials(account_id,credentials_ciphertext) VALUES(300,'old-grant')`)
+		require.NoError(t, e)
+		saved, e := repo.SaveExcelLoginConfig(ctx, &service.ExcelLoginConfig{AccountID: 300, Enabled: true, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted"}, 0)
+		require.NoError(t, e)
+		require.True(t, saved)
+		task, e := repo.QueueExcelLogin(ctx, 300, true)
+		require.NoError(t, e)
+		require.NotNil(t, task)
+		active, e := repo.HasActiveExcelLogins(ctx)
+		require.NoError(t, e)
+		require.True(t, active)
+		_, e = db.Exec(`UPDATE openai_excel_login_tasks SET created_at=NOW()-INTERVAL '31 minutes' WHERE id=$1`, task.ID)
+		require.NoError(t, e)
+		active, e = repo.HasActiveExcelLogins(ctx)
+		require.NoError(t, e)
+		require.False(t, active)
+	})
+
 }

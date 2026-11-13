@@ -49,6 +49,8 @@ type ExcelLoginRepository interface {
 	GetExcelLoginTask(context.Context, int64) (*ExcelLoginTask, error)
 	QueueExcelLogin(context.Context, int64, bool) (*ExcelLoginTask, error)
 	ListMissingExcelLogins(context.Context) ([]int64, error)
+	HasActiveExcelLogins(context.Context) (bool, error)
+	PrepareMissingExcelRoutes(context.Context) error
 	ClaimExcelLogin(context.Context, string) (*ExcelLoginTask, error)
 	ProgressExcelLogin(context.Context, int64, string, string) (bool, error)
 	FailExcelLogin(context.Context, int64, string, string) (bool, error)
@@ -201,6 +203,13 @@ func (s *OpenAIOAuthService) SyncMissingExcelLogins(ctx context.Context) error {
 	if err != nil {
 		return nil
 	}
+	if err = r.PrepareMissingExcelRoutes(ctx); err != nil {
+		return err
+	}
+	active, err := r.HasActiveExcelLogins(ctx)
+	if err != nil {
+		return err
+	}
 	ids, err := r.ListMissingExcelLogins(ctx)
 	if err != nil {
 		return err
@@ -213,7 +222,7 @@ func (s *OpenAIOAuthService) SyncMissingExcelLogins(ctx context.Context) error {
 			return err
 		}
 	}
-	if len(ids) > 0 {
+	if active || len(ids) > 0 {
 		s.ensureExcelLoginWorker()
 	}
 	return nil

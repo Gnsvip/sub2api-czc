@@ -557,3 +557,23 @@ func TestExcelOAuthRecoveryRejectsReplacementIdentity(t *testing.T) {
 	require.Empty(t, token)
 	require.NotEmpty(t, repo.ciphertext, "do not delete an independently replaced grant")
 }
+
+func TestExcelBPSActivationWaitsForIndependentGrant(t *testing.T) {
+	grant, reader, repo := newExcelGrantTestService(t)
+	gateway := &OpenAIGatewayService{openAITokenProvider: &OpenAITokenProvider{openAIOAuthService: grant.oauth}}
+	before := maps.Clone(reader.account.Credentials)
+	require.NoError(t, gateway.PrepareExcelBPSActivation(context.Background(), reader.account))
+	require.True(t, reader.account.Extra[ExcelBPSAuthorizationPendingKey].(bool))
+	require.False(t, reader.account.IsExcelBPSEnabled())
+	raw, err := json.Marshal(excelTestCredentials("ready", time.Now().Add(time.Hour)))
+	require.NoError(t, err)
+	repo.ciphertext, err = grant.encryptor.Encrypt(string(raw))
+	require.NoError(t, err)
+	require.NoError(t, gateway.PrepareExcelBPSActivation(context.Background(), reader.account))
+	require.True(t, reader.account.IsExcelBPSEnabled())
+	require.Equal(t, before, reader.account.Credentials)
+	repo.ciphertext = "invalid"
+	require.Error(t, gateway.PrepareExcelBPSActivation(context.Background(), reader.account))
+	reader.account.Extra["openai_excel_bps"] = false
+	require.NoError(t, gateway.PrepareExcelBPSActivation(context.Background(), reader.account))
+}

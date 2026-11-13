@@ -74,7 +74,15 @@ func (s *adminServiceImpl) validateExcelBPS403GroupSettings(ctx context.Context,
 	if err := s.validateExcelBPSGroupPolicy(ctx, account); err != nil {
 		return err
 	}
-	return validateOpenAIBPSSettings(account)
+	if err := validateOpenAIBPSSettings(account); err != nil {
+		return err
+	}
+	if validator, ok := s.runtimeBlocker.(interface {
+		PrepareExcelBPSActivation(context.Context, *Account) error
+	}); ok {
+		return validator.PrepareExcelBPSActivation(ctx, account)
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) validateExcelBPSGroupPolicy(ctx context.Context, account *Account) error {

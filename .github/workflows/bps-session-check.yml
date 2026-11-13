@@ -35,7 +35,7 @@ jobs:
       - name: Format changed Go files
         run: |
           base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
-          git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.go' -z | xargs -0 -r gofmt -w
+          git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.go' | xargs -0 -r gofmt -w
           git diff --binary > "$RUNNER_TEMP/bps-format.patch"
       - name: Protocol and account routing regressions
         working-directory: backend

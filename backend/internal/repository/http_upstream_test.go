@@ -24,6 +24,25 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+func TestBPSHTTPPoolKeepsConcurrentAccountExits(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{ConnectionPoolIsolation: config.ConnectionPoolIsolationAccount, MaxUpstreamClients: 2}}
+	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	a, err := svc.acquireClientWithProfile("http://proxy-a.test:8080", 71, 3, service.HTTPUpstreamProfileBPS)
+	require.NoError(t, err)
+	defer svc.releaseClientRequest(a)
+	b, err := svc.acquireClientWithProfile("http://proxy-b.test:8080", 71, 3, service.HTTPUpstreamProfileBPS)
+	require.NoError(t, err)
+	defer svc.releaseClientRequest(b)
+	require.NotEqual(t, a.cacheKey, b.cacheKey)
+	require.Len(t, svc.clients, 2)
+	a2, err := svc.acquireClientWithProfile("http://proxy-a.test:8080", 71, 3, service.HTTPUpstreamProfileBPS)
+	require.NoError(t, err)
+	defer svc.releaseClientRequest(a2)
+	require.Same(t, a, a2)
+	_, err = svc.acquireClientWithProfile("http://proxy-c.test:8080", 71, 3, service.HTTPUpstreamProfileBPS)
+	require.ErrorIs(t, err, errUpstreamClientLimitReached)
+}
+
 func TestHTTPUpstreamDoCanDisableRedirectsPerRequest(t *testing.T) {
 	var redirectedCalls atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

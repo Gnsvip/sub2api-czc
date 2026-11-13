@@ -56,6 +56,9 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: missing account")
 	}
 
+	if account.isBPSCredential() {
+		return bpsRequestError(c, 400, "bps_responses_only", "BPS does not support this counting endpoint")
+	}
 	prepared, err := prepareNativeOpenAIInputTokensCountRequest(body, account)
 	if err != nil {
 		writeOpenAIResponsesInputTokensError(c, http.StatusBadRequest, "invalid_request_error", userfacing.FailedToParseBody)

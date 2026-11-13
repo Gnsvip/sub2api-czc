@@ -21,6 +21,10 @@
         </p>
       </div>
 
+      <div v-if="allOpenAIOAuthOnly" class="space-y-3">
+        <label class="flex items-center gap-2"><input v-model="applyBPS" type="checkbox" />修改 BPS 设置</label>
+        <BPSAccountSettings v-if="applyBPS" v-model="bpsSettings" :groups="groups" />
+      </div>
       <!-- Mixed platform warning -->
       <div v-if="isMixedPlatform" class="rounded-lg bg-amber-50 p-4 dark:bg-amber-900/20">
         <p class="text-sm text-amber-700 dark:text-amber-400">
@@ -1538,6 +1542,9 @@
 </template>
 
 <script setup lang="ts">
+import BPSAccountSettings from './BPSAccountSettings.vue'
+import { readBPSSettings, writeBPSSettings } from './bpsSettings'
+
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1604,6 +1611,8 @@ interface Props {
   groups: AdminGroup[]
 }
 
+const applyBPS = ref(false)
+const bpsSettings = ref(readBPSSettings())
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
@@ -2024,6 +2033,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     return updates.extra as Record<string, unknown>
   }
 
+  if (applyBPS.value && allOpenAIOAuthOnly.value) Object.assign(ensureExtra(), writeBPSSettings(bpsSettings.value))
+
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
@@ -2423,6 +2434,8 @@ const handleMixedChannelCancel = () => {
 }
 
 // Reset form when modal closes
+watch(() => props.show, () => { applyBPS.value = false; bpsSettings.value = readBPSSettings() })
+
 watch(
   () => props.show,
   (newShow) => {

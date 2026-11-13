@@ -12,6 +12,9 @@ const (
 	HTTPUpstreamProfileOpenAIHarvest HTTPUpstreamProfile = "openai_harvest"
 	HTTPUpstreamProfileGrok          HTTPUpstreamProfile = "grok"
 	HTTPUpstreamProfileLongStream    HTTPUpstreamProfile = "long_stream"
+	// BPS keeps separate clients for each account/exit even when the global
+	// isolation policy uses one connection pool per account.
+	HTTPUpstreamProfileBPS HTTPUpstreamProfile = "bps"
 )
 
 type httpUpstreamProfileContextKey struct{}
@@ -39,7 +42,7 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileBPS:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault

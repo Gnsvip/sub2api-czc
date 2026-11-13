@@ -95,6 +95,8 @@ func isOpenAIGPT56OrLaterModel(model string) bool {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	account = s.accountForExcelBPSRouting(ctx, account)
 
 	if err := validateRetiredOpenAIRequestModel(account, gjson.GetBytes(body, "model").String(), isOpenAIResponsesCompactPath(c), ""); err != nil {
 		writeOpenAIResponsesErrorJSON(c, http.StatusNotFound, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "model_not_found", "message": err.Error()}})
@@ -130,6 +132,9 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	traceOpenAIInbound(ctx, c, account, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	// Clear route headers left by an earlier account attempt, as upstream does.
+	c.Writer.Header().Del("X-Codex2API-Basispoints-Bypass")
+	c.Writer.Header().Del("X-Codex2API-Upstream")
 	// The handler reuses one context and response writer across failover
 	// attempts; routing records from a previous account must not describe
 	// this attempt.
@@ -148,12 +153,19 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 	clearOpenAIResponsesNamespaceNames(c)
 	setCodexToolNameReverse(c, nil)
 	rememberOpenAIResponsesClientInstructions(c, body)
-	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
-		return nil, err
+	useBPS := account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) && s.excelBPSGloballyEnabled(ctx)
+	if c.GetBool(bpsAccountProbeRequiredContextKey) && (!useBPS || account.excelBPSNativeFallbackReason(body) != "") {
+		return nil, errors.New("BPS tool probe cannot fall back to a native route")
 	}
-	restoreClientSession := stageCodexHTTPClientSession(c, account, body)
-	defer restoreClientSession()
-	s.codexWireProfileForRequest(c, account, body)
+
+	if !account.isBPSCredential() && !useBPS {
+		if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
+			return nil, err
+		}
+		restoreClientSession := stageCodexHTTPClientSession(c, account, body)
+		defer restoreClientSession()
+		s.codexWireProfileForRequest(c, account, body)
+	}
 	startTime := time.Now()
 	body, stripErr := StripOpenAIImageGenerationToolsForGroup(apiKeyGroup(getAPIKeyFromContext(c)), body)
 	if stripErr != nil {
@@ -187,6 +199,9 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesAttempt(ctx context.Context
 			},
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
+	}
+	if account.isBPSCredential() || useBPS {
+		return s.forwardBPS(ctx, c, account, body, startTime)
 	}
 	managedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	managedNonReasoning := false
@@ -1836,6 +1851,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	if account.isBPSCredential() {
+		return nil, fmt.Errorf("Excel OAuth credentials cannot be sent through the Codex route")
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

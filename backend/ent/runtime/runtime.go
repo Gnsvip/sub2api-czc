@@ -1461,8 +1461,12 @@ func init() {
 	proxy.DefaultUpdatedAt = proxyDescUpdatedAt.Default.(func() time.Time)
 	// proxy.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	proxy.UpdateDefaultUpdatedAt = proxyDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// proxyDescMihomoNodeID is the schema descriptor for mihomo_node_id field.
+	proxyDescMihomoNodeID := proxyFields[0].Descriptor()
+	// proxy.MihomoNodeIDValidator is a validator for the "mihomo_node_id" field. It is called by the builders before save.
+	proxy.MihomoNodeIDValidator = proxyDescMihomoNodeID.Validators[0].(func(string) error)
 	// proxyDescName is the schema descriptor for name field.
-	proxyDescName := proxyFields[0].Descriptor()
+	proxyDescName := proxyFields[1].Descriptor()
 	// proxy.NameValidator is a validator for the "name" field. It is called by the builders before save.
 	proxy.NameValidator = func() func(string) error {
 		validators := proxyDescName.Validators
@@ -1480,7 +1484,7 @@ func init() {
 		}
 	}()
 	// proxyDescProtocol is the schema descriptor for protocol field.
-	proxyDescProtocol := proxyFields[1].Descriptor()
+	proxyDescProtocol := proxyFields[2].Descriptor()
 	// proxy.ProtocolValidator is a validator for the "protocol" field. It is called by the builders before save.
 	proxy.ProtocolValidator = func() func(string) error {
 		validators := proxyDescProtocol.Validators
@@ -1498,7 +1502,7 @@ func init() {
 		}
 	}()
 	// proxyDescHost is the schema descriptor for host field.
-	proxyDescHost := proxyFields[2].Descriptor()
+	proxyDescHost := proxyFields[3].Descriptor()
 	// proxy.HostValidator is a validator for the "host" field. It is called by the builders before save.
 	proxy.HostValidator = func() func(string) error {
 		validators := proxyDescHost.Validators
@@ -1516,27 +1520,27 @@ func init() {
 		}
 	}()
 	// proxyDescUsername is the schema descriptor for username field.
-	proxyDescUsername := proxyFields[4].Descriptor()
+	proxyDescUsername := proxyFields[5].Descriptor()
 	// proxy.UsernameValidator is a validator for the "username" field. It is called by the builders before save.
 	proxy.UsernameValidator = proxyDescUsername.Validators[0].(func(string) error)
 	// proxyDescPassword is the schema descriptor for password field.
-	proxyDescPassword := proxyFields[5].Descriptor()
+	proxyDescPassword := proxyFields[6].Descriptor()
 	// proxy.PasswordValidator is a validator for the "password" field. It is called by the builders before save.
 	proxy.PasswordValidator = proxyDescPassword.Validators[0].(func(string) error)
 	// proxyDescStatus is the schema descriptor for status field.
-	proxyDescStatus := proxyFields[6].Descriptor()
+	proxyDescStatus := proxyFields[7].Descriptor()
 	// proxy.DefaultStatus holds the default value on creation for the status field.
 	proxy.DefaultStatus = proxyDescStatus.Default.(string)
 	// proxy.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	proxy.StatusValidator = proxyDescStatus.Validators[0].(func(string) error)
 	// proxyDescFallbackMode is the schema descriptor for fallback_mode field.
-	proxyDescFallbackMode := proxyFields[8].Descriptor()
+	proxyDescFallbackMode := proxyFields[9].Descriptor()
 	// proxy.DefaultFallbackMode holds the default value on creation for the fallback_mode field.
 	proxy.DefaultFallbackMode = proxyDescFallbackMode.Default.(string)
 	// proxy.FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
 	proxy.FallbackModeValidator = proxyDescFallbackMode.Validators[0].(func(string) error)
 	// proxyDescExpiryWarnDays is the schema descriptor for expiry_warn_days field.
-	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
+	proxyDescExpiryWarnDays := proxyFields[11].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()

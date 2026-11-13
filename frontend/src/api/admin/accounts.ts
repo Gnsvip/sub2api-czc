@@ -639,6 +639,16 @@ export async function setOpenAICreditsEnabled(id: number, enabled: boolean): Pro
   return data
 }
 
+export async function setAstraProbeInterval(id: number, intervalMinutes: number): Promise<Account> {
+  const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/astra-probe/interval`, { interval_minutes: intervalMinutes })
+  return data
+}
+
+export async function runAstraProbe(id: number): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/astra-probe/run`, {}, { timeout: 45000 })
+  return data
+}
+
 export async function setAstraProbeEnabled(id: number, enabled: boolean): Promise<Account> {
   const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/astra-probe`, { enabled })
   return data
@@ -1199,6 +1209,8 @@ export const accountsAPI = {
   setSchedulable,
   setOpenAICreditsEnabled,
   setAstraProbeEnabled,
+  setAstraProbeInterval,
+  runAstraProbe,
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,

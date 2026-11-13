@@ -2035,6 +2035,9 @@
         </div>
       </div>
 
+      <BPSAuthorization v-if="account?.platform === 'openai' && account?.type === 'oauth' && account.credentials?.client_id !== 'app_fnr0pYvVwwFDocDumLG3H2Bp' && (bpsSettings.enabled || bpsSettings.autoPolicy?.enabled)" :account-id="account.id" />
+      <BPSAccountSettings v-if="account?.platform === 'openai' && account?.type === 'oauth'" v-model="bpsSettings" :groups="groups" :recovery-pending="typeof account.extra?.openai_excel_bps_403_disabled_at === 'string'" />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -3456,6 +3459,10 @@
 </template>
 
 <script setup lang="ts">
+import BPSAccountSettings from './BPSAccountSettings.vue'
+import BPSAuthorization from './BPSAuthorization.vue'
+import { readBPSSettings, writeBPSSettings } from './bpsSettings'
+
 import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl, normalizeExplicitCacheUpstreamMaxTTL } from '@/utils/geminiExplicitCache'
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -4228,6 +4235,7 @@ const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
+const bpsSettings = ref(readBPSSettings())
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -4760,6 +4768,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
+  bpsSettings.value = readBPSSettings(extra || {})
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -6295,10 +6304,7 @@ const handleSubmit = async () => {
         delete newExtra.openai_passthrough
         delete newExtra.openai_oauth_passthrough
       }
-      delete newExtra.openai_excel_bps
-      delete newExtra.openai_excel_bps_models
-      delete newExtra.openai_excel_bps_cache_creation_as_input
-      delete newExtra.openai_excel_bps_auto_disable_on_403
+      if (props.account.type === 'oauth') Object.assign(newExtra, writeBPSSettings(bpsSettings.value))
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
       if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
         newExtra.openai_responses_flatten_namespaces = true

@@ -622,6 +622,11 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        excelBPS403Badge: 'BPS 403: Excel possibly banned',
+        excelBPS403BadgeNote: 'Excel / BPS returned HTTP 403 (not a confirmed ban). Automatic actions taken:',
+        excelBPS403BadgeDisabled: '{time} turned off the Excel / BPS protocol; clears when the protocol is turned back on',
+        excelBPS403BadgeMoved: '{time} moved to group “{group}”; clears when the account’s groups change',
+        excelBPS403BadgeLeftGroups: '{time} left all groups; clears when the account’s groups change',
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
         providerPreset: {
@@ -632,6 +637,14 @@ export default {
           alibabaQwen: 'Alibaba Qwen',
           forceNonReasoning: 'Non-reasoning mode is enforced by this provider preset'
         },
+        bpsAuthFlow: 'Authorization type',
+        bpsAuthHint: 'Uses separate Excel authorization. BPS remains off after creation; enable it in Edit account. Paste the full callback URL to exchange the code.',
+        bpsEnabled: 'Enable Excel BPS (off by default)',
+        bpsCredentialHint: 'Create an account using Excel BPS authorization. Codex credentials cannot be switched directly.',
+        bpsModels: 'BPS models',
+        bpsModelsHint: 'Comma-separated model names; empty adds no restriction',
+        bpsSessionProxy: 'Assign proxy exits by session',
+        bpsSessionProxyHint: 'Uses enabled, unexpired proxies from IP management. Sessions keep their exit; different sessions spread across exits. No direct fallback; account concurrency stays unchanged.',
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
@@ -807,6 +820,13 @@ export default {
         astraProbeToggle: 'Automatic Astra probes',
         astraProbeToggleDesc: 'Controls automatic Astra probes for this account only. Disabling stops new probes; requests already sent may finish. History is retained.',
         astraProbeDisabled: 'Disabled',
+        astraProbeRun: 'Test now',
+        astraProbeRunning: 'Testing…',
+        astraProbeRunFailed: 'Astra probe did not complete. Please retry.',
+        astraProbeInterval: 'Regular probe interval (minutes)',
+        astraProbeMinutes: '{minutes} min',
+        astraProbeDefault: 'System default',
+        astraProbeIntervalHint: '1–1440 minutes; confirmation probes, rate limits and error backoff still apply.',
         astraProbeSaveFailed: 'Failed to save the Astra probe setting. Please retry.',
         codexTiboSampleEmpty: 'No probe yet',
         codexTiboRouteConfirmed: 'Confirmed: {verdict}',

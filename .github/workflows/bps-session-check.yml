@@ -1,0 +1,132 @@
+name: BPS session proxy checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/bps-session-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bps-session-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOMEMLIMIT: 3GiB
+
+jobs:
+  backend:
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bps_ci
+          POSTGRES_PASSWORD: bps_ci_test_only
+          POSTGRES_DB: bps_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bps_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      BPS_TEST_POSTGRES_DSN: postgres://bps_ci:bps_ci_test_only@localhost:5432/bps_ci?sslmode=disable
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Generate schema bindings
+        working-directory: backend
+        run: |
+          go generate ./ent
+          git diff --binary -- ent > "$RUNNER_TEMP/bps-generated.patch"
+      - name: Format changed Go files
+        run: |
+          base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
+          git diff --name-only --diff-filter=ACMR -z "$base" HEAD -- '*.go' | xargs -0 -r gofmt -w
+          git diff --binary > "$RUNNER_TEMP/bps-format.patch"
+      - name: Excel worker regressions
+        run: python3 -m unittest tools.test_openai_excel_oauth_adapter tools.test_openai_oauth_reauth_worker tools.test_openai_oauth_reauth_runtime_controls tools.test_openai_oauth_reauth_engines
+      - name: Protocol regressions
+        working-directory: backend
+        run: |
+          go test -race ./internal/service/basispoints ./internal/mihomo ./internal/reauthruntime ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
+      - name: Pinned Excel runtime self-check (no login)
+        working-directory: backend
+        env:
+          BPS_RUNTIME_SMOKE: '1'
+        run: go test ./internal/reauthruntime -run '^TestExcelBPSPinnedRuntimeReleaseSelfCheck$' -count=1 -timeout=9m -json > "$RUNNER_TEMP/bps-runtime-tests.jsonl"
+      - name: Account routing regressions
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|TestOpenAIBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+      - name: Compile shared packages and verify dependency wiring
+        working-directory: backend
+        run: |
+          go build ./internal/...
+          go generate ./cmd/server
+          git diff --binary -- cmd/server/wire_gen.go >> "$RUNNER_TEMP/bps-generated.patch"
+      - name: Require committed formatting and generated bindings
+        run: |
+          test ! -s "$RUNNER_TEMP/bps-format.patch"
+          test ! -s "$RUNNER_TEMP/bps-generated.patch"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bps-backend-validation
+          path: |
+            ${{ runner.temp }}/bps-*-tests.jsonl
+            ${{ runner.temp }}/bps-format.patch
+            ${{ runner.temp }}/bps-generated.patch
+          retention-days: 7
+  frontend-and-embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run lint:check
+      - run: pnpm --dir frontend run build
+      - name: Frontend regressions
+        working-directory: frontend
+        run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/bps-frontend-tests.json"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compile Linux amd64 with freshly built frontend (validation only)
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go generate ./ent
+          go generate ./cmd/server
+          go build -tags embed -trimpath -o "$RUNNER_TEMP/bps-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bps-frontend-validation
+          path: ${{ runner.temp }}/bps-frontend-tests.json
+          retention-days: 7

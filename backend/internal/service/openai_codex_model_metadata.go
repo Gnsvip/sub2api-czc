@@ -200,12 +200,12 @@ func groupCodexModelMetadata(
 			if !codexExplicitModelMappingClaims(*account, modelID) {
 				continue
 			}
-			lookupModel = account.GetMappedModel(modelID)
+			lookupModel, _ = resolveExcelBPSCatalogMappedModel(account, modelID)
 		} else {
 			if !account.IsModelSupported(upstreamModel) {
 				continue
 			}
-			lookupModel = account.GetMappedModel(upstreamModel)
+			lookupModel, _ = resolveExcelBPSCatalogMappedModel(account, upstreamModel)
 		}
 		if strings.TrimSpace(lookupModel) != modelID {
 			publicAlias = true
@@ -243,7 +243,7 @@ func codexExplicitModelTargetsConflict(accounts []Account, modelID string) bool 
 	targets := make(map[string]struct{})
 	for i := range accounts {
 		account := &accounts[i]
-		mappedModel, matched := account.ResolveMappedModel(modelID)
+		mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, modelID)
 		mappedModel = strings.TrimSpace(mappedModel)
 		if !matched || mappedModel == "" {
 			continue
@@ -260,7 +260,7 @@ func codexExplicitModelTargetsConflictForPlatform(accounts []Account, platform, 
 		if !codexAccountServesPlatformModel(account, platform, modelID) {
 			continue
 		}
-		mappedModel, matched := account.ResolveMappedModel(modelID)
+		mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, modelID)
 		mappedModel = strings.TrimSpace(mappedModel)
 		if !matched || mappedModel == "" {
 			continue

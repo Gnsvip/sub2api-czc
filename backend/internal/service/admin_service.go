@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -12,6 +13,9 @@ import (
 
 // AdminService interface defines admin management operations
 type AdminService interface {
+	TestMihomoNode(context.Context, MihomoNodeProber, string) (*ProxyTestResult, error)
+	CheckMihomoNodeQuality(context.Context, MihomoNodeProber, string) (*ProxyQualityCheckResult, error)
+	CreateMihomoNodeProxies(context.Context, MihomoStaticNodeBinder, []string) (*MihomoNodeProxyImportResult, error)
 	// User management
 	ListUsers(ctx context.Context, page, pageSize int, filters UserListFilters, sortBy, sortOrder string) ([]User, int64, error)
 	GetUser(ctx context.Context, id int64) (*User, error)
@@ -115,6 +119,7 @@ type AdminService interface {
 	// 开启时解除当前限流，让账号立即恢复调度并由上游消耗点数。
 	SetOpenAICreditsEnabled(ctx context.Context, id int64, enabled bool) (*Account, error)
 	SetOpenAIAstraProbeEnabled(ctx context.Context, id int64, enabled bool) (*Account, error)
+	SetOpenAIAstraProbeInterval(ctx context.Context, id int64, minutes int) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
@@ -527,6 +532,7 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
+	MihomoNodeID   string
 	Name           string
 	Protocol       string
 	Host           string
@@ -691,6 +697,7 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	mihomoProxyMu        sync.Mutex
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository

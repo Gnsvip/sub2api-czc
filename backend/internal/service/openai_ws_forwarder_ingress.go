@@ -71,6 +71,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 ) (returnErr error) {
+	if account.isBPSCredential() {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "BPS requires HTTP /v1/responses", nil)
+	}
 	if s == nil {
 		return errors.New("service is nil")
 	}

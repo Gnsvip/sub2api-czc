@@ -133,7 +133,12 @@
           :samples="route.recent_samples"
           :probe-enabled="route.model === 'gpt-6-astra' ? astraProbeEnabled : undefined"
           :probe-saving="astraProbeSaving"
+          :probe-running="astraProbeRunning"
+          :probe-interval-minutes="route.probe_interval_minutes || Number(account.extra?.openai_astra_probe_interval_minutes) || 10"
+          :last-sample-at="route.last_sample_at"
           @toggle-probe="toggleAstraProbe"
+          @run-probe="runAstraProbe"
+          @set-interval="setAstraProbeInterval"
           compact
         />
       </div>
@@ -225,7 +230,12 @@
           :samples="route.recent_samples"
           :probe-enabled="route.model === 'gpt-6-astra' ? astraProbeEnabled : undefined"
           :probe-saving="astraProbeSaving"
+          :probe-running="astraProbeRunning"
+          :probe-interval-minutes="route.probe_interval_minutes || Number(account.extra?.openai_astra_probe_interval_minutes) || 10"
+          :last-sample-at="route.last_sample_at"
           @toggle-probe="toggleAstraProbe"
+          @run-probe="runAstraProbe"
+          @set-interval="setAstraProbeInterval"
           compact
         />
       </div>
@@ -776,6 +786,7 @@ import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { accountUsageShowsTodayStats } from '@/utils/accountTodayStats'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import { supportsAccountQuota } from '@/utils/accountQuota'
 import UsageProgressBar from './UsageProgressBar.vue'
 import TiboRouteSpark from './TiboRouteSpark.vue'
@@ -901,30 +912,44 @@ const hasOpenAIUsageFallback = computed(() => {
 
 const astraProbeEnabled = ref(props.account.extra?.openai_astra_probe_enabled !== false)
 const astraProbeSaving = ref(false)
+const astraProbeRunning = ref(false)
 const astraProbeError = ref<string | null>(null)
+let astraRevision = 0
+watch(() => props.account.id, () => {
+  astraRevision++
+  astraProbeSaving.value = false
+  astraProbeRunning.value = false
+})
 watch(() => [props.account.id, props.account.extra?.openai_astra_probe_enabled], () => {
   astraProbeEnabled.value = props.account.extra?.openai_astra_probe_enabled !== false
   astraProbeError.value = null
 })
 
-async function toggleAstraProbe() {
-  if (astraProbeSaving.value) return
-  const accountId = props.account.id
-  astraProbeSaving.value = true
+async function performAstraAction(action: (id: number) => Promise<Account>, manual = false) {
+  if (astraProbeSaving.value || astraProbeRunning.value) return
+  const accountId = props.account.id, revision = ++astraRevision
+  astraProbeSaving.value = !manual
+  astraProbeRunning.value = manual
   astraProbeError.value = null
   try {
-    const updated = await adminAPI.accounts.setAstraProbeEnabled(accountId, !astraProbeEnabled.value)
-    if (unmounted.value || props.account.id !== accountId) return
+    const updated = await action(accountId)
+    if (unmounted.value || props.account.id !== accountId || revision !== astraRevision) return
     astraProbeEnabled.value = updated.extra?.openai_astra_probe_enabled !== false
     emit('account-updated', updated)
-  } catch {
-    if (!unmounted.value && props.account.id === accountId) {
-      astraProbeError.value = t('admin.accounts.openai.astraProbeSaveFailed')
+  } catch (error) {
+    if (!unmounted.value && props.account.id === accountId && revision === astraRevision) {
+      astraProbeError.value = manual ? extractApiErrorMessage(error, t('admin.accounts.openai.astraProbeRunFailed')) : t('admin.accounts.openai.astraProbeSaveFailed')
     }
   } finally {
-    astraProbeSaving.value = false
+    if (revision === astraRevision) {
+      astraProbeSaving.value = false
+      astraProbeRunning.value = false
+    }
   }
 }
+function toggleAstraProbe() { return performAstraAction(id => adminAPI.accounts.setAstraProbeEnabled(id, !astraProbeEnabled.value)) }
+function setAstraProbeInterval(minutes: number) { return performAstraAction(id => adminAPI.accounts.setAstraProbeInterval(id, minutes)) }
+function runAstraProbe() { return performAstraAction(adminAPI.accounts.runAstraProbe, true) }
 
 const codexTiboRoutes = computed(() => {
   const routes = (props.account.codex_turn_tickets ?? []).flatMap((ticket) =>
@@ -932,12 +957,15 @@ const codexTiboRoutes = computed(() => {
       model: ticket.model,
       route: route.route,
       verdict: route.verdict,
-      recent_samples: route.recent_samples
+      recent_samples: route.recent_samples,
+      last_sample_at: route.last_sample_at,
+      probe_interval_minutes: route.probe_interval_minutes,
+      probing: route.probing
     }))
   )
   // Keep the switch available before the first sample and while probing is off.
   if (props.account.platform === 'openai' && ['oauth', 'setup-token', 'apikey'].includes(props.account.type) && !routes.some(route => route.model === 'gpt-6-astra')) {
-    routes.unshift({ model: 'gpt-6-astra', route: 'http', verdict: 'unknown', recent_samples: [] })
+    routes.unshift({ model: 'gpt-6-astra', route: 'http', verdict: 'unknown', recent_samples: [], last_sample_at: undefined, probe_interval_minutes: undefined, probing: false })
   }
   return routes
 })

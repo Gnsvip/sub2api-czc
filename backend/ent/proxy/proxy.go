@@ -21,6 +21,8 @@ const (
 	FieldUpdatedAt = "updated_at"
 	// FieldDeletedAt holds the string denoting the deleted_at field in the database.
 	FieldDeletedAt = "deleted_at"
+	// FieldMihomoNodeID holds the string denoting the mihomo_node_id field in the database.
+	FieldMihomoNodeID = "mihomo_node_id"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
 	// FieldProtocol holds the string denoting the protocol field in the database.
@@ -74,6 +76,7 @@ var Columns = []string{
 	FieldCreatedAt,
 	FieldUpdatedAt,
 	FieldDeletedAt,
+	FieldMihomoNodeID,
 	FieldName,
 	FieldProtocol,
 	FieldHost,
@@ -111,6 +114,8 @@ var (
 	DefaultUpdatedAt func() time.Time
 	// UpdateDefaultUpdatedAt holds the default value on update for the "updated_at" field.
 	UpdateDefaultUpdatedAt func() time.Time
+	// MihomoNodeIDValidator is a validator for the "mihomo_node_id" field. It is called by the builders before save.
+	MihomoNodeIDValidator func(string) error
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
 	// ProtocolValidator is a validator for the "protocol" field. It is called by the builders before save.
@@ -154,6 +159,11 @@ func ByUpdatedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByDeletedAt orders the results by the deleted_at field.
 func ByDeletedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDeletedAt, opts...).ToFunc()
+}
+
+// ByMihomoNodeID orders the results by the mihomo_node_id field.
+func ByMihomoNodeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMihomoNodeID, opts...).ToFunc()
 }
 
 // ByName orders the results by the name field.

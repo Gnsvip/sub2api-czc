@@ -10,6 +10,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBPSSettingsSurviveSchedulerProjection(t *testing.T) {
+	a := service.Account{ID: 71, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"client_id": "app_fnr0pYvVwwFDocDumLG3H2Bp", "access_token": "not-for-cache"},
+		Extra:       map[string]any{service.OpenAIExcelBPSEnabledKey: true, service.OpenAIExcelBPSSessionProxyKey: true, service.OpenAIExcelBPSModelsKey: []string{"gpt-6.1-sol"}}}
+	metadata := buildSchedulerMetadataAccount(a)
+	require.True(t, metadata.IsSchedulable())
+	require.Equal(t, true, metadata.Extra[service.OpenAIExcelBPSSessionProxyKey])
+	require.True(t, metadata.IsModelSupported("gpt-6.1-sol"))
+	require.False(t, metadata.IsModelSupported("gpt-6-luna"))
+	require.Empty(t, metadata.GetCredential("access_token"))
+	a.Extra[service.OpenAIExcelBPSEnabledKey] = false
+	metadata = buildSchedulerMetadataAccount(a)
+	require.False(t, metadata.IsSchedulable())
+}
+
 func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	filtered := filterSchedulerCredentials(map[string]any{
 		"plan_type":     "plus",

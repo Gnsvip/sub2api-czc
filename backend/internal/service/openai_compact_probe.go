@@ -12,11 +12,14 @@ const (
 	AccountTestModeDefault = "default"
 	// AccountTestModeCompact drives the remote-compaction probe test
 	// (native v2: streaming /responses with a compaction_trigger input item).
-	AccountTestModeCompact = "compact"
+	AccountTestModeCompact  = "compact"
+	AccountTestModeBPSTools = "bps_tools"
 )
 
 func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case AccountTestModeBPSTools:
+		return AccountTestModeBPSTools
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
 	default:

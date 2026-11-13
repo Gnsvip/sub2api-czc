@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -74,6 +76,7 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 
 	proxy := &Proxy{
 		Name:           input.Name,
+		MihomoNodeID:   input.MihomoNodeID,
 		Protocol:       input.Protocol,
 		Host:           input.Host,
 		Port:           input.Port,
@@ -104,6 +107,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if proxy.MihomoNodeID != "" && ((input.Protocol != "" && input.Protocol != proxy.Protocol) || (input.Host != "" && input.Host != proxy.Host) || (input.Port != 0 && input.Port != proxy.Port) || (input.Username != nil && *input.Username != proxy.Username) || (input.Password != nil && *input.Password != proxy.Password)) {
+		return nil, infraerrors.BadRequest("MIHOMO_STATIC_ENDPOINT_IMMUTABLE", "A managed node endpoint cannot be changed")
 	}
 
 	// Merge only supplied fields, then validate the resulting fallback configuration.
@@ -159,6 +165,8 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
+	s.mihomoProxyMu.Lock()
+	defer s.mihomoProxyMu.Unlock()
 	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
 	if err != nil {
 		return err
@@ -166,10 +174,12 @@ func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
 	if count > 0 {
 		return ErrProxyInUse
 	}
-	return s.proxyRepo.Delete(ctx, id)
+	return s.deleteProxyWithStaticBinding(ctx, id)
 }
 
 func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) (*ProxyBatchDeleteResult, error) {
+	s.mihomoProxyMu.Lock()
+	defer s.mihomoProxyMu.Unlock()
 	result := &ProxyBatchDeleteResult{}
 	if len(ids) == 0 {
 		return result, nil
@@ -191,7 +201,7 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 			})
 			continue
 		}
-		if err := s.proxyRepo.Delete(ctx, id); err != nil {
+		if err := s.deleteProxyWithStaticBinding(ctx, id); err != nil {
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
 				ID:     id,
 				Reason: err.Error(),
@@ -216,6 +226,11 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if s.proxyProber == nil {
+		result := &ProxyTestResult{Success: false, Message: "代理探测服务未配置"}
+		s.saveProxyLatency(ctx, id, proxyTestLatencyInfo(result))
+		return result, nil
 	}
 
 	proxyURL := proxy.URL()
@@ -621,4 +636,173 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
 	}
+}
+
+func (s *adminServiceImpl) deleteProxyWithStaticBinding(ctx context.Context, id int64) error {
+	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	if err != nil && !errors.Is(err, ErrProxyNotFound) {
+		return err
+	}
+	if proxy != nil && proxy.MihomoNodeID != "" {
+		if err := mihomo.DeactivateStaticNode(ctx, proxy.MihomoNodeID); err != nil {
+			return err
+		}
+	}
+	if err := s.proxyRepo.Delete(ctx, id); err != nil {
+		if proxy != nil && proxy.MihomoNodeID != "" {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			defer cancel()
+			mihomo.RestoreStaticNode(cleanup, proxy.MihomoNodeID)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) testProxyURL(ctx context.Context, proxyURL string) *ProxyTestResult {
+	if s.proxyProber == nil {
+		return &ProxyTestResult{Success: false, Message: "代理探测服务未配置"}
+	}
+	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
+	if err != nil {
+		return &ProxyTestResult{
+			Success: false,
+			Message: err.Error(),
+		}
+	}
+	return &ProxyTestResult{
+		Success:     true,
+		Message:     "Proxy is accessible",
+		LatencyMs:   latencyMs,
+		IPAddress:   exitInfo.IP,
+		City:        exitInfo.City,
+		Region:      exitInfo.Region,
+		Country:     exitInfo.Country,
+		CountryCode: exitInfo.CountryCode,
+	}
+}
+
+func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL string) (*ProxyQualityCheckResult, *ProxyExitInfo) {
+	result := &ProxyQualityCheckResult{
+		Score:     100,
+		Grade:     "A",
+		CheckedAt: time.Now().Unix(),
+		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
+	}
+
+	if s.proxyProber == nil {
+		result.Items = append(result.Items, ProxyQualityCheckItem{
+			Target:  "base_connectivity",
+			Status:  "fail",
+			Message: "代理探测服务未配置",
+		})
+		result.FailedCount++
+		finalizeProxyQualityResult(result)
+		return result, nil
+	}
+
+	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
+	if err != nil {
+		result.Items = append(result.Items, ProxyQualityCheckItem{
+			Target:    "base_connectivity",
+			Status:    "fail",
+			LatencyMs: latencyMs,
+			Message:   err.Error(),
+		})
+		result.FailedCount++
+		finalizeProxyQualityResult(result)
+		return result, nil
+	}
+
+	result.ExitIP = exitInfo.IP
+	result.Country = exitInfo.Country
+	result.CountryCode = exitInfo.CountryCode
+	result.BaseLatencyMs = latencyMs
+	result.Items = append(result.Items, ProxyQualityCheckItem{
+		Target:    "base_connectivity",
+		Status:    "pass",
+		LatencyMs: latencyMs,
+		Message:   "代理出口连通正常",
+	})
+	result.PassedCount++
+
+	client, err := httpclient.GetClient(httpclient.Options{
+		ProxyURL:              proxyURL,
+		Timeout:               proxyQualityRequestTimeout,
+		ResponseHeaderTimeout: proxyQualityResponseHeaderTimeout,
+	})
+	if err != nil {
+		result.Items = append(result.Items, ProxyQualityCheckItem{
+			Target:  "http_client",
+			Status:  "fail",
+			Message: fmt.Sprintf("创建检测客户端失败: %v", err),
+		})
+		result.FailedCount++
+		finalizeProxyQualityResult(result)
+		return result, exitInfo
+	}
+
+	for _, target := range proxyQualityTargets {
+		item := runProxyQualityTarget(ctx, client, target)
+		result.Items = append(result.Items, item)
+		switch item.Status {
+		case "pass":
+			result.PassedCount++
+		case "warn":
+			result.WarnCount++
+		case "challenge":
+			result.ChallengeCount++
+		default:
+			result.FailedCount++
+		}
+	}
+
+	finalizeProxyQualityResult(result)
+	return result, exitInfo
+}
+
+func proxyTestLatencyInfo(result *ProxyTestResult) *ProxyLatencyInfo {
+	info := &ProxyLatencyInfo{
+		Success:   result.Success,
+		Message:   result.Message,
+		UpdatedAt: time.Now(),
+	}
+	if result.Success {
+		latency := result.LatencyMs
+		info.LatencyMs = &latency
+		info.IPAddress = result.IPAddress
+		info.Country = result.Country
+		info.CountryCode = result.CountryCode
+		info.Region = result.Region
+		info.City = result.City
+	}
+	return info
+}
+
+func proxyQualityLatencyInfo(result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) *ProxyLatencyInfo {
+	score := result.Score
+	checkedAt := result.CheckedAt
+	info := &ProxyLatencyInfo{
+		Success:          proxyQualityBaseConnectivityPass(result),
+		Message:          result.Summary,
+		QualityStatus:    proxyQualityOverallStatus(result),
+		QualityScore:     &score,
+		QualityGrade:     result.Grade,
+		QualitySummary:   result.Summary,
+		QualityCheckedAt: &checkedAt,
+		QualityCFRay:     proxyQualityFirstCFRay(result),
+		UpdatedAt:        time.Now(),
+	}
+	if result.BaseLatencyMs > 0 {
+		latency := result.BaseLatencyMs
+		info.LatencyMs = &latency
+	}
+	if exitInfo != nil {
+		info.IPAddress = exitInfo.IP
+		info.Country = exitInfo.Country
+		info.CountryCode = exitInfo.CountryCode
+		info.Region = exitInfo.Region
+		info.City = exitInfo.City
+	}
+	return info
 }

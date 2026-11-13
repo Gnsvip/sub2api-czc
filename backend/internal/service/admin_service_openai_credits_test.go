@@ -100,3 +100,25 @@ func TestAdminService_SetOpenAIAstraProbeEnabled(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, repo.extraUpdates)
 }
+
+func TestAdminService_SetOpenAIAstraProbeInterval(t *testing.T) {
+	account := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAIAstraProbeEnabledExtraKey: false, OpenAIAstraPolicyExtraKey: "history"}}
+	repo := newOpenAICreditsRepo(account)
+	svc := &adminServiceImpl{accountRepo: repo}
+	for _, minutes := range []int{0, 1, 30, 1440} {
+		updated, err := svc.SetOpenAIAstraProbeInterval(context.Background(), 47, minutes)
+		require.NoError(t, err)
+		require.Equal(t, minutes, updated.OpenAIAstraProbeIntervalMinutes())
+		require.False(t, updated.IsOpenAIAstraProbeEnabled())
+		require.Equal(t, "history", updated.Extra[OpenAIAstraPolicyExtraKey])
+	}
+	for _, minutes := range []int{-1, 1441} {
+		_, err := svc.SetOpenAIAstraProbeInterval(context.Background(), 47, minutes)
+		require.Error(t, err)
+	}
+	require.Len(t, repo.extraUpdates, 4)
+	account.Platform = PlatformAnthropic
+	_, err := svc.SetOpenAIAstraProbeInterval(context.Background(), 47, 10)
+	require.Error(t, err)
+	require.Len(t, repo.extraUpdates, 4)
+}

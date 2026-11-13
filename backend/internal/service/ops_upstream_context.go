@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"strconv"
 	"strings"
 	"time"
@@ -184,6 +185,9 @@ func IsOpsRequestScopedError(c *gin.Context) bool {
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
 type OpsStreamError struct {
+	// Only the local BPS converter may populate this bounded diagnostic; it
+	// excludes tool arguments and customer content.
+	BridgeFailure *basispoints.BridgeFailure
 	// ErrType 是写入 SSE 帧的对客错误类型（如 rate_limit_error / upstream_error / api_error）。
 	ErrType string
 	// Code 是可选的稳定错误分类；用于既保留通用 OpenAI error.type，又向客户端和 Ops

@@ -3,16 +3,20 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
-const { getUsage, setAstraProbeEnabled } = vi.hoisted(() => ({
+const { getUsage, setAstraProbeEnabled, setAstraProbeInterval, runAstraProbe } = vi.hoisted(() => ({
   getUsage: vi.fn(),
-  setAstraProbeEnabled: vi.fn()
+  setAstraProbeEnabled: vi.fn(),
+  setAstraProbeInterval: vi.fn(),
+  runAstraProbe: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       getUsage,
-      setAstraProbeEnabled
+      setAstraProbeEnabled,
+      setAstraProbeInterval,
+      runAstraProbe
     }
   }
 }))
@@ -118,6 +122,8 @@ describe('AccountUsageCell', () => {
   beforeEach(() => {
     getUsage.mockReset()
     setAstraProbeEnabled.mockReset()
+    setAstraProbeInterval.mockReset()
+    runAstraProbe.mockReset()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -205,6 +211,54 @@ describe('AccountUsageCell', () => {
     await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('runs one manual probe while automatic probes are off and ignores a stale result', async () => {
+    // A stale server-side probing snapshot must not lock the button. The
+    // backend joins a running probe when one still exists.
+    const account = makeAccount({ platform: 'openai', type: 'apikey', extra: { openai_astra_probe_enabled: false },
+      codex_turn_tickets: [{ model: 'gpt-6-astra', tibo_routes: [{ route: 'http', verdict: 'unknown', probes_hour: 1, flips_hour: 0, probing: true }] }] })
+    const wrapper = mount(AccountUsageCell, { props: { account } })
+    let finish!: (value: Account) => void
+    runAstraProbe.mockImplementationOnce(() => new Promise<Account>(resolve => { finish = resolve }))
+    const button = wrapper.get('[data-testid="astra-probe-run"]')
+    await button.trigger('click')
+    expect(runAstraProbe).toHaveBeenCalledWith(account.id)
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(runAstraProbe).toHaveBeenCalledTimes(1)
+    expect(setAstraProbeEnabled).not.toHaveBeenCalled()
+    await wrapper.setProps({ account: { ...account, id: 99 } })
+    finish(account)
+    await flushPromises()
+    expect(wrapper.emitted('account-updated')).toBeUndefined()
+    expect(wrapper.get('[data-testid="astra-probe-run"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('saves only the Astra interval and displays the returned sample time', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'apikey', extra: { openai_astra_probe_enabled: false } })
+    const wrapper = mount(AccountUsageCell, { props: { account } })
+    const updated = { ...account, extra: { ...account.extra, openai_astra_probe_interval_minutes: 30 } }
+    setAstraProbeInterval.mockResolvedValue(updated)
+    await wrapper.get('[data-testid="astra-probe-interval"]').trigger('click')
+    await wrapper.get('[data-testid="astra-probe-interval-input"]').setValue(30)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(setAstraProbeInterval).toHaveBeenCalledWith(account.id, 30)
+    expect(setAstraProbeEnabled).not.toHaveBeenCalled()
+    expect(wrapper.emitted('account-updated')?.[0]).toEqual([updated])
+    await wrapper.setProps({ account: updated })
+    const at = '2026-11-13T01:02:03Z'
+    const result: Account = { ...updated, codex_turn_tickets: [{ model: 'gpt-6-astra', tibo_routes: [{ route: 'http', verdict: 'healthy', probes_hour: 1, flips_hour: 0, last_sample_at: at, recent_samples: [{ verdict: 'healthy', at }] }] }] }
+    runAstraProbe.mockResolvedValue(result)
+    await wrapper.get('[data-testid="astra-probe-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('account-updated')?.[1]).toEqual([result])
+    await wrapper.setProps({ account: result })
+    expect(wrapper.get('[data-testid="astra-probe-time"]').attributes('datetime')).toBe(at)
+    expect(wrapper.get('[data-testid="astra-probe-toggle"]').attributes('aria-checked')).toBe('false')
     wrapper.unmount()
   })
 

@@ -1049,7 +1049,9 @@ func (c GatewayConfig) CodexFullSynthesisEnabled() bool {
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
-	NativeReasoningReplay GatewayNativeReasoningReplayConfig `mapstructure:"native_reasoning_replay"`
+	ExcelBPSStateRedisEnabled         bool                               `mapstructure:"excel_bps_state_redis_enabled"`
+	ExcelBPSStreamDataIntervalTimeout int                                `mapstructure:"excel_bps_stream_data_interval_timeout"`
+	NativeReasoningReplay             GatewayNativeReasoningReplayConfig `mapstructure:"native_reasoning_replay"`
 	// MinOutputTokens is the minimum max_output_tokens used when
 	// converting Chat Completions or Anthropic requests to Responses.
 	MinOutputTokens int `mapstructure:"min_output_tokens"`
@@ -2298,6 +2300,9 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+
+	viper.SetDefault("gateway.excel_bps_state_redis_enabled", false)
+	viper.SetDefault("gateway.excel_bps_stream_data_interval_timeout", 120)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.max_same_account_retries_gemini", 4)
 	viper.SetDefault("gateway.gemini_debug_response_headers", false)

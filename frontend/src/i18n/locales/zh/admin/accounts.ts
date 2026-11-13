@@ -746,6 +746,11 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        excelBPS403Badge: 'BPS 403疑似被封excel',
+        excelBPS403BadgeNote: 'Excel / BPS 上游返回 HTTP 403（不代表已确认封禁），已按设置自动处理：',
+        excelBPS403BadgeDisabled: '{time} 关闭 Excel / BPS 协议，重新开启协议后解除',
+        excelBPS403BadgeMoved: '{time} 移入分组「{group}」，调整分组后解除',
+        excelBPS403BadgeLeftGroups: '{time} 退出所有分组，调整分组后解除',
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
         providerPreset: {
@@ -756,6 +761,14 @@ export default {
           alibabaQwen: '阿里云千问',
           forceNonReasoning: '此服务商预设将强制使用非推理模式'
         },
+        bpsAuthFlow: '授权类型',
+        bpsAuthHint: '使用独立 Excel 授权；创建后默认关闭 BPS，请在编辑账号中开启。粘贴完整回调 URL 兑换。',
+        bpsEnabled: '启用 Excel BPS（默认关闭）',
+        bpsCredentialHint: '需新建账号并选择 Excel BPS 授权，普通 Codex 凭据不能直接切换。',
+        bpsModels: 'BPS 模型范围',
+        bpsModelsHint: '模型名用逗号分隔，留空不额外限制',
+        bpsSessionProxy: '按会话分配多个代理出口',
+        bpsSessionProxyHint: '使用 IP 管理中启用且未过期的代理。同会话固定出口，不同会话分散；空池不直连，账号并发限制不变。',
         oauthPassthrough: '自动透传（仅替换认证）',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
@@ -917,7 +930,14 @@ export default {
         astraProbeToggle: 'Astra 自动检测',
         astraProbeToggleDesc: '仅控制此账号的 Astra 自动检测。关闭后不再发起新检测，已发出的检测可能完成；历史结果保留。',
         astraProbeDisabled: '已关闭',
-        astraProbeSaveFailed: 'Astra 检测开关保存失败，请重试',
+        astraProbeRun: '立即检测',
+        astraProbeRunning: '检测中…',
+        astraProbeRunFailed: 'Astra 检测未完成，请重试',
+        astraProbeInterval: '常规检测间隔（分钟）',
+        astraProbeMinutes: '{minutes} 分钟',
+        astraProbeDefault: '系统默认',
+        astraProbeIntervalHint: '1–1440 分钟；确认检测、限流和错误退避仍按原规则执行。',
+        astraProbeSaveFailed: 'Astra 检测设置保存失败，请重试',
         codexTiboSampleEmpty: '尚无探测',
         codexTiboRouteConfirmed: '已确认：{verdict}',
         codexTiboRouteCheckedAt: '最近检查：{time}',

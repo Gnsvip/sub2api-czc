@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -18,8 +20,10 @@ import (
 
 // SystemHandler handles system-related operations
 type SystemHandler struct {
-	updateSvc systemUpdateService
-	lockSvc   *service.SystemOperationLockService
+	kernel      *mihomo.Manager
+	nodeChecker mihomoNodeChecker
+	updateSvc   systemUpdateService
+	lockSvc     *service.SystemOperationLockService
 }
 
 // systemUpdateTimeout bounds a full in-place update or rollback. Updates may
@@ -54,6 +58,7 @@ type systemUpdateService interface {
 func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
 	return &SystemHandler{
 		updateSvc: updateSvc,
+		kernel:    mihomo.New(filepath.Join(sysutil.GetDataDir(), "mihomo-codex")),
 		lockSvc:   lockSvc,
 	}
 }

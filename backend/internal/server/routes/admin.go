@@ -446,6 +446,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/schedulable", h.Admin.Account.SetSchedulable)
 		accounts.POST("/:id/openai-credits", h.Admin.Account.SetOpenAICreditsEnabled)
 		accounts.PUT("/:id/astra-probe", h.Admin.Account.SetOpenAIAstraProbeEnabled)
+		accounts.PUT("/:id/astra-probe/interval", h.Admin.Account.SetOpenAIAstraProbeInterval)
+		accounts.POST("/:id/astra-probe/run", h.Admin.Account.RunOpenAIAstraProbe)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)
 		accounts.POST("/:id/models/sync-upstream", h.Admin.Account.SyncUpstreamModels)
@@ -687,6 +689,12 @@ func registerBackupRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	system := admin.Group("/system")
 	{
+		system.GET("/mihomo", h.Admin.System.GetMihomo)
+		system.POST("/mihomo", h.Admin.System.ManageMihomo)
+		system.PUT("/mihomo/download-mode", h.Admin.System.SetMihomoDownloadMode)
+		system.POST("/mihomo/nodes/:name/test", h.Admin.System.TestMihomoNode)
+		system.POST("/mihomo/nodes/:name/quality-check", h.Admin.System.CheckMihomoNodeQuality)
+		system.POST("/mihomo/nodes/static-proxies", h.Admin.System.AddMihomoNodesAsStaticProxies)
 		system.GET("/version", h.Admin.System.GetVersion)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
 		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)
@@ -909,6 +917,14 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
+		openai.GET("/bps-defaults", h.Admin.OpenAIOAuth.GetBPSDefaults)
+		openai.PUT("/bps-defaults", h.Admin.OpenAIOAuth.SaveBPSDefaults)
+		openai.GET("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.ExcelLoginStatus)
+		openai.PUT("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.SaveExcelLogin)
+		openai.POST("/accounts/:id/excel-login/run", h.Admin.OpenAIOAuth.QueueExcelLogin)
+		openai.GET("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.ExcelAuthorizationState)
+		openai.POST("/accounts/:id/excel-authorization/start", h.Admin.OpenAIOAuth.BeginExcelAuthorization)
+		openai.POST("/accounts/:id/excel-authorization", h.Admin.OpenAIOAuth.CompleteExcelAuthorization)
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)

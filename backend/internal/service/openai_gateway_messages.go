@@ -33,6 +33,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.isBPSCredential() {
+		return nil, bpsRequestError(c, 400, "bps_responses_only", "This Excel BPS account supports HTTP /v1/responses only")
+	}
 	requestedModel := gjson.GetBytes(body, "model").String()
 
 	if err := validateRetiredOpenAIRequestModel(account, requestedModel, false, resolveOpenAIForwardModel(account, requestedModel, defaultMappedModel)); err != nil {

@@ -1921,7 +1921,7 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a.isBPSCredential() {
 		// ChatCompletions is also the scheduler's generic text capability.
 		// The actual ingress is checked before forwarding to BPS.
-		return capability == "" || capability == OpenAIEndpointCapabilityChatCompletions || capability == OpenAIEndpointCapabilityResponses || capability == OpenAIEndpointCapabilityImages
+		return capability == "" || capability == OpenAIEndpointCapabilityChatCompletions || capability == OpenAIEndpointCapabilityResponses
 	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()

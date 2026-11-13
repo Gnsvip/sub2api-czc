@@ -1048,6 +1048,22 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 	}
+
+	if openAISettings.bps {
+		for _, original := range targetsByID {
+			candidate := *original
+			candidate.Extra = make(map[string]any, len(original.Extra)+len(input.Extra))
+			for k, v := range original.Extra {
+				candidate.Extra[k] = v
+			}
+			for k, v := range input.Extra {
+				candidate.Extra[k] = v
+			}
+			if err := s.validateExcelBPSGroupPolicy(ctx, &candidate); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {
 			account, ok := targetsByID[accountID]

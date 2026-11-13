@@ -225,7 +225,15 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("filter Tibo group Codex models: %w", err)
 	}
-	if changed || retired || tiboFiltered {
+
+	bpsRestricted := false
+	if s.excelBPSGloballyEnabled(ctx) {
+		body, bpsRestricted, err = restrictExcelBPSCodexModelsManifest(body, accounts, group)
+		if err != nil {
+			return fmt.Errorf("restrict BPS model capabilities: %w", err)
+		}
+	}
+	if changed || retired || tiboFiltered || bpsRestricted {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
 	}

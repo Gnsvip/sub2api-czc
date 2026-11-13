@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -25,7 +26,7 @@ func (s *AccountTestService) testBPSAccountConnection(c *gin.Context, account *A
 	if s.openaiGatewayService == nil {
 		return s.sendErrorAndEnd(c, "BPS gateway is unavailable")
 	}
-	if mode == AccountTestModeCompact || isOpenAIImageModel(model) {
+	if isOpenAIImageModel(model) {
 		return s.sendErrorAndEnd(c, "BPS connection test supports text Responses only")
 	}
 	if model == "" {
@@ -39,20 +40,33 @@ func (s *AccountTestService) testBPSAccountConnection(c *gin.Context, account *A
 	}
 	payload := map[string]any{"model": model, "input": prompt, "stream": false}
 	applyIntelligentPayloadPrompt(c.Request.Context(), payload)
+
+	if mode == AccountTestModeCompact {
+		payload = createOpenAICompactProbePayload(model, true)
+		payload["stream"] = false
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to encode BPS test request")
 	}
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
 	internal := c.Copy()
+	internal.Request = c.Request.Clone(s.withBPSTestEvidence(c.Request.Context(), c))
+	if scope, _ := resolveOpenAIWSExecutionScope(internal, encoded, 0); scope == "" {
+		internal.Request.Header.Set("Session-Id", "account-test-"+uuid.NewString())
+	}
 	capture := &responsesWebSearchRoundWriter{header: make(http.Header), status: http.StatusOK, size: -1}
 	internal.Writer = capture
-	_, err = s.openaiGatewayService.forwardBPS(s.withBPSTestEvidence(c.Request.Context(), c), internal, account, encoded, time.Now())
+	_, err = s.openaiGatewayService.forwardBPS(internal.Request.Context(), internal, account, encoded, time.Now())
 	if err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
 	if capture.err != nil {
 		return s.sendErrorAndEnd(c, "BPS test response exceeded the buffer limit")
+	}
+
+	if mode == AccountTestModeCompact && !openAICompactProbeFoundCompactionItem(capture.body.Bytes()) {
+		return s.sendErrorAndEnd(c, "BPS compact response has no compaction item")
 	}
 	for _, item := range gjson.GetBytes(capture.body.Bytes(), "output").Array() {
 		for _, part := range item.Get("content").Array() {

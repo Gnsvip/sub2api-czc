@@ -488,8 +488,6 @@ type OpenAIGatewayService struct {
 	excelBPSModelsCache     openAIModelsCache
 
 	bpsProxyRepo          bpsProxySource
-	bpsSessions           bpsSessionPool
-	bpsReplay             basispoints.ReplayCache
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository

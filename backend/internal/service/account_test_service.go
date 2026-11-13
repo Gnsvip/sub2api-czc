@@ -951,7 +951,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if err := validateRetiredOpenAIRequestModel(account, modelID, false, account.GetMappedModel(modelID)); err != nil {
 		return s.sendErrorAndEnd(c, err.Error())
 	}
-	if account.isBPSCredential() {
+
+	if mode == AccountTestModeBPSTools {
+		return s.testExcelBPSToolRoundtrip(c, account, modelID)
+	}
+	if !isOpenAIImageModel(account.GetMappedModel(modelID)) && s.openaiGatewayService != nil && (account.isBPSCredential() || (account.IsExcelBPSEnabledForModel(modelID) && s.openaiGatewayService.excelBPSGloballyEnabled(ctx))) {
 		return s.testBPSAccountConnection(c, account, modelID, prompt, mode)
 	}
 
@@ -3361,6 +3365,14 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	applyOpenAIImagesDefaults(parsed)
 
 	upstreamModel := account.GetMappedModel(parsed.Model)
+	if s.openaiGatewayService != nil && s.openaiGatewayService.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSImagesEnabledForModel(parsed.Model) {
+		if handled, err := s.testExcelBPSImages(c, ctx, account, parsed, upstreamModel); handled {
+			return err
+		}
+	}
+	if account.isBPSCredential() {
+		return s.sendErrorAndEnd(c, "Excel OAuth image tests require enabled BPS image routing")
+	}
 	responsesBody, targetURL, err := buildOpenAIImagesOAuthPayload(parsed, upstreamModel)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))

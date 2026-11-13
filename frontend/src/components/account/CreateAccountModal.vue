@@ -3756,6 +3756,7 @@
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
       <label v-if="form.platform === 'openai'" class="block">
+        <BPSAccountSettings v-model="bpsSettings" :groups="groups" />
         <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
         <select v-model="openaiOAuthFlow" class="input" :disabled="openaiOAuth.loading.value" data-testid="openai-oauth-flow" @change="openaiOAuth.resetState(); oauthFlowRef?.reset()">
           <option value="openai">Codex</option>
@@ -4113,6 +4114,9 @@
 </template>
 
 <script setup lang="ts">
+import BPSAccountSettings from './BPSAccountSettings.vue'
+import { readBPSSettings, writeBPSSettings } from './bpsSettings'
+
 import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -4337,6 +4341,7 @@ const appStore = useAppStore()
 
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
+const bpsSettings = ref(readBPSSettings())
 const openaiOAuthFlow = ref<'openai' | 'excel_bps'>('openai')
 const openaiOAuth = useOpenAIOAuth() // For OpenAI OAuth
 const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
@@ -5788,10 +5793,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.openai_responses_flatten_namespaces
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
-  delete extra.openai_excel_bps
-  delete extra.openai_excel_bps_models
-  delete extra.openai_excel_bps_cache_creation_as_input
-  delete extra.openai_excel_bps_auto_disable_on_403
+  if (form.type === 'oauth') Object.assign(extra, writeBPSSettings(bpsSettings.value))
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
@@ -6669,9 +6671,6 @@ const handleOpenAIExchange = async (authCode: string) => {
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
     const extra = buildOpenAIExtra(oauthExtra) || {}
     if (openaiOAuthFlow.value === 'excel_bps') {
-      // This separate credential must be explicitly enabled after creation.
-      extra.openai_excel_bps = false
-      extra.openai_excel_bps_session_proxy = false
       extra.openai_oauth_responses_websockets_v2_enabled = false
       extra.openai_oauth_responses_websockets_v2_mode = 'off'
       extra.openai_astra_probe_enabled = false

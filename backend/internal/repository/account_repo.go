@@ -3257,6 +3257,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			args = append(args, payload)
 			idx++
 
+			if raw, exists := updates.Extra[service.OpenAIExcelBPSModelsKey]; exists && raw == nil {
+				extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_models'"
+			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}

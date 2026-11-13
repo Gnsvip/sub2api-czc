@@ -12,6 +12,21 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	ExcelBPSImageMode                   string
+	ExcelBPSImageRelayEnabled           bool
+	ExcelBPSImageBaseURL                string
+	ExcelBPSImageBodyLimitMiB           int
+	ExcelBPSImageBudgetMiB              int
+	ExcelBPSImageMaxRequests            int
+	ExcelBPSImageMaxImageMiB            int
+	ExcelBPSImageMaxImages              int
+	ExcelBPSImageLimitPolicy            string
+	ExcelBPSImageWarningRemaining       int
+	ExcelBPSImageCompactReserve         int
+	ExcelBPSImageMaxTotalMiB            int
+	ExcelBPSImageStorageMiB             int
+	ExcelBPSImageStorageEntries         int
+	ExcelBPSImageTTLMinutes             int
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string

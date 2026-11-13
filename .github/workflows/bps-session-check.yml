@@ -40,12 +40,12 @@ jobs:
       - name: Protocol regressions
         working-directory: backend
         run: |
-          go test -race ./internal/service/basispoints -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
+          go test -race ./internal/service/basispoints ./internal/mihomo ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
       - name: Account routing regressions
         if: ${{ !cancelled() }}
         working-directory: backend
         run: |
-          go test -race -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler/admin -run '^(TestBPS|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+          go test -race -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler/admin -run '^(TestBPS|TestExcelBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
       - name: Compile shared packages and verify dependency wiring
         working-directory: backend
         run: |

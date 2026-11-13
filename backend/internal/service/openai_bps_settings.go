@@ -16,13 +16,7 @@ func (a *Account) isBPSCredential() bool {
 	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth && a.GetCredential("client_id") == openai.ExcelClientID
 }
 
-func (a *Account) isBPSEnabled() bool {
-	if !a.isBPSCredential() {
-		return false
-	}
-	enabled, _ := a.Extra[OpenAIExcelBPSEnabledKey].(bool)
-	return enabled
-}
+func (a *Account) isBPSEnabled() bool { return a.IsExcelBPSEnabled() }
 
 func (a *Account) bpsModelAllowed(model string) bool {
 	models, err := bpsModelList(a.Extra[OpenAIExcelBPSModelsKey])

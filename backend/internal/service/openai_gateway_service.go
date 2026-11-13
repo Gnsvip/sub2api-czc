@@ -469,6 +469,24 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	excelBPSRecoveryMu      sync.Mutex
+	excelBPSRecoveryCancel  context.CancelFunc
+	excelBPSRecoveryDone    chan struct{}
+	excelBPSRecoveryStopped bool
+	excelBPSWarmMu          sync.Mutex
+	excelBPSWarmCancel      context.CancelFunc
+	excelBPSWarmDone        chan struct{}
+	excelBPSWarmStopped     bool
+	excelBPSImagesMu        sync.Mutex
+	excelBPSImages          *basispoints.ImageRelay
+	excelBPSImageAdmission  excelBPSImageAdmission
+	excelBPSAttachments     basispoints.AttachmentCache
+	excelBPSIPPoolMu        sync.Mutex
+	excelBPSIPPoolSyncedAt  time.Time
+	excelBPSModelCooldowns  excelBPSModelCooldowns
+	excelBPSCooldownUntil   sync.Map
+	excelBPSModelsCache     openAIModelsCache
+
 	bpsProxyRepo          bpsProxySource
 	bpsSessions           bpsSessionPool
 	bpsReplay             basispoints.ReplayCache

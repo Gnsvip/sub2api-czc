@@ -351,6 +351,7 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="excel-bps-toggle"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="bps-enabled"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="openai-outbound-protocol"]').exists()).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
@@ -360,6 +361,40 @@ describe('EditAccountModal', () => {
     expect(extra.openai_excel_bps_cache_creation_as_input).toBeUndefined()
     expect(extra.openai_excel_bps_auto_disable_on_403).toBeUndefined()
     expect(extra.unrelated).toBe('preserve')
+  })
+
+  it('keeps Excel BPS off by default and saves explicit session proxy settings', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="bps-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="bps-session-proxy"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="bps-enabled"]').setValue(true)
+    expect((wrapper.get('[data-testid="bps-session-proxy"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('[data-testid="bps-session-proxy"]').setValue(true)
+    await wrapper.get('[data-testid="bps-models"]').setValue('gpt-6.1-sol, gpt-6.1-sol, gpt-6-luna')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps).toBe(true)
+    expect(extra.openai_excel_bps_session_proxy).toBe(true)
+    expect(extra.openai_excel_bps_models).toEqual(['gpt-6.1-sol', 'gpt-6-luna'])
+    wrapper.unmount()
+  })
+
+  it('disables session proxy with BPS while preserving unrelated settings', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp' },
+      extra: { openai_excel_bps: true, openai_excel_bps_session_proxy: true, openai_excel_bps_models: ['gpt-6.1-sol'], unrelated: 'keep' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="bps-enabled"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps).toBe(false)
+    expect(extra.openai_excel_bps_session_proxy).toBe(false)
+    expect(extra.unrelated).toBe('keep')
+    wrapper.unmount()
   })
 
   it('passes existing non-identity mappings to the whitelist selector and preserves them on save', async () => {

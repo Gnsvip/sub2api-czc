@@ -15,14 +15,16 @@ import (
 )
 
 type openaiOAuthClientStateStub struct {
-	exchangeCalled int32
-	lastClientID   string
-	idToken        string
+	exchangeCalled  int32
+	lastClientID    string
+	lastRedirectURI string
+	idToken         string
 }
 
 func (s *openaiOAuthClientStateStub) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
 	atomic.AddInt32(&s.exchangeCalled, 1)
 	s.lastClientID = clientID
+	s.lastRedirectURI = redirectURI
 	return &openai.TokenResponse{
 		AccessToken:  "at",
 		RefreshToken: "rt",

@@ -315,3 +315,20 @@ func TestBPSOAuthSeparateAuthorization(t *testing.T) {
 	require.NotEmpty(t, session.CodeVerifier)
 	require.False(t, bytes.Contains([]byte(result.AuthURL), []byte(session.CodeVerifier)))
 }
+
+func TestBPSOAuthExchangeUsesSessionClientAndCallback(t *testing.T) {
+	client := &openaiOAuthClientStateStub{}
+	svc := NewOpenAIOAuthService(nil, client)
+	defer svc.Stop()
+	result, err := svc.GenerateAuthURL(context.Background(), nil, "", openai.OAuthPlatformExcel)
+	require.NoError(t, err)
+	session, ok := svc.sessionStore.Get(result.SessionID)
+	require.True(t, ok)
+	info, err := svc.ExchangeCode(context.Background(), &OpenAIExchangeCodeInput{SessionID: result.SessionID, Code: "test-code", State: session.State, RedirectURI: "https://wrong.example/callback"})
+	require.NoError(t, err)
+	require.Equal(t, openai.ExcelClientID, client.lastClientID)
+	require.Equal(t, openai.ExcelRedirectURI, client.lastRedirectURI)
+	require.Equal(t, openai.ExcelClientID, info.ClientID)
+	_, ok = svc.sessionStore.Get(result.SessionID)
+	require.False(t, ok)
+}

@@ -6325,6 +6325,10 @@ const handleSubmit = async () => {
         newExtra.openai_excel_bps = bpsEnabled.value
         newExtra.openai_excel_bps_session_proxy = bpsEnabled.value && bpsSessionProxy.value
         newExtra.openai_excel_bps_models = [...new Set(bpsModels.value.split(/[,，\s]+/).filter(Boolean))]
+      } else {
+        delete newExtra.openai_excel_bps
+        delete newExtra.openai_excel_bps_models
+        delete newExtra.openai_excel_bps_session_proxy
       }
       delete newExtra.openai_excel_bps_cache_creation_as_input
       delete newExtra.openai_excel_bps_auto_disable_on_403

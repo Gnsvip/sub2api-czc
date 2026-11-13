@@ -195,7 +195,15 @@ func validateBulkOpenAISettingsTargets(
 			for key, value := range input.Extra {
 				candidate.Extra[key] = value
 			}
-			candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+			// Bulk persistence merges JSONB keys; validate that same effective
+			// credential set, not the full-object PUT replacement semantics.
+			candidate.Credentials = maps.Clone(account.Credentials)
+			if candidate.Credentials == nil {
+				candidate.Credentials = make(map[string]any)
+			}
+			for key, value := range input.Credentials {
+				candidate.Credentials[key] = value
+			}
 			if err := validateOpenAIBPSSettings(&candidate); err != nil {
 				return err
 			}

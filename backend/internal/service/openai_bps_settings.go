@@ -24,7 +24,8 @@ func (a *Account) bpsModelAllowed(model string) bool {
 		return false
 	}
 	if len(models) == 0 {
-		return true
+		_, configured := a.Extra[OpenAIExcelBPSModelsKey]
+		return !configured
 	}
 	for _, candidate := range models {
 		if model == candidate {

@@ -112,7 +112,7 @@ func filterRetiredOpenAIPublicModelsBody(body []byte, accounts []Account, codex 
 // Compact-only administrator mappings are evaluated against their actual
 // target, without treating an old client-visible name as a retired target.
 func supportsOpenAIRequestModel(account *Account, requestedModel string, requireCompact bool) bool {
-	if account.isBPSCredential() && (!account.isBPSEnabled() || requireCompact || !account.bpsModelAllowed(requestedModel)) {
+	if account.isBPSCredential() && (!account.IsExcelBPSEnabledForModel(requestedModel)) {
 		return false
 	}
 	if !account.AllowsOpenAIOAuthModelPolicy(requestedModel) {

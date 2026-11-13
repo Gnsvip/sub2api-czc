@@ -443,7 +443,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
-	if err := validateOpenAIBPSSettings(account); err != nil {
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	applyOpenAIOAuthCreateDefaults(account, input.ConcurrencyProvided)
@@ -877,7 +877,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if err := validateOpenAIBPSSettings(account); err != nil {
+	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	billingSettingsAppliedAtomically := false

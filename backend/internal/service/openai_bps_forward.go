@@ -89,7 +89,7 @@ func bpsRequestError(c *gin.Context, status int, code, message string) error {
 }
 
 func (s *OpenAIGatewayService) forwardBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time) (*OpenAIForwardResult, error) {
-	if !account.IsExcelBPSEnabled() {
+	if !account.IsExcelBPSEnabled() || !s.excelBPSGloballyEnabled(ctx) {
 		return nil, bpsRequestError(c, 503, "bps_disabled", "Enable BPS before use")
 	}
 	if !account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) {

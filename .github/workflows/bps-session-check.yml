@@ -32,6 +32,11 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Generate schema bindings
+        working-directory: backend
+        run: |
+          go generate ./ent
+          git diff --binary -- ent > "$RUNNER_TEMP/bps-generated.patch"
       - name: Format changed Go files
         run: |
           base="${{ github.event.pull_request.base.sha || 'origin/dev-czc' }}"
@@ -51,7 +56,7 @@ jobs:
         run: |
           go build ./internal/...
           go generate ./cmd/server
-          git diff --exit-code -- cmd/server/wire_gen.go
+          git diff --binary -- cmd/server/wire_gen.go >> "$RUNNER_TEMP/bps-generated.patch"
       - name: Require committed formatting
         run: test ! -s "$RUNNER_TEMP/bps-format.patch"
       - uses: actions/upload-artifact@v7
@@ -61,6 +66,7 @@ jobs:
           path: |
             ${{ runner.temp }}/bps-*-tests.jsonl
             ${{ runner.temp }}/bps-format.patch
+            ${{ runner.temp }}/bps-generated.patch
           retention-days: 7
   frontend-and-embed:
     runs-on: ubuntu-latest
@@ -91,7 +97,10 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: go build -tags embed -trimpath -o "$RUNNER_TEMP/bps-server" ./cmd/server
+        run: |
+          go generate ./ent
+          go generate ./cmd/server
+          go build -tags embed -trimpath -o "$RUNNER_TEMP/bps-server" ./cmd/server
       - uses: actions/upload-artifact@v7
         if: always()
         with:

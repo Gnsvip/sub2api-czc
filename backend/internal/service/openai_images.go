@@ -701,9 +701,6 @@ func (s *OpenAIGatewayService) ForwardImages(
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
-	if account.isBPSCredential() {
-		return nil, bpsRequestError(c, 400, "bps_responses_only", "This Excel BPS account supports HTTP /v1/responses only")
-	}
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}

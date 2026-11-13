@@ -74,7 +74,7 @@ func (s *adminServiceImpl) validateExcelBPS403GroupSettings(ctx context.Context,
 	if err := s.validateExcelBPSGroupPolicy(ctx, account); err != nil {
 		return err
 	}
-	return s.validateExcelBPSActivation(ctx, account)
+	return validateOpenAIBPSSettings(account)
 }
 
 func (s *adminServiceImpl) validateExcelBPSGroupPolicy(ctx context.Context, account *Account) error {
@@ -90,7 +90,7 @@ func (s *adminServiceImpl) validateExcelBPSGroupPolicy(ctx context.Context, acco
 	if account.Extra[ExcelBPSAutoMoveOn403Key] != true {
 		return nil
 	}
-	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow() || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() {
+	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsOpenAIAgentIdentity() || account.IsOpenAIPersonalAccessToken() {
 		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "BPS 403 group actions require an OpenAI ChatGPT OAuth account")
 	}
 	target, _ := excelBPS403GroupID(account.Extra[ExcelBPS403TargetGroupIDKey])

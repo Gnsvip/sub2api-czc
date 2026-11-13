@@ -337,6 +337,22 @@ type UpdateSettingsRequest struct {
 	PaymentAlipayMobilePrecreateDeepLink *bool `json:"payment_alipay_mobile_precreate_deep_link"`
 
 	// Channel Monitor feature switch
+	ExcelBPSEnabled                      *bool   `json:"excel_bps_enabled"`
+	ExcelBPSImageMode                    *string `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled            *bool   `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL                 *string `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB            *int    `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB               *int    `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests             *int    `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB             *int    `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages               *int    `json:"excel_bps_image_max_images"`
+	ExcelBPSImageLimitPolicy             *string `json:"excel_bps_image_limit_policy"`
+	ExcelBPSImageWarningRemaining        *int    `json:"excel_bps_image_warning_remaining"`
+	ExcelBPSImageCompactReserve          *int    `json:"excel_bps_image_compact_reserve"`
+	ExcelBPSImageMaxTotalMiB             *int    `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB              *int    `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries          *int    `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes              *int    `json:"excel_bps_image_ttl_minutes"`
 	ChannelMonitorEnabled                *bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   *string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds *int    `json:"channel_monitor_default_interval_seconds"`
@@ -1933,6 +1949,102 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AccountQuotaNotifyEmails
 		}(),
+		ExcelBPSEnabled: func() bool {
+			if req.ExcelBPSEnabled != nil {
+				return *req.ExcelBPSEnabled
+			}
+			return previousSettings.ExcelBPSEnabled
+		}(),
+		ExcelBPSImageMode: func() string {
+			if req.ExcelBPSImageMode != nil {
+				return *req.ExcelBPSImageMode
+			}
+			return previousSettings.ExcelBPSImageMode
+		}(),
+		ExcelBPSImageRelayEnabled: func() bool {
+			if req.ExcelBPSImageRelayEnabled != nil {
+				return *req.ExcelBPSImageRelayEnabled
+			}
+			return previousSettings.ExcelBPSImageRelayEnabled
+		}(),
+		ExcelBPSImageBaseURL: func() string {
+			if req.ExcelBPSImageBaseURL != nil {
+				return *req.ExcelBPSImageBaseURL
+			}
+			return previousSettings.ExcelBPSImageBaseURL
+		}(),
+		ExcelBPSImageBodyLimitMiB: func() int {
+			if req.ExcelBPSImageBodyLimitMiB != nil {
+				return *req.ExcelBPSImageBodyLimitMiB
+			}
+			return previousSettings.ExcelBPSImageBodyLimitMiB
+		}(),
+		ExcelBPSImageBudgetMiB: func() int {
+			if req.ExcelBPSImageBudgetMiB != nil {
+				return *req.ExcelBPSImageBudgetMiB
+			}
+			return previousSettings.ExcelBPSImageBudgetMiB
+		}(),
+		ExcelBPSImageMaxRequests: func() int {
+			if req.ExcelBPSImageMaxRequests != nil {
+				return *req.ExcelBPSImageMaxRequests
+			}
+			return previousSettings.ExcelBPSImageMaxRequests
+		}(),
+		ExcelBPSImageMaxImageMiB: func() int {
+			if req.ExcelBPSImageMaxImageMiB != nil {
+				return *req.ExcelBPSImageMaxImageMiB
+			}
+			return previousSettings.ExcelBPSImageMaxImageMiB
+		}(),
+		ExcelBPSImageMaxImages: func() int {
+			if req.ExcelBPSImageMaxImages != nil {
+				return *req.ExcelBPSImageMaxImages
+			}
+			return previousSettings.ExcelBPSImageMaxImages
+		}(),
+		ExcelBPSImageLimitPolicy: func() string {
+			if req.ExcelBPSImageLimitPolicy != nil {
+				return *req.ExcelBPSImageLimitPolicy
+			}
+			return previousSettings.ExcelBPSImageLimitPolicy
+		}(),
+		ExcelBPSImageWarningRemaining: func() int {
+			if req.ExcelBPSImageWarningRemaining != nil {
+				return *req.ExcelBPSImageWarningRemaining
+			}
+			return previousSettings.ExcelBPSImageWarningRemaining
+		}(),
+		ExcelBPSImageCompactReserve: func() int {
+			if req.ExcelBPSImageCompactReserve != nil {
+				return *req.ExcelBPSImageCompactReserve
+			}
+			return previousSettings.ExcelBPSImageCompactReserve
+		}(),
+		ExcelBPSImageMaxTotalMiB: func() int {
+			if req.ExcelBPSImageMaxTotalMiB != nil {
+				return *req.ExcelBPSImageMaxTotalMiB
+			}
+			return previousSettings.ExcelBPSImageMaxTotalMiB
+		}(),
+		ExcelBPSImageStorageMiB: func() int {
+			if req.ExcelBPSImageStorageMiB != nil {
+				return *req.ExcelBPSImageStorageMiB
+			}
+			return previousSettings.ExcelBPSImageStorageMiB
+		}(),
+		ExcelBPSImageStorageEntries: func() int {
+			if req.ExcelBPSImageStorageEntries != nil {
+				return *req.ExcelBPSImageStorageEntries
+			}
+			return previousSettings.ExcelBPSImageStorageEntries
+		}(),
+		ExcelBPSImageTTLMinutes: func() int {
+			if req.ExcelBPSImageTTLMinutes != nil {
+				return *req.ExcelBPSImageTTLMinutes
+			}
+			return previousSettings.ExcelBPSImageTTLMinutes
+		}(),
 		ChannelMonitorEnabled: func() bool {
 			if req.ChannelMonitorEnabled != nil {
 				return *req.ChannelMonitorEnabled
@@ -2447,6 +2559,22 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentCancelRateLimitMode:                             updatedPaymentCfg.CancelRateLimitMode,
 		PaymentAlipayForceQRCode:                               updatedPaymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                   updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
+		ExcelBPSEnabled:                                        updatedSettings.ExcelBPSEnabled,
+		ExcelBPSImageMode:                                      updatedSettings.ExcelBPSImageMode,
+		ExcelBPSImageRelayEnabled:                              updatedSettings.ExcelBPSImageRelayEnabled,
+		ExcelBPSImageBaseURL:                                   updatedSettings.ExcelBPSImageBaseURL,
+		ExcelBPSImageBodyLimitMiB:                              updatedSettings.ExcelBPSImageBodyLimitMiB,
+		ExcelBPSImageBudgetMiB:                                 updatedSettings.ExcelBPSImageBudgetMiB,
+		ExcelBPSImageMaxRequests:                               updatedSettings.ExcelBPSImageMaxRequests,
+		ExcelBPSImageMaxImageMiB:                               updatedSettings.ExcelBPSImageMaxImageMiB,
+		ExcelBPSImageMaxImages:                                 updatedSettings.ExcelBPSImageMaxImages,
+		ExcelBPSImageLimitPolicy:                               updatedSettings.ExcelBPSImageLimitPolicy,
+		ExcelBPSImageWarningRemaining:                          updatedSettings.ExcelBPSImageWarningRemaining,
+		ExcelBPSImageCompactReserve:                            updatedSettings.ExcelBPSImageCompactReserve,
+		ExcelBPSImageMaxTotalMiB:                               updatedSettings.ExcelBPSImageMaxTotalMiB,
+		ExcelBPSImageStorageMiB:                                updatedSettings.ExcelBPSImageStorageMiB,
+		ExcelBPSImageStorageEntries:                            updatedSettings.ExcelBPSImageStorageEntries,
+		ExcelBPSImageTTLMinutes:                                updatedSettings.ExcelBPSImageTTLMinutes,
 
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,

@@ -531,6 +531,7 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 	return &Proxy{
 		ID:             p.ID,
 		Name:           p.Name,
+		MihomoNodeID:   p.MihomoNodeID,
 		Protocol:       p.Protocol,
 		Host:           p.Host,
 		Port:           p.Port,

@@ -89,6 +89,10 @@ func (s *OpenAIGatewayService) StopBPSWarmPool() {
 	}
 }
 func (s *OpenAIGatewayService) syncBPSWarmPool(ctx context.Context) {
+	if !s.excelBPSGloballyEnabled(ctx) {
+		mihomo.WarmBPSPools(ctx, 0, 0)
+		return
+	}
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	var accounts []Account
 	var err error

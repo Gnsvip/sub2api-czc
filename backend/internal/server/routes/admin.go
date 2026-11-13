@@ -687,6 +687,12 @@ func registerBackupRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	system := admin.Group("/system")
 	{
+		system.GET("/mihomo", h.Admin.System.GetMihomo)
+		system.POST("/mihomo", h.Admin.System.ManageMihomo)
+		system.PUT("/mihomo/download-mode", h.Admin.System.SetMihomoDownloadMode)
+		system.POST("/mihomo/nodes/:name/test", h.Admin.System.TestMihomoNode)
+		system.POST("/mihomo/nodes/:name/quality-check", h.Admin.System.CheckMihomoNodeQuality)
+		system.POST("/mihomo/nodes/static-proxies", h.Admin.System.AddMihomoNodesAsStaticProxies)
 		system.GET("/version", h.Admin.System.GetVersion)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
 		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)

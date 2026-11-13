@@ -80,7 +80,7 @@ func codexGroupModelUsesExcelBPS(model string, accounts []Account, group *Group)
 		}
 		incompatible := account.IsExcelBPSEnabledForModel(model) ||
 			(account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account))
-		if account.IsModelAllowedInGroup(groupID, model) && account.IsModelSupported(model) && incompatible {
+		if (groupID == nil || containsInt64(account.GroupIDs, *groupID)) && account.IsModelSupported(model) && incompatible {
 			return true
 		}
 	}

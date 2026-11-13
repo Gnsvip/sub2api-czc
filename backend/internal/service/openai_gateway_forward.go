@@ -1841,7 +1841,7 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
-	if account.isBPSCredential() || account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) {
+	if account.isBPSCredential() {
 		return nil, fmt.Errorf("Excel OAuth credentials cannot be sent through the Codex route")
 	}
 	// Determine target URL based on account type

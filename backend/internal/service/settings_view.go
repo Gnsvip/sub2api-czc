@@ -12,6 +12,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	ExcelBPSEnabled                     bool `json:"excel_bps_enabled"`
 	ExcelBPSImageMode                   string
 	ExcelBPSImageRelayEnabled           bool
 	ExcelBPSImageBaseURL                string

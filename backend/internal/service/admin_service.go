@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -12,6 +13,9 @@ import (
 
 // AdminService interface defines admin management operations
 type AdminService interface {
+	TestMihomoNode(context.Context, MihomoNodeProber, string) (*ProxyTestResult, error)
+	CheckMihomoNodeQuality(context.Context, MihomoNodeProber, string) (*ProxyQualityCheckResult, error)
+	CreateMihomoNodeProxies(context.Context, MihomoStaticNodeBinder, []string) (*MihomoNodeProxyImportResult, error)
 	// User management
 	ListUsers(ctx context.Context, page, pageSize int, filters UserListFilters, sortBy, sortOrder string) ([]User, int64, error)
 	GetUser(ctx context.Context, id int64) (*User, error)
@@ -527,6 +531,7 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
+	MihomoNodeID   string
 	Name           string
 	Protocol       string
 	Host           string
@@ -691,6 +696,7 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	mihomoProxyMu        sync.Mutex
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository

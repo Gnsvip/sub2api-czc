@@ -96,3 +96,13 @@ func writeOpenAICompactSSEFailureMessageParam(c *gin.Context, statusCode int, er
 	_, _ = c.Writer.Write([]byte("\n\n"))
 	c.Writer.Flush()
 }
+
+func (s *OpenAIGatewayService) excelBPSGloballyEnabled(ctx context.Context) bool {
+	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, gatewayForwardingDBTimeout)
+	defer cancel()
+	value, err := s.settingService.settingRepo.GetValue(ctx, SettingKeyExcelBPSEnabled)
+	return err == nil && value == "true"
+}

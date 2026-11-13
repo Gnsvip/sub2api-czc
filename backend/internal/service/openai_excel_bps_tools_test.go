@@ -53,7 +53,7 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 					ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "req-policy")))
 					upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(excelBPSToolPolicyResponse))}}
 					svc := excelBPSTestService(upstream)
-					account := excelAccount()
+					account := bpsUpstreamTestAccount()
 					if omit {
 						account.Extra[ExcelBPSOmitUnsupportedToolsKey] = true
 					}
@@ -106,7 +106,7 @@ func TestExcelBPSOmitUnsupportedToolsRequiresExplicitOptIn(t *testing.T) {
 	var missing *Account
 	require.False(t, missing.IsExcelBPSOmitUnsupportedToolsEnabled())
 	for _, value := range []any{nil, false, "true", 1, true} {
-		account := excelAccount()
+		account := bpsUpstreamTestAccount()
 		account.Extra[ExcelBPSOmitUnsupportedToolsKey] = value
 		require.Equal(t, value == true, account.IsExcelBPSOmitUnsupportedToolsEnabled())
 		account.Extra["openai_excel_bps"] = false
@@ -121,7 +121,7 @@ func TestExcelBPSToolPolicyRespectsModelScope(t *testing.T) {
 	for _, models := range [][]string{{}, {"gpt-5.6-sol"}} {
 		t.Run(fmt.Sprint(models), func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(excelBPSToolPolicyResponse))}}
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra[ExcelBPSOmitUnsupportedToolsKey] = true
 			account.Extra["openai_excel_bps_models"] = models
 			rec := httptest.NewRecorder()

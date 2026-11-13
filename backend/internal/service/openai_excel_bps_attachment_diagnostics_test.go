@@ -52,7 +52,7 @@ func TestExcelBPSAttachmentFailureDiagnostics(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			_, err := svc.Forward(context.Background(), c, account, body)
 			require.Error(t, err)
 			require.Equal(t, 1, calls, "attachment failure must not submit generation")
@@ -98,7 +98,7 @@ func TestExcelBPSAttachmentClientCancellationIsNotProviderFailure(t *testing.T) 
 	body, _ := nativeGatewayBody(t)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body)).WithContext(ctx)
-	_, err := svc.Forward(ctx, c, excelAccount(), body)
+	_, err := svc.Forward(ctx, c, bpsUpstreamTestAccount(), body)
 	require.True(t, errors.Is(err, context.Canceled))
 	require.Equal(t, 1, calls)
 	require.Empty(t, c.GetString(OpsUpstreamErrorMessageKey))
@@ -109,7 +109,7 @@ func TestExcelBPSAttachmentClientCancellationIsNotProviderFailure(t *testing.T) 
 func TestExcelBPSAttachmentProxyAcquisitionDiagnostics(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_mihomo"] = true
 	calls := 0
 	acquire := func(context.Context, string, ...string) (string, excelBPSLease, error) {

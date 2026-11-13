@@ -52,7 +52,7 @@ func TestExcelBPSStructuredOutputForwardContract(t *testing.T) {
 					rec := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(rec)
 					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-					account := excelAccount()
+					account := bpsUpstreamTestAccount()
 					result, err := svc.Forward(context.Background(), c, account, excelStructuredRequest(t, model, stream))
 					require.Len(t, upstream.requests, 1)
 					require.Equal(t, "bps.openai.com", upstream.lastReq.URL.Host)
@@ -100,7 +100,7 @@ func TestExcelBPSStructuredOutputDoesNotOverrideModelAccess(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			_, err := svc.Forward(context.Background(), c, account, excelStructuredRequest(t, model, true))
 			require.Error(t, err)
 			var failover *UpstreamFailoverError

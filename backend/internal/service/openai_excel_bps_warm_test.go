@@ -12,7 +12,7 @@ import (
 
 func TestExcelBPSWarmTargetsUseConfiguredConcurrency(t *testing.T) {
 	makeAccount := func(n int, source string) Account {
-		a := *excelAccount()
+		a := *bpsUpstreamTestAccount()
 		a.Concurrency = n
 		a.Status = StatusActive
 		a.Schedulable = true
@@ -59,7 +59,7 @@ func (r *warmProjectionRepo) ListByPlatform(context.Context, string) ([]Account,
 
 func TestBPSWarmUsesProjectionWithoutFullHydrationFallback(t *testing.T) {
 	repo := &warmProjectionRepo{}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), accountRepo: repo}
 	svc.syncBPSWarmPool(context.Background())
 	require.Equal(t, 1, repo.projectionCalls)
 	require.Zero(t, repo.legacyCalls)
@@ -77,7 +77,7 @@ func (r *warmLifecycleRepo) ListByPlatform(ctx context.Context, _ string) ([]Acc
 }
 func TestExcelBPSWarmWorkerStartsBeforeTrafficAndStops(t *testing.T) {
 	repo := &warmLifecycleRepo{started: make(chan struct{})}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), accountRepo: repo}
 	svc.StartBPSWarmPool()
 	svc.StartBPSWarmPool()
 	select {

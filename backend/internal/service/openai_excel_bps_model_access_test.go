@@ -51,16 +51,19 @@ func TestExcelBPSAccessSharedRefreshSurvivesWaiterCancellation(t *testing.T) {
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := make(chan error, 1)
-	go func() { _, err := svc.FetchExcelBPSModelsList(ctx, excelAccount()); first <- err }()
+	go func() { _, err := svc.FetchExcelBPSModelsList(ctx, bpsUpstreamTestAccount()); first <- err }()
 	<-started
 	second := make(chan error, 1)
-	go func() { _, err := svc.FetchExcelBPSModelsList(context.Background(), excelAccount()); second <- err }()
+	go func() {
+		_, err := svc.FetchExcelBPSModelsList(context.Background(), bpsUpstreamTestAccount())
+		second <- err
+	}()
 	cancel()
 	require.ErrorIs(t, <-first, context.Canceled)
 	close(release)
 	require.NoError(t, <-second)
 	require.EqualValues(t, 1, calls.Load())
-	_, err := svc.FetchExcelBPSModelsList(ctx, excelAccount())
+	_, err := svc.FetchExcelBPSModelsList(ctx, bpsUpstreamTestAccount())
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -84,7 +87,7 @@ func TestExcelBPSAccessCacheCredentialIsolationExpiryAndErrors(t *testing.T) {
 	}}
 	svc := excelBPSTestService(nil)
 	svc.httpUpstream = upstream
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	first, err := svc.FetchExcelBPSModelsList(context.Background(), account)
 	require.NoError(t, err)
 	first.Body[0] = '!'
@@ -117,7 +120,7 @@ func TestExcelBPSDiscoveryProducesCodexEffortsAndMappedPicker(t *testing.T) {
 	svc.httpUpstream = &codexModelsHTTPUpstreamStub{do: func(*http.Request, string, int64, int) (*http.Response, error) {
 		return ordinaryModelsUpstreamResponse(bpsAccessFixture), nil
 	}}
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_passthrough"] = false
 	account.Credentials["model_mapping"] = map[string]any{"public-new": "gpt-7-new"}
 	manifest, err := svc.FetchCodexModelsManifest(context.Background(), account, "", "")
@@ -142,7 +145,7 @@ func TestExcelBPSDiscoveryProducesCodexEffortsAndMappedPicker(t *testing.T) {
 }
 
 func TestExcelBPSMixedRoutesAndAliasesUseTheirOwnCatalog(t *testing.T) {
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_passthrough"] = false
 	account.Extra["openai_excel_bps_models"] = []string{"gpt-7-new"}
 	body, err := mergeExcelBPSAccountModels([]byte(`{"data":[{"id":"gpt-native"},{"id":"gpt-7-new"}]}`), []byte(`{"data":[{"id":"gpt-7-new","reasoning_efforts":["medium"]},{"id":"gpt-other"}]}`), account)

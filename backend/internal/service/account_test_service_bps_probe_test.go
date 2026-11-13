@@ -94,7 +94,7 @@ func (u *bpsProbeUpstream) DoWithTLS(req *http.Request, proxyURL string, account
 }
 
 func bpsProbeTestService(upstream *bpsProbeUpstream) *AccountTestService {
-	gateway := &OpenAIGatewayService{httpUpstream: upstream, cfg: &config.Config{Security: config.SecurityConfig{
+	gateway := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), httpUpstream: upstream, cfg: &config.Config{Security: config.SecurityConfig{
 		URLAllowlist: config.URLAllowlistConfig{Enabled: false},
 	}}}
 	return &AccountTestService{openaiGatewayService: gateway}
@@ -107,7 +107,7 @@ func TestExcelBPSToolProbeRoundtrip(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/300/test", nil).WithContext(context.Background())
-	require.NoError(t, svc.testExcelBPSToolRoundtrip(c, excelAccount(), "gpt-6-astra"))
+	require.NoError(t, svc.testExcelBPSToolRoundtrip(c, bpsUpstreamTestAccount(), "gpt-6-astra"))
 	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
 	require.Len(t, upstream.bodies, 3)
 	require.Contains(t, rec.Body.String(), `"type":"test_complete"`)
@@ -133,7 +133,7 @@ func TestExcelBPSToolProbeRejectsIncompleteStages(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/300/test", nil)
-			require.Error(t, svc.testExcelBPSToolRoundtrip(c, excelAccount(), "gpt-6-astra"))
+			require.Error(t, svc.testExcelBPSToolRoundtrip(c, bpsUpstreamTestAccount(), "gpt-6-astra"))
 			require.Len(t, upstream.bodies, tc.wantCalls)
 			require.Contains(t, rec.Body.String(), `"type":"error"`)
 			require.NotContains(t, rec.Body.String(), `"type":"test_complete"`)
@@ -142,7 +142,7 @@ func TestExcelBPSToolProbeRejectsIncompleteStages(t *testing.T) {
 }
 
 func TestExcelBPSToolProbeRejectsModelsOutsideBPS(t *testing.T) {
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 	upstream := &bpsProbeUpstream{}
 	svc := bpsProbeTestService(upstream)
@@ -154,7 +154,7 @@ func TestExcelBPSToolProbeRejectsModelsOutsideBPS(t *testing.T) {
 }
 
 func TestExcelBPSToolProbeModeDoesNotFallBackToNative(t *testing.T) {
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	delete(account.Extra, "openai_excel_bps")
 	upstream := &bpsProbeUpstream{}
 	svc := bpsProbeTestService(upstream)
@@ -166,7 +166,7 @@ func TestExcelBPSToolProbeModeDoesNotFallBackToNative(t *testing.T) {
 }
 
 func TestExcelBPSToolProbeStopsWhenBPSIsDisabledBetweenSteps(t *testing.T) {
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	upstream := &bpsProbeUpstream{disableAfterFirst: account}
 	svc := bpsProbeTestService(upstream)
 	rec := httptest.NewRecorder()
@@ -185,8 +185,8 @@ func TestExcelBPSToolProbeRejectsNativeFallbackBeforeDispatch(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/300/test", nil)
 	c.Set(bpsAccountProbeRequiredContextKey, true)
 	body := []byte(`{"model":"gpt-6-astra","input":"test","tools":[{"type":"image_generation"}]}`)
-	_, err := svc.openaiGatewayService.Forward(c, c, excelAccount(), body)
-	require.ErrorContains(t, err, "probe path is unavailable")
+	_, err := svc.openaiGatewayService.Forward(c, c, bpsUpstreamTestAccount(), body)
+	require.ErrorContains(t, err, "BPS tool probe cannot fall back")
 	require.Empty(t, upstream.bodies)
 }
 

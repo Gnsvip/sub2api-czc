@@ -17,7 +17,7 @@ export interface BPSSettings {
 export function readBPSSettings(extra: Record<string, unknown> = {}): BPSSettings {
   return {
     enabled: extra.openai_excel_bps === true,
-    allModels: !Object.hasOwn(extra, 'openai_excel_bps_models') || extra.openai_excel_bps_models === null,
+    allModels: !Object.prototype.hasOwnProperty.call(extra, 'openai_excel_bps_models') || extra.openai_excel_bps_models === null,
     models: Array.isArray(extra.openai_excel_bps_models) ? extra.openai_excel_bps_models.filter((v): v is string => typeof v === 'string') : [],
     sessionProxy: extra.openai_excel_bps_mihomo === true || extra.openai_excel_bps_session_proxy === true,
     proxySource: extra.openai_excel_bps_proxy_source === 'ip_pool' || (!extra.openai_excel_bps_proxy_source && extra.openai_excel_bps_session_proxy === true) ? 'ip_pool' : 'mihomo',

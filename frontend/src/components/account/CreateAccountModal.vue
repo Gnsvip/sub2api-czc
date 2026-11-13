@@ -3755,8 +3755,8 @@
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <BPSAccountSettings v-if="form.platform === 'openai'" v-model="bpsSettings" :groups="groups" />
       <label v-if="form.platform === 'openai'" class="block">
-        <BPSAccountSettings v-model="bpsSettings" :groups="groups" />
         <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
         <select v-model="openaiOAuthFlow" class="input" :disabled="openaiOAuth.loading.value" data-testid="openai-oauth-flow" @change="openaiOAuth.resetState(); oauthFlowRef?.reset()">
           <option value="openai">Codex</option>

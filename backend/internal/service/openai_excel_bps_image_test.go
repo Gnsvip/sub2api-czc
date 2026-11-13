@@ -38,13 +38,13 @@ func TestExcelBPSInlineImageForwardAndFetch(t *testing.T) {
 				router.GET(basispoints.ImageRelayPath+":token", svc.ServeExcelBPSImage)
 				server := httptest.NewTLSServer(router)
 				defer server.Close()
-				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageMode: ExcelBPSImageModeRelay, SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: server.URL}}, svc.cfg)
+				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageMode: ExcelBPSImageModeRelay, SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: server.URL}}, svc.cfg)
 				body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%v,"input":[{"role":"user","content":[{"type":"input_text","text":"describe"},{"type":"input_image","image_url":%q,"detail":"high"}]}]}`, stream, dataURL))
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 				c.Request.Header.Set("X-Forwarded-Host", "attacker.example")
-				result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+				result, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 				require.NoError(t, err)
 				require.NotNil(t, result)
 				require.NotContains(t, string(upstream.lastBody), "data:image")
@@ -84,12 +84,12 @@ func TestExcelBPSImageRelayValidationDoesNotCallUpstream(t *testing.T) {
 			upstream := &httpUpstreamRecorder{}
 			svc := excelBPSTestService(upstream)
 			t.Cleanup(func() { require.NoError(t, svc.CloseExcelBPSImages()) })
-			svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: fmt.Sprint(tt.baseURL != ""), SettingKeyExcelBPSImageBaseURL: tt.baseURL}}, svc.cfg)
+			svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: fmt.Sprint(tt.baseURL != ""), SettingKeyExcelBPSImageBaseURL: tt.baseURL}}, svc.cfg)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":%q}]}]}`, tt.dataURL))
-			_, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Equal(t, tt.status, rec.Code)
 			require.Empty(t, upstream.requests)
@@ -101,7 +101,7 @@ func TestExcelBPSImageRelayValidationDoesNotCallUpstream(t *testing.T) {
 
 func TestExcelBPSImageCapabilityRedactedFromUpstreamError(t *testing.T) {
 	raw := `{"error":{"message":"Cannot fetch https://images.example/api/bps-images/PRIVATE_CAPABILITY_123"}}`
-	out := excelBPSSanitizeErrorBody(raw, "test-token", excelAccount())
+	out := excelBPSSanitizeErrorBody(raw, "test-token", bpsUpstreamTestAccount())
 	require.NotContains(t, out, "PRIVATE_CAPABILITY_123")
 	require.Contains(t, out, "/api/bps-images/[redacted]")
 }
@@ -117,7 +117,7 @@ func TestExcelBPS429ImageAndCompactFailOverWithoutCodexState(t *testing.T) {
 				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusTooManyRequests, Header: excelBPSQuotaHeaders("100", "100"), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"PRIVATE_UPSTREAM"}}`))}}
 				svc := excelBPSTestService(upstream)
 				t.Cleanup(func() { require.NoError(t, svc.CloseExcelBPSImages()) })
-				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example"}}, svc.cfg)
+				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example"}}, svc.cfg)
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
 				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
@@ -126,7 +126,7 @@ func TestExcelBPS429ImageAndCompactFailOverWithoutCodexState(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 
 				_, err := svc.Forward(context.Background(), c, account, body)
 

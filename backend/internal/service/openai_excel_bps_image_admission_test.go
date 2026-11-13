@@ -223,7 +223,7 @@ func TestAdmitExcelBPSImageRequestRejectsForFailover(t *testing.T) {
 func TestExcelBPSImageAdmissionOnlyAppliesToBPSForwards(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	body := []byte(`{"model":"gpt-6-astra","input":"hello","stream":true}`)
-	other := excelAccount()
+	other := bpsUpstreamTestAccount()
 	other.ID = 301
 	delete(other.Extra, "openai_excel_bps")
 	for _, tt := range []struct {
@@ -232,14 +232,14 @@ func TestExcelBPSImageAdmissionOnlyAppliesToBPSForwards(t *testing.T) {
 		marked   bool
 		wantBusy bool
 	}{
-		{"client request on BPS account", excelAccount(), true, true},
+		{"client request on BPS account", bpsUpstreamTestAccount(), true, true},
 		{"client request on other account", other, true, false},
-		{"internal BPS check", excelAccount(), false, false},
+		{"internal BPS check", bpsUpstreamTestAccount(), false, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(""))}}
 			svc := excelBPSTestService(upstream)
-			svc.settingService = NewSettingService(&excelBPSImageAdmissionSettingsRepo{values: map[string]string{
+			svc.settingService = NewSettingService(&excelBPSImageAdmissionSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true",
 				SettingKeyExcelBPSImageRelayEnabled: "true",
 				SettingKeyExcelBPSImageBaseURL:      "https://images.example",
 				SettingKeyExcelBPSImageMaxRequests:  "1",

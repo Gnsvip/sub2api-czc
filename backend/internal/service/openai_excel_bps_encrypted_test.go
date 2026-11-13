@@ -115,7 +115,7 @@ func TestExcelBPSInvalidEncryptedContentRecoversSameRoute(t *testing.T) {
 				checked := &excelBPSRepairUpstream{httpUpstreamRecorder: upstream, bodies: []*excelBPSRepairBody{first, second}}
 				svc := excelBPSTestService(upstream)
 				svc.httpUpstream = checked
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Concurrency = 1
 				account.Credentials["model_mapping"] = map[string]any{"gpt-5.4": "gpt-5.6-sol"}
 				account.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 7890}
@@ -171,7 +171,7 @@ func TestExcelBPSInvalidEncryptedContentRetryIsBounded(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			_, err := svc.Forward(context.Background(), c, account, excelBPSEncryptedHistoryRequest(false))
 			require.Error(t, err)
 			require.Len(t, upstream.requests, 2)
@@ -209,7 +209,7 @@ func TestExcelBPSInvalidEncryptedContentDoesNotRetryOtherFailures(t *testing.T) 
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			_, err := svc.Forward(context.Background(), c, excelAccount(), []byte(tc.body))
+			_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), []byte(tc.body))
 			require.Error(t, err)
 			require.Len(t, upstream.requests, 1)
 			require.Equal(t, tc.status, rec.Code)
@@ -241,7 +241,7 @@ func TestExcelBPSInvalidEncryptedContentStopsOnDisconnect(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
-			_, err := svc.Forward(ctx, c, excelAccount(), excelBPSEncryptedHistoryRequest(false))
+			_, err := svc.Forward(ctx, c, bpsUpstreamTestAccount(), excelBPSEncryptedHistoryRequest(false))
 			require.Error(t, err)
 			require.True(t, first.closed.Load())
 			if cancelBeforeRetry {

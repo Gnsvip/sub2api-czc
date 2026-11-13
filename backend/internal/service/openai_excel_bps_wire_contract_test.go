@@ -89,7 +89,7 @@ func TestExcelBPSWireTierPolicyAndModelEvidence(t *testing.T) {
 				}
 				body, err := json.Marshal(input)
 				require.NoError(t, err)
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Credentials["model_mapping"] = map[string]any{"public-astra": "gpt-6-astra"}
 				account.Credentials["access_token"] = bpsWireToken(t, map[string]string{"chatgpt_account_id": "test-account", "user_id": "selected-bps-user"})
 				account.Credentials["chatgpt_user_id"] = "stale-codex-user"

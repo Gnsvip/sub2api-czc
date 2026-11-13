@@ -24,7 +24,7 @@ func TestExcelBPSToolSchemaDiagnosticHTTPResponse(t *testing.T) {
 			ctx, _ := gin.CreateTestContext(rec)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":%t,"input":"offline","tools":[{"type":"namespace","name":"example_mcp","tools":[{"type":"function","name":"example_tool","parameters":{"properties":{"rule":{"$ref":"https://example.invalid/schema?token=PRIVATE_SECRET"}}}}]}]}`, stream))
-			_, err := svc.Forward(context.Background(), ctx, excelAccount(), body)
+			_, err := svc.Forward(context.Background(), ctx, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.True(t, IsResponseCommitted(ctx))

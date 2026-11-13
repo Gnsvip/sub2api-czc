@@ -37,7 +37,7 @@ func TestExcelBPSNativeAttachmentsUseSelectedTransport(t *testing.T) {
 			}}
 			svc := excelBPSTestService(upstream)
 			enableNativeAttachments(svc)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%v,"input":[{"role":"user","content":[{"type":"input_image","image_url":%q,"detail":"high"}]}]}`, stream, imageURL))
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
@@ -77,7 +77,7 @@ func TestExcelBPSNativeAttachmentFailureDoesNotGenerate(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-			_, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Len(t, upstream.requests, 1)
 			if status == http.StatusTooManyRequests {
@@ -108,7 +108,7 @@ func TestExcelBPSCorrectionUsesSameModelAndCountsBothAttempts(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-			result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			result, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 			require.NoError(t, err)
 			require.Len(t, upstream.requests, 2)
 			require.EqualValues(t, 12, result.Usage.InputTokens)

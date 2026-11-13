@@ -33,6 +33,12 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 			settings.bps = true
 		}
 	}
+
+	if settings.bps {
+		if err := validateExcelBPS403RecoveryExtra(input.Extra); err != nil {
+			return settings, err
+		}
+	}
 	if _, exists := input.Credentials["client_id"]; exists {
 		settings.bps = true
 	}

@@ -27,7 +27,7 @@ func TestExcelBPSCacheCreationAsInputDownstreamUsage(t *testing.T) {
 					wire := `data: {"type":"response.completed","response":{"id":"resp_bps_usage","status":"completed","model":"gpt-6-astra","output":[],"usage":` + excelBPSUsageWithCreation + `}}` + "\n\n"
 					upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
 					svc := excelBPSTestService(upstream)
-					account := excelAccount()
+					account := bpsUpstreamTestAccount()
 					account.Extra["openai_excel_bps_cache_creation_as_input"] = enabled
 					body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%t,"input":"usage regression"}`, stream))
 					rec := httptest.NewRecorder()
@@ -83,7 +83,7 @@ func TestExcelBPSCacheCreationAsInputEveryStreamUsage(t *testing.T) {
 			}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire.String()))}}
 			svc := excelBPSTestService(upstream)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_cache_creation_as_input"] = true
 			body := []byte(`{"model":"gpt-6-astra","stream":true,"input":"usage regression"}`)
 			rec := httptest.NewRecorder()

@@ -192,7 +192,7 @@ func TestExcelBPSImagePolicyForwardCompactAndContinue(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/stream=%v/%s", mode, stream, failure), func(t *testing.T) {
 					svc := excelBPSTestService(nil)
 					svc.cache = newImagePolicyMemoryCache()
-					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageMode: mode, SettingKeyExcelBPSImageBaseURL: "https://images.example", SettingKeyExcelBPSImageLimitPolicy: "auto_compact"}}
+					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageMode: mode, SettingKeyExcelBPSImageBaseURL: "https://images.example", SettingKeyExcelBPSImageLimitPolicy: "auto_compact"}}
 					svc.settingService = NewSettingService(repo, svc.cfg)
 					_, pixels := nativeGatewayBody(t)
 					raw := bytes.ReplaceAll(imagePolicyRequest(t, 19, 2), []byte("data:image/png;base64,synthetic"), []byte("data:image/png;base64,"+base64.StdEncoding.EncodeToString(pixels)))
@@ -270,7 +270,7 @@ func TestExcelBPSImagePolicyForwardCompactAndContinue(t *testing.T) {
 					c.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(raw))
 					c.Request.Header.Set("User-Agent", "codex_cli_rs/0.116.0")
 					c.Request.Header.Set("session_id", "policy-session")
-					result, err := svc.forwardExcelBPS(context.Background(), c, excelAccount(), raw, time.Now())
+					result, err := svc.forwardExcelBPS(context.Background(), c, bpsUpstreamTestAccount(), raw, time.Now())
 					if failure != "" {
 						require.Error(t, err)
 						require.NotContains(t, rec.Body.String(), "continued")
@@ -317,7 +317,7 @@ func TestExcelBPSImagePolicyForwardCompactAndContinue(t *testing.T) {
 					nextCtx.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(nextRaw))
 					nextCtx.Request.Header.Set("User-Agent", "codex_app/1.0")
 					nextCtx.Request.Header.Set("session_id", "policy-session")
-					nextResult, e := svc.forwardExcelBPS(context.Background(), nextCtx, excelAccount(), nextRaw, time.Now())
+					nextResult, e := svc.forwardExcelBPS(context.Background(), nextCtx, bpsUpstreamTestAccount(), nextRaw, time.Now())
 					require.NoError(t, e)
 					require.Equal(t, 3, phase)
 					require.Equal(t, 10, nextResult.Usage.InputTokens)

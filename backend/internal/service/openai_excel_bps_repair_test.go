@@ -82,7 +82,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Concurrency = 1
 				result, err := svc.Forward(context.Background(), c, account, body)
 				if corrected {
@@ -144,7 +144,7 @@ func TestExcelBPSUnknownTargetDoesNotRegenerateVisibleStream(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-				result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+				result, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 				require.NotNil(t, result)
 				require.Equal(t, http.StatusOK, rec.Code)
 				require.True(t, first.closed.Load())
@@ -188,7 +188,7 @@ func TestExcelBPSToolCorrectionStopsOnHTTPRejection(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-			result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			result, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Len(t, upstream.requests, 2)
 			require.True(t, first.closed.Load())
@@ -215,7 +215,7 @@ func TestExcelBPS429CorrectionDoesNotChangeCodexState(t *testing.T) {
 			svc.accountRepo = repo
 			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 			svc.rateLimitService.SetAccountRuntimeBlocker(svc)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"input":"test","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, stream))
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
@@ -273,7 +273,7 @@ func TestExcelBPSMixedToolCorrectionKeepsOriginalOperation(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Credentials["model_mapping"] = map[string]any{"gpt-5.5": "gpt-5.6-sol"}
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)

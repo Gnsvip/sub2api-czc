@@ -201,7 +201,7 @@ func TestProtocolFeatureSwitchesApplyImmediately(t *testing.T) {
 func TestExcelBPSImageLimitsHotReload(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	ctx := context.Background()
-	repo := &excelBPSImageSettingsRepo{values: map[string]string{
+	repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true",
 		SettingKeyExcelBPSImageMode: ExcelBPSImageModeRelay, SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example",
 	}}
 	settings := NewSettingService(repo, &config.Config{})

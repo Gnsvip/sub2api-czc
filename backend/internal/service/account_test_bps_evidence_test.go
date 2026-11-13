@@ -25,7 +25,7 @@ func TestBPSTestResponseEvidence(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Request = httptest.NewRequest("POST", "/admin/test", nil)
-		require.Error(t, svc.testExcelBPSAccountConnection(c, excelAccount(), "gpt-6-astra", "test"))
+		require.Error(t, svc.testBPSAccountConnection(c, bpsUpstreamTestAccount(), "gpt-6-astra", "test", AccountTestModeDefault))
 		wire := recorder.Body.String()
 		if transportError {
 			require.NotContains(t, wire, `"type":"upstream_response"`)

@@ -38,7 +38,7 @@ func TestExcelBPSContinuationUnknownTargetKeepsNativeHistory(t *testing.T) {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Concurrency = 1
 				result, err := svc.Forward(context.Background(), c, account, body)
 				require.NotNil(t, result)
@@ -98,7 +98,7 @@ func TestExcelBPSLocalProtocolFailureKeepsHTTPAndDiagnostic(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			_, err := svc.Forward(context.Background(), c, excelAccount(), []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":%t,"input":"test","tools":[{"type":"function","name":"shell"}]}`, stream)))
+			_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":%t,"input":"test","tools":[{"type":"function","name":"shell"}]}`, stream)))
 			require.Error(t, err)
 			observed, ok := GetOpsStreamError(c)
 			require.True(t, ok)

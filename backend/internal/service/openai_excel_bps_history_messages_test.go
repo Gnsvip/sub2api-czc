@@ -32,7 +32,7 @@ func TestExcelBPSHistoryMessageAttributionForward(t *testing.T) {
 					rec := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(rec)
 					c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
-					result, err := svc.Forward(context.Background(), c, excelAccount(), body)
+					result, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 					require.NoError(t, err)
 					require.NotNil(t, result)
 					require.Equal(t, http.StatusOK, rec.Code)

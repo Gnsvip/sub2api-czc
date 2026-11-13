@@ -15,7 +15,7 @@ import (
 )
 
 func recoveryTestAccount(now time.Time) *Account {
-	a := excelAccount()
+	a := bpsUpstreamTestAccount()
 	a.ID, a.Status, a.Schedulable = 27, StatusActive, true
 	a.Extra["openai_excel_bps"] = false
 	a.Extra["openai_excel_bps_auto_disable_on_403"] = true
@@ -96,7 +96,7 @@ func TestExcelBPS403RecoveryRestoresOnlyAfterSuccessfulClaimAndProbe(t *testing.
 			a := recoveryTestAccount(now)
 			upstream := &bpsProbeUpstream{mode: tc.mode}
 			repo := &recoveryTestRepo{claim: tc.claim}
-			svc := &OpenAIGatewayService{httpUpstream: upstream, accountRepo: repo}
+			svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), httpUpstream: upstream, accountRepo: repo}
 			svc.recoverExcelBPS403Account(t.Context(), a, now)
 			require.Len(t, upstream.bodies, tc.requests)
 			require.Equal(t, tc.restores, repo.restores)
@@ -131,7 +131,7 @@ func TestExcelBPS403RecoveryProbeRejectsHTTPAndIncompleteResponses(t *testing.T)
 				require.Equal(t, HTTPUpstreamProfileBPS, HTTPUpstreamProfileFromContext(req.Context()))
 				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.wire))}, nil
 			}}
-			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), httpUpstream: upstream}
 			a := recoveryTestAccount(time.Now())
 			require.Error(t, svc.probeExcelBPS403Recovery(t.Context(), a))
 			require.Equal(t, 1, calls)
@@ -144,7 +144,7 @@ func TestExcelBPS403RecoveryEmptyScopeNeverProbesAnotherModel(t *testing.T) {
 	a := recoveryTestAccount(time.Now())
 	a.Extra["openai_excel_bps_models"] = []any{}
 	upstream := &bpsProbeUpstream{}
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), httpUpstream: upstream}
 	require.Error(t, svc.probeExcelBPS403Recovery(t.Context(), a))
 	require.Empty(t, upstream.bodies)
 }
@@ -184,7 +184,7 @@ func (r *recoveryLifecycleRepo) ListByPlatform(ctx context.Context, _ string) ([
 }
 func TestExcelBPS403RecoveryWorkerLifecycle(t *testing.T) {
 	repo := &recoveryLifecycleRepo{started: make(chan struct{})}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), accountRepo: repo}
 	svc.StartBPS403Recovery()
 	svc.StartBPS403Recovery()
 	select {
@@ -208,18 +208,21 @@ func TestExcelBPS403RecoveryEmptyProxyPoolNeverFallsBackToDirect(t *testing.T) {
 	a.Extra["openai_excel_bps_mihomo"] = true
 	a.Extra[ExcelBPSProxySourceKey] = ExcelBPSProxySourceIPPool
 	upstream := &bpsProbeUpstream{}
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	svc := &OpenAIGatewayService{settingService: bpsEnabledTestSettings(), httpUpstream: upstream}
 	require.Error(t, svc.probeExcelBPS403Recovery(t.Context(), a))
 	require.Empty(t, upstream.bodies)
 }
 
 func TestExcelBPS403RecoveryPolicyRequiresAutomaticShutdown(t *testing.T) {
 	extra := map[string]any{ExcelBPSAutoRecoverOn403Key: "true"}
-	require.Error(t, validateExcelBPS403RecoveryExtra(extra))
+	require.Error(t, validateOpenAIBPSSettings(&Account{Extra: extra}))
 	extra = map[string]any{ExcelBPSAutoRecoverOn403Key: true}
-	a := excelAccount()
+	a := bpsUpstreamTestAccount()
 	a.Extra = extra
-	require.False(t, a.IsExcelBPSAutoRecoverOn403Enabled())
+	a.Status = StatusActive
+	a.Schedulable = true
+	a.Extra[ExcelBPS403DisabledAtKey] = time.Now().Format(time.RFC3339Nano)
+	require.False(t, a.IsExcelBPS403RecoveryPending())
 	extra["openai_excel_bps_auto_disable_on_403"] = true
-	require.True(t, a.IsExcelBPSAutoRecoverOn403Enabled())
+	require.True(t, a.IsExcelBPS403RecoveryPending())
 }

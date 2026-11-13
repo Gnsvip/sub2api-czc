@@ -54,8 +54,8 @@ func TestExcelBPSIgnoreEncryptedContentHTTPFlow(t *testing.T) {
 					svc := excelBPSTestService(nil)
 					svc.httpUpstream = &excelBPSImageHTTPUpstream{target: target, client: upstream.Client()}
 					defer func() { _ = svc.CloseExcelBPSImages() }()
-					svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{}}, svc.cfg)
-					account := excelAccount()
+					svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true"}}, svc.cfg)
+					account := bpsUpstreamTestAccount()
 					if value := c.GetHeader("X-Test-Ignore-Encrypted"); value != "" {
 						account.Extra[ExcelBPSIgnoreEncryptedContentKey] = value == "true"
 					}

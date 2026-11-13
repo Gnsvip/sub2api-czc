@@ -50,7 +50,7 @@ func nativeGatewayBody(t *testing.T) ([]byte, []byte) {
 	return body, data.Bytes()
 }
 func enableNativeAttachments(s *OpenAIGatewayService) {
-	s.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageMode: "native"}}, s.cfg)
+	s.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageMode: "native"}}, s.cfg)
 }
 
 func TestExcelBPSNativeAttachmentForward(t *testing.T) {
@@ -63,7 +63,7 @@ func TestExcelBPSNativeAttachmentForward(t *testing.T) {
 				calls := 0
 				svc := excelBPSTestService(nil)
 				enableNativeAttachments(svc)
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Concurrency = 1
 				account.Proxy = &Proxy{Protocol: "http", Host: "proxy.example", Port: 8080}
 				svc.httpUpstream = &nativeAttachmentUpstream{do: func(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
@@ -167,7 +167,7 @@ func TestExcelBPSNativeUploadFailureStopsWithoutQuotaWrite(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			_, err := svc.Forward(context.Background(), c, account, body)
 			require.Error(t, err)
 			if tc.status == http.StatusTooManyRequests {
@@ -221,7 +221,7 @@ func TestExcelBPSNativePreflightRejectsBeforeNetwork(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(raw))
-			_, err = svc.Forward(context.Background(), c, excelAccount(), raw)
+			_, err = svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), raw)
 			require.Error(t, err)
 			require.Equal(t, 400, rec.Code)
 			require.Empty(t, upstream.requests)
@@ -232,7 +232,7 @@ func TestExcelBPSNativePreflightRejectsBeforeNetwork(t *testing.T) {
 
 func TestExcelBPSNativeAttachmentIDRedaction(t *testing.T) {
 	raw := "{\"error\":{\"message\":\"cannot read file-private123 from this account\"}}"
-	out := excelBPSSanitizeErrorBody(raw, "test-token", excelAccount())
+	out := excelBPSSanitizeErrorBody(raw, "test-token", bpsUpstreamTestAccount())
 	require.NotContains(t, out, "private123")
 	require.Contains(t, out, "file-[redacted]")
 }
@@ -254,7 +254,7 @@ func TestExcelBPSAttachmentUsesResolvedSessionProxy(t *testing.T) {
 	images, err := basispoints.PrepareNativeImages(body)
 	require.NoError(t, err)
 	svc := excelBPSTestService(nil)
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Proxy = &Proxy{Protocol: "http", Host: "account-proxy.example", Port: 8080}
 	const selected = "http://127.0.0.1:19007"
 	calls := 0
@@ -327,7 +327,7 @@ func TestExcelBPSNativeToolScreenshotsStayInline(t *testing.T) {
 					rec := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(rec)
 					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-					_, err = svc.Forward(context.Background(), c, excelAccount(), body)
+					_, err = svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 					require.NoError(t, err)
 					require.Equal(t, 1, responses)
 					if mixed {

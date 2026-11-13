@@ -18,7 +18,7 @@ import (
 )
 
 func TestExcelBPSModelSelection(t *testing.T) {
-	a := excelAccount()
+	a := bpsUpstreamTestAccount()
 	require.True(t, a.IsExcelBPSEnabledForModel("gpt-6-sol"), "legacy all-model setting")
 	a.Extra["openai_excel_bps_models"] = []any{"gpt-6-astra"}
 	require.True(t, a.IsExcelBPSEnabledForModel("gpt-6-astra"))
@@ -47,7 +47,7 @@ func TestExcelBPSSelectedModelForwarding(t *testing.T) {
 			wire := fmt.Sprintf("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"model\":%q,\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", model)
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
 			svc := excelBPSTestService(upstream)
-			a := excelAccount()
+			a := bpsUpstreamTestAccount()
 			a.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
@@ -67,7 +67,7 @@ func TestExcelBPSSelectedModelForwarding(t *testing.T) {
 }
 
 func TestExcelBPSSelectedModelsPreserveCodexTransportAndTickets(t *testing.T) {
-	a := excelAccount()
+	a := bpsUpstreamTestAccount()
 	a.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 	a.Extra["openai_oauth_responses_websockets_v2_mode"] = OpenAIWSIngressModeCtxPool
 	a.Extra["openai_oauth_responses_websockets_v2_enabled"] = true
@@ -104,7 +104,7 @@ func TestExcelBPSSelectedModelsPreserveCodexTransportAndTickets(t *testing.T) {
 }
 
 func TestExcelBPSSelectedCompactKeepsExcelModel(t *testing.T) {
-	a := excelAccount()
+	a := bpsUpstreamTestAccount()
 	a.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 	a.Credentials["model_mapping"] = map[string]any{"alias": "gpt-6-astra"}
 	a.Credentials["compact_model_mapping"] = map[string]any{"alias": "gpt-6-sol"}

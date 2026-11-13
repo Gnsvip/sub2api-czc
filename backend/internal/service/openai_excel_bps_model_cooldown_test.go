@@ -22,7 +22,7 @@ func TestExcelBPSModelPermissionForward(t *testing.T) {
 	for _, code := range []string{"basispoints_model_access_changed", "model_not_allowed"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", code, stream), func(t *testing.T) {
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-6-astra", "second-alias": "gpt-6-astra", "gpt-5.6-sol": "gpt-5.6-sol"}
 				account.Extra["openai_excel_bps_models"] = []any{"gpt-6-astra", "gpt-5.6-sol"}
 				account.Extra["openai_excel_bps_auto_disable_on_403"] = true
@@ -50,7 +50,7 @@ func TestExcelBPSModelPermissionForward(t *testing.T) {
 
 func TestExcelBPSModelCooldownExpiryAndBound(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	svc.coolDownExcelBPSModel(account, "gpt-6-astra")
 	svc.excelBPSModelCooldowns.until[excelBPSModelKey{account.ID, "gpt-6-astra"}] = time.Now().Add(-time.Second)
 	require.False(t, svc.isExcelBPSModelCoolingDown(account, "gpt-6-astra"))

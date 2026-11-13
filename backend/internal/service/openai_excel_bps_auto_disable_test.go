@@ -49,7 +49,7 @@ func TestExcelBPSAutoDisableOn403(t *testing.T) {
 	} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", tc.name, stream), func(t *testing.T) {
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				if tc.optIn {
 					account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 				}
@@ -100,7 +100,7 @@ func TestExcelBPSAutoDisableIgnoresTransportAndStreamErrors(t *testing.T) {
 			if transport {
 				upstream.err = errors.New("connection failed")
 			}
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 			svc := excelBPSTestService(upstream)
 			svc.accountRepo = &excelBPSAutoDisableRepo{disable: func(context.Context, *Account) (bool, error) {
@@ -119,7 +119,7 @@ func TestExcelBPSAutoDisableIgnoresTransportAndStreamErrors(t *testing.T) {
 func TestExcelBPSAutoDisableUsesBoundedDetachedContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 	var writeContext context.Context
 	svc := &OpenAIGatewayService{accountRepo: &excelBPSAutoDisableRepo{disable: func(ctx context.Context, _ *Account) (bool, error) {
@@ -147,7 +147,7 @@ func TestAccount_IsExcelBPSAutoDisableOn403Enabled(t *testing.T) {
 		func(a *Account) { a.Credentials["auth_mode"] = OpenAIAuthModeAgentIdentity },
 		func(a *Account) { a.Credentials["auth_mode"] = "personal_access_token" },
 	} {
-		account := excelAccount()
+		account := bpsUpstreamTestAccount()
 		account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 		require.True(t, account.IsExcelBPSAutoDisableOn403Enabled())
 		mutate(account)

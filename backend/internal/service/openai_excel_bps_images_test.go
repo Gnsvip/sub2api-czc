@@ -39,7 +39,7 @@ func newOpenAIImagesEditsTestContext(t *testing.T, body []byte) (*gin.Context, *
 }
 
 func excelBPSImagesAccount(models ...any) *Account {
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	if len(models) == 0 {
 		models = []any{"gpt-image-2"}
 	}
@@ -59,7 +59,7 @@ func excelBPSImagesUpstream(status int, urls *[]string) *codexModelsHTTPUpstream
 }
 
 func TestExcelBPSImagesRequiresExplicitImageModel(t *testing.T) {
-	legacy := excelAccount()
+	legacy := bpsUpstreamTestAccount()
 	require.True(t, legacy.IsExcelBPSEnabledForModel("gpt-image-2"))
 	require.False(t, legacy.IsExcelBPSImagesEnabledForModel("gpt-image-2"), "legacy all-models routing keeps images on Codex")
 	require.False(t, excelBPSImagesAccount("gpt-6-astra").IsExcelBPSImagesEnabledForModel("gpt-image-2"))
@@ -306,7 +306,7 @@ func TestExcelBPSImagesStayOnCodexWhenBPSCannotServe(t *testing.T) {
 		account *Account
 		body    string
 	}{
-		"legacy all models": {account: excelAccount(), body: `{"model":"gpt-image-2","prompt":"draw"}`},
+		"legacy all models": {account: bpsUpstreamTestAccount(), body: `{"model":"gpt-image-2","prompt":"draw"}`},
 		"model not listed":  {account: excelBPSImagesAccount("gpt-6-astra"), body: `{"model":"gpt-image-2","prompt":"draw"}`},
 		"jpeg output":       {account: excelBPSImagesAccount(), body: `{"model":"gpt-image-2","prompt":"draw","output_format":"jpeg"}`},
 		"model BPS rejects": {account: excelBPSImagesAccount("gpt-image-2.5-flare"), body: `{"model":"gpt-image-2.5-flare","prompt":"draw"}`},
@@ -410,7 +410,7 @@ func TestExcelBPSImagesAccountTest(t *testing.T) {
 			contains: []string{"Excel BPS rejected this request format", "Calling Codex /images/generations"}},
 		// Before this change an image model on a BPS account went to the text
 		// BPS test and was sent to /responses.
-		"legacy all models": {account: excelAccount(), status: http.StatusOK, urls: []string{codexDirectImagesURL},
+		"legacy all models": {account: bpsUpstreamTestAccount(), status: http.StatusOK, urls: []string{codexDirectImagesURL},
 			contains: []string{"Calling Codex /images/generations"}},
 	} {
 		t.Run(name, func(t *testing.T) {

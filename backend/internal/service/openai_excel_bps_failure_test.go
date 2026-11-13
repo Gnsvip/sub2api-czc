@@ -54,7 +54,7 @@ func TestExcelBPSFailureAfterCompactKeepalive(t *testing.T) {
 	require.True(t, keepalive.beat())
 	body, err := json.Marshal(map[string]any{"model": "gpt-6-astra", "input": "continue"})
 	require.NoError(t, err)
-	_, err = svc.Forward(context.Background(), c, excelAccount(), body)
+	_, err = svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 	require.Error(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"))
@@ -74,10 +74,10 @@ func TestExcelBPSFailureQualityObservationDoesNotCoolAccount(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	ctx := withPelicanTestOptions(context.Background(), pelicanTestOptions{observeOnly: true})
+	ctx := context.WithValue(context.Background(), bpsTestResponseObserverKey{}, bpsTestResponseObserver(func(TestEvent) {}))
 	body, err := json.Marshal(map[string]any{"model": "gpt-6-astra", "input": "observe"})
 	require.NoError(t, err)
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	_, err = svc.Forward(ctx, c, account, body)
 	require.Error(t, err)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
@@ -112,7 +112,7 @@ func TestExcelBPSFailureClassification(t *testing.T) {
 				}
 				upstream := &httpUpstreamRecorder{resp: bpsCompletionResponse(http.StatusOK, wire)}
 				svc := excelBPSTestService(upstream)
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 				body, err := json.Marshal(map[string]any{"model": "gpt-6-astra", "stream": stream, "input": "hello"})
 				require.NoError(t, err)

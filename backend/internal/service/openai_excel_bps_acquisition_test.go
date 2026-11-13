@@ -25,7 +25,7 @@ func TestExcelBPSAcquisitionDiagnosticsPreserveReasonWithoutSending(t *testing.T
 			ctx := logger.IntoContext(context.Background(), zap.New(core))
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = true
 			acquire := func(context.Context, string, ...string) (string, excelBPSLease, error) {
 				return "", nil, fmt.Errorf("secret-user:proxy-password: %w", &mihomo.BPSAcquireError{Reason: reason, Candidates: 2})

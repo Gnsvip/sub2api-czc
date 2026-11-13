@@ -51,7 +51,7 @@ func TestExcelBPSClientCancellationBeforeHeadersAndDuringStream(t *testing.T) {
 				}}
 				svc := excelBPSTestService(nil)
 				svc.httpUpstream = upstream
-				result, err := svc.Forward(ctx, c, excelAccount(), body)
+				result, err := svc.Forward(ctx, c, bpsUpstreamTestAccount(), body)
 				require.ErrorIs(t, err, context.Canceled)
 				require.Equal(t, 1, calls, "a canceled request must not be replayed")
 				if stage == "headers" {
@@ -86,7 +86,7 @@ func TestExcelBPSChildCancellationAndTimeoutRemainProviderFailures(t *testing.T)
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 			svc := excelBPSTestService(&httpUpstreamRecorder{err: cause})
-			_, err = svc.Forward(c.Request.Context(), c, excelAccount(), body)
+			_, err = svc.Forward(c.Request.Context(), c, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Equal(t, 502, c.Writer.Status())
 			_, canceled := GetOpsStreamError(c)

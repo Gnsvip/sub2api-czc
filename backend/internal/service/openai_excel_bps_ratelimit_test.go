@@ -108,7 +108,7 @@ func TestExcelBPSQuotaSnapshotAtResponseBoundary(t *testing.T) {
 				svc.codexSnapshotThrottle = newAccountWriteThrottle(time.Hour)
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				body := []byte(fmt.Sprintf("{\"model\":\"gpt-6-astra\",\"input\":\"test\",\"stream\":%t}", stream))
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -150,7 +150,7 @@ func TestExcelBPSQuotaSnapshotRequiresHeaders(t *testing.T) {
 		svc.accountRepo = repo
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-		_, _ = svc.Forward(context.Background(), c, excelAccount(), []byte("{\"model\":\"gpt-6-astra\",\"input\":\"test\"}"))
+		_, _ = svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), []byte("{\"model\":\"gpt-6-astra\",\"input\":\"test\"}"))
 		requireNoExcelBPSQuotaWrite(t, repo)
 	}
 }
@@ -235,7 +235,7 @@ func TestExcelBPS429FailsOverWithoutChangingCodexState(t *testing.T) {
 				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 				svc.rateLimitService.SetSettingService(NewSettingService(&excelBPSQuotaSettingsRepo{cooldown: `{"enabled":true,"cooldown_seconds":11}`}, svc.cfg))
 				svc.rateLimitService.SetAccountRuntimeBlocker(svc)
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.Extra["openai_excel_bps_auto_disable_on_403"] = true
 				retryStarted := time.Now()
 				svc.openaiOAuth429RetryStartedAt.Store(account.ID, retryStarted)
@@ -299,7 +299,7 @@ func TestExcelBPSNon429DoesNotChangeQuotaState(t *testing.T) {
 			svc.accountRepo = repo
 			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 			svc.rateLimitService.SetAccountRuntimeBlocker(svc)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -340,7 +340,7 @@ func TestExcelBPS429FallbackCooldownFollowsSetting(t *testing.T) {
 				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 				svc.rateLimitService.SetSettingService(NewSettingService(&excelBPSQuotaSettingsRepo{cooldown: tc.setting}, svc.cfg))
 			}
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 
@@ -359,14 +359,14 @@ func TestExcelBPS429FallbackCooldownFollowsSetting(t *testing.T) {
 
 func TestExcelBPSCooldownNeverShortensAndExpires(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	svc.coolDownExcelBPS(context.Background(), account, "60")
 	svc.coolDownExcelBPS(context.Background(), account, "5")
 	require.InDelta(t, 60, excelBPSCooldownRemaining(t, svc, account.ID).Seconds(), 1, "a shorter cooldown must not win")
 	svc.coolDownExcelBPS(context.Background(), account, "120")
 	require.InDelta(t, 120, excelBPSCooldownRemaining(t, svc, account.ID).Seconds(), 1)
 
-	other := excelAccount()
+	other := bpsUpstreamTestAccount()
 	other.ID++
 	var wg sync.WaitGroup
 	for i := 1; i <= 64; i++ {
@@ -387,7 +387,7 @@ func TestExcelBPSCooldownNeverShortensAndExpires(t *testing.T) {
 
 func TestExcelBPSCooldownOnlyAffectsBPSRoutedModels(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_models"] = []any{"gpt-6-astra"}
 	svc.coolDownExcelBPS(context.Background(), account, "30")
 
@@ -423,7 +423,7 @@ func TestExcelBPS429AfterOutputCoolsWithoutReplay(t *testing.T) {
 				svc.accountRepo = repo
 				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 				svc.rateLimitService.SetAccountRuntimeBlocker(svc)
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)

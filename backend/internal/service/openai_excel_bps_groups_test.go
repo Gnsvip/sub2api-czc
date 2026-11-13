@@ -32,14 +32,14 @@ func TestExcelBPS403GroupTarget(t *testing.T) {
 	_, enabled := (*Account)(nil).ExcelBPS403GroupTarget()
 	require.False(t, enabled)
 	for _, value := range []any{nil, true, "0", -1, 1.5, math.NaN(), math.Inf(1), float64(math.MaxInt64), json.Number("-1")} {
-		account := excelAccount()
+		account := bpsUpstreamTestAccount()
 		account.Extra[ExcelBPSAutoMoveOn403Key] = true
 		account.Extra[ExcelBPS403TargetGroupIDKey] = value
 		_, enabled := account.ExcelBPS403GroupTarget()
 		require.False(t, enabled, "invalid destination must never become leave-all: %v", value)
 	}
 	for _, value := range []any{0, int64(0), float64(0), json.Number("0"), 7, int64(7), float64(7), json.Number("7")} {
-		account := excelAccount()
+		account := bpsUpstreamTestAccount()
 		account.Extra[ExcelBPSAutoMoveOn403Key] = true
 		account.Extra[ExcelBPS403TargetGroupIDKey] = value
 		_, enabled := account.ExcelBPS403GroupTarget()
@@ -69,7 +69,7 @@ func TestExcelBPS403GroupActionTrigger(t *testing.T) {
 	} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
-				account := excelAccount()
+				account := bpsUpstreamTestAccount()
 				account.GroupIDs = []int64{1, 2}
 				account.Extra[ExcelBPSAutoMoveOn403Key] = tc.optIn
 				account.Extra[ExcelBPS403TargetGroupIDKey] = tc.target
@@ -131,7 +131,7 @@ func TestExcelBPS403GroupActionDuringCorrection(t *testing.T) {
 				{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(excelBPSRepairWire(t, "group", "Run", "text(42);")))},
 				{StatusCode: 403, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(raw))},
 			}}
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra[ExcelBPSAutoMoveOn403Key] = true
 			account.Extra[ExcelBPS403TargetGroupIDKey] = 0
 			svc := excelBPSTestService(upstream)
@@ -177,7 +177,7 @@ func TestValidateExcelBPS403GroupSettings(t *testing.T) {
 		{name: "string zero", target: "0", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra[ExcelBPSAutoMoveOn403Key] = true
 			account.Extra[ExcelBPS403TargetGroupIDKey] = tc.target
 			groups := &excelBPSDestinationRepo{group: &Group{ID: 7, Platform: tc.platform}}

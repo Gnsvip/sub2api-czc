@@ -76,7 +76,7 @@ func TestExcelBPSProxyFailoverOnlyBeforeRequestSent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = true
 			first, second := &bpsTestLease{}, &bpsTestLease{}
 			acquired, calls := 0, 0
@@ -136,7 +136,7 @@ func TestExcelBPSFailoverBudgetAndCancellation(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = scenario != "static_proxy"
 			leases := []*bpsTestLease{}
 			acquired, calls := 0, 0
@@ -207,7 +207,7 @@ func TestExcelBPSTransportDiagnosticsAreCredentialFree(t *testing.T) {
 	ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "req-43885")))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_mihomo"] = true
 	err := &url.Error{Op: "Post", URL: "https://secret-user:proxy-password@bps.openai.com/?token=secret-token", Err: fmt.Errorf("credential=raw-secret: %w", syscall.ECONNRESET)}
 	recordExcelBPSTransportFailure(ctx, c, account, "private-session-key", "http://127.0.0.1:19007", err, "transport", 1, false)
@@ -247,7 +247,7 @@ func TestExcelBPSFailoverRealHTTPTransport(t *testing.T) {
 		t.Run(fmt.Sprintf("sent_%t", sent), func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = true
 			acquired, calls := 0, 0
 			acquire := func(context.Context, string, ...string) (string, excelBPSLease, error) {
@@ -316,7 +316,7 @@ func TestExcelBPSTransportAndStreamFailureAreServerErrors(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
-			_, err := svc.Forward(context.Background(), c, excelAccount(), body)
+			_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), body)
 			require.Error(t, err)
 			require.Contains(t, rec.Body.String(), "server_error")
 			if streamFailure {
@@ -338,7 +338,7 @@ func TestExcelBPSAttachmentLeaseCannotChangeExitOrReleaseOwner(t *testing.T) {
 			lease := &bpsTestLease{}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = true
 			calls := 0
 			upstream := &bpsTestUpstream{send: func(r *http.Request, proxy string) (*http.Response, error) {

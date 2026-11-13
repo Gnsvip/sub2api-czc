@@ -56,7 +56,7 @@ func TestNewExcelBPSRequestHeaders(t *testing.T) {
 	require.Equal(t, "chatgpt", req.Header.Get("x-basispoints-auth-mode"))
 }
 
-func excelAccount() *Account {
+func bpsUpstreamTestAccount() *Account {
 	return &Account{ID: 300, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 10,
 		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}, Extra: map[string]any{"openai_excel_bps": true, "openai_passthrough": true}}
 }
@@ -72,7 +72,7 @@ func TestExcelBPSForwardContract(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(body))
 			c.Request.Header.Set("x-codex-turn-state", "must-not-leak")
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 7890}
 			account.Extra["openai_excel_bps_mihomo"] = false
 			result, err := svc.Forward(context.Background(), c, account, body)
@@ -100,7 +100,7 @@ func TestExcelBPSModelDeniedDoesNotFailover(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-	_, err := svc.Forward(context.Background(), c, excelAccount(), []byte(`{"model":"gpt-5.6-sol","input":"x"}`))
+	_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), []byte(`{"model":"gpt-5.6-sol","input":"x"}`))
 	require.Error(t, err)
 	var failover *UpstreamFailoverError
 	require.NotErrorAs(t, err, &failover)
@@ -123,7 +123,7 @@ func TestExcelBPSHTTPErrorRecordsUpstreamRejection(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Credentials["refresh_token"] = "refresh-secret"
 			_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-6-astra","stream":true,"input":"continue"}`))
 			require.Error(t, err)
@@ -188,7 +188,7 @@ func TestExcelBPSHTTPErrorAfterCompactKeepalive(t *testing.T) {
 	keepalive, ok := value.(*openAICompactSSEKeepalive)
 	require.True(t, ok)
 	require.True(t, keepalive.beat())
-	_, err := svc.Forward(context.Background(), c, excelAccount(), []byte(`{"model":"gpt-6-astra","input":"continue"}`))
+	_, err := svc.Forward(context.Background(), c, bpsUpstreamTestAccount(), []byte(`{"model":"gpt-6-astra","input":"continue"}`))
 	require.Error(t, err)
 	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -213,7 +213,7 @@ func TestExcelBPSMihomoFailsClosed(t *testing.T) {
 		t.Run(fmt.Sprint(identity), func(t *testing.T) {
 			upstream := &httpUpstreamRecorder{}
 			svc := excelBPSTestService(upstream)
-			account := excelAccount()
+			account := bpsUpstreamTestAccount()
 			account.Extra["openai_excel_bps_mihomo"] = true
 			body, _ := nativeGatewayBody(t)
 			enableNativeAttachments(svc)

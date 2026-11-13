@@ -27,7 +27,6 @@ func TestAccount_IsExcelBPSCacheCreationAsInputEnabled(t *testing.T) {
 		"no extra":        func(a *Account) { a.Extra = nil },
 		"API key":         func(a *Account) { a.Type = AccountTypeAPIKey },
 		"other platform":  func(a *Account) { a.Platform = PlatformAnthropic },
-		"shadow account":  func(a *Account) { a.ParentAccountID = i64p(1) },
 		"agent identity":  func(a *Account) { a.Credentials = map[string]any{"auth_mode": OpenAIAuthModeAgentIdentity} },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -148,7 +147,7 @@ func TestExcelBPSSelectedModelBillingPreservesCodexCacheCreation(t *testing.T) {
 	svc.billingService = NewBillingService(svc.cfg, &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"gpt-6-sol": {InputCostPerToken: 5e-6, OutputCostPerToken: 30e-6, CacheCreationInputTokenCost: 6.25e-6, CacheCreationInputTokenCostExplicit: true, CacheReadInputTokenCost: 0.5e-6},
 	}})
-	account := excelAccount()
+	account := bpsUpstreamTestAccount()
 	account.Extra["openai_excel_bps_models"] = []string{"gpt-6-astra"}
 	account.Extra["openai_excel_bps_cache_creation_as_input"] = true
 	require.False(t, account.IsExcelBPSEnabledForModel("gpt-6-sol"))

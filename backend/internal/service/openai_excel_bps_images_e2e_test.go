@@ -87,7 +87,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					defer upstream.Close()
 					target, err := url.Parse(upstream.URL)
 					require.NoError(t, err)
-					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "false"}}
+					repo := &excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "false"}}
 					if mode != "" {
 						repo.values[SettingKeyExcelBPSImageMode] = mode
 					}
@@ -100,7 +100,7 @@ func TestExcelBPSImagesHTTPFlow(t *testing.T) {
 					defer func() { require.NoError(t, svc.CloseExcelBPSImages()) }()
 					router := gin.New()
 					router.POST(path, func(c *gin.Context) {
-						account := excelAccount()
+						account := bpsUpstreamTestAccount()
 						// A saved legacy opt-in must never strip images anymore.
 						account.Extra["openai_excel_bps_ignore_images"] = true
 						body, err := c.GetRawData()

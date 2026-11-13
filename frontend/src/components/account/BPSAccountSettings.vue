@@ -4,7 +4,7 @@
     <label class="flex items-center gap-2"><input v-model="value.enabled" type="checkbox" data-testid="bps-enabled" />启用 BPS 协议</label>
     <p class="text-xs text-gray-500">需同时开启系统 BPS 开关；需要账号具备 BPS 授权。保存设置不会替换 OAuth 凭据。</p>
     <template v-if="value.enabled || recoveryPending">
-      <label class="flex items-center gap-2"><input v-model="value.allModels" type="checkbox" />所有文本模型使用 BPS</label>
+      <label class="flex items-center gap-2"><input v-model="value.allModels" type="checkbox" data-testid="bps-all-models" />所有文本模型使用 BPS</label>
       <ModelWhitelistSelector v-if="!value.allModels" v-model="value.models" platform="openai" />
       <p class="text-xs text-gray-500">生图需单独选择 gpt-image-2；取消全选且未选择模型时，不使用 BPS。</p>
       <label class="flex items-center gap-2"><input v-model="value.sessionProxy" type="checkbox" data-testid="bps-session-proxy" />按会话分配代理 IP</label>

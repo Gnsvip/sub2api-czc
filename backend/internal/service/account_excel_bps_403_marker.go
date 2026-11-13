@@ -27,6 +27,13 @@ var excelBPS403MarkerKeys = []string{ExcelBPS403DisabledAtKey, ExcelBPS403LastPr
 // records stay until the next automatic move. The repository applies this
 // under the row lock.
 func MergeExcelBPS403Marker(extra, current map[string]any) map[string]any {
+	delete(extra, ExcelBPSCredentialStateExtraKey)
+	if state, ok := current[ExcelBPSCredentialStateExtraKey]; ok {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra[ExcelBPSCredentialStateExtraKey] = state
+	}
 	for _, key := range excelBPS403MarkerKeys {
 		delete(extra, key)
 	}

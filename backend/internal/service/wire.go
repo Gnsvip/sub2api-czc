@@ -107,9 +107,14 @@ func ProvideOpenAIOAuthService(
 	proxyRepo ProxyRepository,
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
+	grantRepo OpenAIExcelOAuthRepository,
+	accountRepo AccountRepository,
+	encryptor SecretEncryptor,
+	cfg *config.Config,
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	svc.excelGrants = &OpenAIExcelOAuthService{repo: grantRepo, accounts: accountRepo, oauth: svc, encryptor: encryptor, encryptionKeyConfigured: cfg != nil && cfg.Totp.EncryptionKeyConfigured}
 	return svc
 }
 

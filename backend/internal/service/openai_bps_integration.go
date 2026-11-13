@@ -27,8 +27,17 @@ func (s *OpenAIGatewayService) doExcelBPSObservedHTTP(req *http.Request, proxy s
 	return resp, err
 }
 func (s *OpenAIGatewayService) getExcelBPSAccessToken(ctx context.Context, account *Account) (string, error) {
+	if grants := s.excelGrants(); grants != nil && !account.IsExcelOAuth() {
+		return grants.ExcelAccessToken(ctx, account, s.openAITokenProvider.tokenCache)
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	return token, err
+}
+func (s *OpenAIGatewayService) excelGrants() *OpenAIExcelOAuthService {
+	if s == nil || s.openAITokenProvider == nil || s.openAITokenProvider.openAIOAuthService == nil {
+		return nil
+	}
+	return s.openAITokenProvider.openAIOAuthService.excelGrants
 }
 func (a *Account) IsExcelOAuth() bool { return a.isBPSCredential() }
 func QualityBPSEligible(a *Account) bool {

@@ -17,6 +17,7 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
+	excelGrants          *OpenAIExcelOAuthService
 	sessionStore         *openai.SessionStore
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
@@ -109,11 +110,12 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 
 // OpenAIExchangeCodeInput represents the input for code exchange
 type OpenAIExchangeCodeInput struct {
-	SessionID   string
-	Code        string
-	State       string
-	RedirectURI string
-	ProxyID     *int64
+	ExcelAccountID int64
+	SessionID      string
+	Code           string
+	State          string
+	RedirectURI    string
+	ProxyID        *int64
 }
 
 // OpenAITokenInfo represents the token information for OpenAI
@@ -144,6 +146,9 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	session, ok := s.sessionStore.Get(input.SessionID)
 	if !ok {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
+	}
+	if session.ExcelAccountID != input.ExcelAccountID {
+		return nil, infraerrors.BadRequest("OPENAI_EXCEL_SESSION_MISMATCH", "Authorization session belongs to another operation")
 	}
 	if input.State == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_STATE_REQUIRED", "oauth state is required")

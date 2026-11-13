@@ -2035,6 +2035,7 @@
         </div>
       </div>
 
+      <BPSAuthorization v-if="account?.platform === 'openai' && account?.type === 'oauth' && account.credentials?.client_id !== 'app_fnr0pYvVwwFDocDumLG3H2Bp' && bpsSettings.enabled" :account-id="account.id" />
       <BPSAccountSettings v-if="account?.platform === 'openai' && account?.type === 'oauth'" v-model="bpsSettings" :groups="groups" :recovery-pending="typeof account.extra?.openai_excel_bps_403_disabled_at === 'string'" />
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
@@ -3459,6 +3460,7 @@
 
 <script setup lang="ts">
 import BPSAccountSettings from './BPSAccountSettings.vue'
+import BPSAuthorization from './BPSAuthorization.vue'
 import { readBPSSettings, writeBPSSettings } from './bpsSettings'
 
 import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl, normalizeExplicitCacheUpstreamMaxTTL } from '@/utils/geminiExplicitCache'

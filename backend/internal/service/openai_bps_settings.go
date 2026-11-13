@@ -64,6 +64,7 @@ func bpsModelList(raw any) ([]string, error) {
 }
 
 func validateOpenAIBPSSettings(account *Account) error {
+	delete(account.Extra, ExcelBPSCredentialStateExtraKey)
 	if raw, exists := account.Extra[OpenAIExcelBPSModelsKey]; exists && raw == nil {
 		delete(account.Extra, OpenAIExcelBPSModelsKey)
 	}

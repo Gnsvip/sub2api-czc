@@ -84,7 +84,7 @@ func TestSettingsExcelBPSRelayRequiresHTTPSOriginWhenEnabled(t *testing.T) {
 }
 
 func TestSettingsExcelBPSDefaultNativeModePersistsWithoutOrigin(t *testing.T) {
-	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{service.SettingKeyExcelBPSEnabled: "true"})
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)

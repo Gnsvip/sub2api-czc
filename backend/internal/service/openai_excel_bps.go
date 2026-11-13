@@ -33,6 +33,16 @@ func (s *OpenAIGatewayService) handleExcelBPSUnauthorized(ctx context.Context, a
 	if status != http.StatusUnauthorized || isQualityObservation(ctx) {
 		return
 	}
+	if grants := s.excelGrants(); grants != nil && account != nil && !account.IsExcelOAuth() {
+		if len(tokens) > 0 {
+			stateCtx, cancel := openAIAccountStateContext(ctx)
+			defer cancel()
+			if err := grants.invalidateExcelAccessToken(stateCtx, account.ID, tokens[0], s.openAITokenProvider.tokenCache); err != nil {
+				logger.LegacyPrintf("service.openai_excel_bps", "Excel access rejection could not be recorded: account_id=%d", account.ID)
+			}
+		}
+		return
+	}
 	if s.rateLimitService == nil {
 		return
 	}

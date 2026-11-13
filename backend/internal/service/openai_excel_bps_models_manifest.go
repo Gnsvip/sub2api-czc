@@ -68,10 +68,6 @@ func codexGroupModelUsesExcelBPS(model string, accounts []Account, group *Group)
 	if model == "" {
 		return false
 	}
-	var groupID *int64
-	if group != nil {
-		groupID = &group.ID
-	}
 	routed := codexModelRoutingAccountIDs(group, model)
 	for i := range accounts {
 		account := &accounts[i]
@@ -80,7 +76,7 @@ func codexGroupModelUsesExcelBPS(model string, accounts []Account, group *Group)
 		}
 		incompatible := account.IsExcelBPSEnabledForModel(model) ||
 			(account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account))
-		if (groupID == nil || containsInt64(account.GroupIDs, *groupID)) && account.IsModelSupported(model) && incompatible {
+		if account.IsModelSupported(model) && incompatible {
 			return true
 		}
 	}

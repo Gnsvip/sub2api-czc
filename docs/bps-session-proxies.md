@@ -82,4 +82,4 @@ JPEG、透明背景、流式、多图/mask 编辑等不适用请求保留原生 
 
 GitHub Actions 运行上游协议/代理池测试、本站路由/授权/计费/图片回归、临时 PostgreSQL 真实事务验证、Python worker 测试、前端 lint/类型/测试和 Linux amd64 embed 编译。失败与跳过检查以 PR 最新验证记录为准。
 
-测试使用模拟供应商和隔离 PostgreSQL，不读取生产密钥，不代表真实 Excel 授权、多个公网出口、真实模型额度、图片生成或 Codex 客户端 compact 已验收。当前任务只提交 PR 和验证，未合并、发布、部署。
+测试使用模拟供应商和隔离 PostgreSQL，不读取生产密钥，不代表真实 Excel 授权、多个公网出口、真实模型额度、图片生成或 Codex 客户端 compact 已验收。本说明对应 BPS 移植；发布状态以 GitHub Release 为准，生产启用与真实链路验收另行确认。

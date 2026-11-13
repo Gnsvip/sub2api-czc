@@ -18,4 +18,4 @@
 
 对应最小补丁为 `deploy/remove-modeltrace-injection.patch`。先备份并核对当前 Nginx 文件，再验证 `nginx -t`、重载 Nginx，检查 `https://www.aifxo.com/` 和 `https://aifxo.com/` 的响应 HTML 不再包含该脚本。API 专用域名及品牌映射不涉及此变更。移除注入入口不等于删除独立插件的历史数据或停止其后台服务。
 
-本 PR 只提交代码与 GitHub Actions 验证，未执行上述服务器变更，未发布或部署。
+发布状态以 GitHub Release 为准；上述服务器插件移除需在用户确认部署后执行，发布本身不会修改线上入口。

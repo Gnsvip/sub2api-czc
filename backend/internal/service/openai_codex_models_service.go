@@ -131,7 +131,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		return nil, false, nil
 	}
 
-	visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, catalog, err := s.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -192,7 +192,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
-	visible, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, accounts, err := s.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -225,7 +225,15 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("filter Tibo group Codex models: %w", err)
 	}
-	if changed || retired || tiboFiltered {
+
+	bpsRestricted := false
+	if s.excelBPSGloballyEnabled(ctx) {
+		body, bpsRestricted, err = restrictExcelBPSCodexModelsManifest(body, accounts, group)
+		if err != nil {
+			return fmt.Errorf("restrict BPS model capabilities: %w", err)
+		}
+	}
+	if changed || retired || tiboFiltered || bpsRestricted {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
 	}
@@ -320,7 +328,7 @@ func openAIConfiguredCodexModelIDsForGroup(accounts []Account, group *Group) []s
 			if account.Platform != PlatformOpenAI {
 				continue
 			}
-			mappedModel, matched := account.ResolveMappedModel(selectedModel)
+			mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, selectedModel)
 			if !matched || strings.TrimSpace(mappedModel) == "" {
 				continue
 			}
@@ -890,7 +898,8 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		return BuildCodexModelsManifest(modelIDs)
 	}
 
-	_, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	routing := &OpenAIGatewayService{accountRepo: s.accountRepo, settingService: s.settingService}
+	_, catalog, err := routing.loadCodexGroupCatalogRoutingAccounts(ctx, group.ID)
 	if err != nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}
@@ -974,7 +983,12 @@ func buildCodexModelsManifestForAccounts(
 			modelMetadata[modelID] = metadata
 		}
 	}
-	return buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
+	body, err := buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
+	if err != nil || effectivePlatform != PlatformOpenAI {
+		return body, err
+	}
+	body, _, err = restrictExcelBPSCodexModelsManifest(body, accounts, group)
+	return body, err
 }
 
 func buildCodexModelsManifest(
@@ -1122,7 +1136,7 @@ func uniqueCodexMappedModel(accounts []Account, platform string, modelID string)
 		if !codexAccountServesPlatformModel(account, platform, modelID) {
 			continue
 		}
-		mappedModel, matched := account.ResolveMappedModel(modelID)
+		mappedModel, matched := resolveExcelBPSCatalogMappedModel(account, modelID)
 		mappedModel = strings.TrimSpace(mappedModel)
 		if !matched || mappedModel == "" {
 			continue
@@ -1173,7 +1187,8 @@ func groupCodexModelSupportsImageInput(
 			continue
 		}
 		candidates++
-		if !accountCodexModelSupportsImageInput(account, account.GetMappedModel(upstreamModel)) {
+		mappedModel, _ := resolveExcelBPSCatalogMappedModel(account, upstreamModel)
+		if !accountCodexModelSupportsImageInput(account, mappedModel) {
 			return false
 		}
 	}
@@ -1711,6 +1726,15 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	ctx = s.withExcelBPSRoutingContext(ctx)
+	account = s.accountForExcelBPSRouting(ctx, account)
+	if account.IsExcelOAuth() || (account.IsExcelBPSEnabled() && s.excelBPSGloballyEnabled(ctx)) {
+		return s.fetchExcelBPSCodexManifest(ctx, account, ifNoneMatch)
+	}
+	return s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch)
+}
+
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}

@@ -31,6 +31,7 @@ func (Proxy) Mixin() []ent.Mixin {
 
 func (Proxy) Fields() []ent.Field {
 	return []ent.Field{
+		field.String("mihomo_node_id").MaxLen(128).Optional().Nillable(),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),

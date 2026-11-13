@@ -55,6 +55,26 @@ func (_u *ProxyUpdate) ClearDeletedAt() *ProxyUpdate {
 	return _u
 }
 
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (_u *ProxyUpdate) SetMihomoNodeID(v string) *ProxyUpdate {
+	_u.mutation.SetMihomoNodeID(v)
+	return _u
+}
+
+// SetNillableMihomoNodeID sets the "mihomo_node_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableMihomoNodeID(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetMihomoNodeID(*v)
+	}
+	return _u
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (_u *ProxyUpdate) ClearMihomoNodeID() *ProxyUpdate {
+	_u.mutation.ClearMihomoNodeID()
+	return _u
+}
+
 // SetName sets the "name" field.
 func (_u *ProxyUpdate) SetName(v string) *ProxyUpdate {
 	_u.mutation.SetName(v)
@@ -379,6 +399,11 @@ func (_u *ProxyUpdate) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *ProxyUpdate) check() error {
+	if v, ok := _u.mutation.MihomoNodeID(); ok {
+		if err := proxy.MihomoNodeIDValidator(v); err != nil {
+			return &ValidationError{Name: "mihomo_node_id", err: fmt.Errorf(`ent: validator failed for field "Proxy.mihomo_node_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := proxy.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
@@ -437,6 +462,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(proxy.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.MihomoNodeID(); ok {
+		_spec.SetField(proxy.FieldMihomoNodeID, field.TypeString, value)
+	}
+	if _u.mutation.MihomoNodeIDCleared() {
+		_spec.ClearField(proxy.FieldMihomoNodeID, field.TypeString)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
@@ -645,6 +676,26 @@ func (_u *ProxyUpdateOne) SetNillableDeletedAt(v *time.Time) *ProxyUpdateOne {
 // ClearDeletedAt clears the value of the "deleted_at" field.
 func (_u *ProxyUpdateOne) ClearDeletedAt() *ProxyUpdateOne {
 	_u.mutation.ClearDeletedAt()
+	return _u
+}
+
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (_u *ProxyUpdateOne) SetMihomoNodeID(v string) *ProxyUpdateOne {
+	_u.mutation.SetMihomoNodeID(v)
+	return _u
+}
+
+// SetNillableMihomoNodeID sets the "mihomo_node_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableMihomoNodeID(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetMihomoNodeID(*v)
+	}
+	return _u
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (_u *ProxyUpdateOne) ClearMihomoNodeID() *ProxyUpdateOne {
+	_u.mutation.ClearMihomoNodeID()
 	return _u
 }
 
@@ -985,6 +1036,11 @@ func (_u *ProxyUpdateOne) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *ProxyUpdateOne) check() error {
+	if v, ok := _u.mutation.MihomoNodeID(); ok {
+		if err := proxy.MihomoNodeIDValidator(v); err != nil {
+			return &ValidationError{Name: "mihomo_node_id", err: fmt.Errorf(`ent: validator failed for field "Proxy.mihomo_node_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Name(); ok {
 		if err := proxy.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
@@ -1060,6 +1116,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(proxy.FieldDeletedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.MihomoNodeID(); ok {
+		_spec.SetField(proxy.FieldMihomoNodeID, field.TypeString, value)
+	}
+	if _u.mutation.MihomoNodeIDCleared() {
+		_spec.ClearField(proxy.FieldMihomoNodeID, field.TypeString)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)

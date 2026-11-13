@@ -1833,6 +1833,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 	upstreamModel := account.GetMappedModel(requestModel)
+	if account.IsExcelBPSImagesEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) {
+		upstreamModel = account.getExcelBPSMappedModel(requestModel)
+	}
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}
@@ -1855,6 +1858,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx, s.openAIImageDrainTimeout())
 	defer releaseUpstreamCtx()
 
+	if direct && account.IsExcelBPSImagesEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) && excelBPSImagesUnsupportedReason(parsed) == "" {
+		result, fallback, err := s.forwardExcelBPSImages(upstreamCtx, c, account, parsed, requestModel, upstreamModel, startTime)
+		if !fallback {
+			return result, err
+		}
+	}
+	if account.IsExcelOAuth() {
+		return nil, bpsRequestError(c, 400, "bps_images_unsupported", "This image request is not supported by the Excel BPS account")
+	}
 	token, _, err := s.getRequestCredential(upstreamCtx, c, account)
 	if err != nil {
 		return nil, err

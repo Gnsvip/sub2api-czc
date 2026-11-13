@@ -562,6 +562,9 @@ func (s *OpenAIGatewayService) clearOpenAIAccountRuntimeBlockIfUnchanged(account
 // IsOpenAIResponsesCompactPath）：门票门控按真正出站的模型名判定，否则 compact
 // 请求会被按客户端原始模型误拦（见 openAICodexTicketOutboundModel）。
 func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string, requireCompact bool) bool {
+	if s.isExcelBPSCoolingDown(account, requestedModel) || s.isExcelBPSModelCoolingDown(account, requestedModel) {
+		return true
+	}
 	if s == nil {
 		return false
 	}

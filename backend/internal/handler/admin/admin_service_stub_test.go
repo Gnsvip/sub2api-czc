@@ -857,3 +857,13 @@ func (s *stubAdminService) RevertAccountProxyFallback(ctx context.Context, id in
 
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)
+
+func (*stubAdminService) TestMihomoNode(context.Context, service.MihomoNodeProber, string) (*service.ProxyTestResult, error) {
+	panic("unexpected Mihomo node test")
+}
+func (*stubAdminService) CheckMihomoNodeQuality(context.Context, service.MihomoNodeProber, string) (*service.ProxyQualityCheckResult, error) {
+	panic("unexpected Mihomo quality check")
+}
+func (*stubAdminService) CreateMihomoNodeProxies(context.Context, service.MihomoStaticNodeBinder, []string) (*service.MihomoNodeProxyImportResult, error) {
+	panic("unexpected Mihomo static proxy import")
+}

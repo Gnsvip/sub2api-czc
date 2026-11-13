@@ -1,3 +1,4 @@
+import { readBPSSettings, writeBPSSettings, fromBPSDefaults, bpsDefaultsPayload, initialBPSDefaults } from '../bpsSettings'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -335,7 +336,7 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('strips leftover Excel BPS extra keys on OAuth save', async () => {
+  it('preserves restored BPS settings on OAuth save', async () => {
     const account = buildAccount()
     account.type = 'oauth'
     account.credentials = { access_token: 'test-token', chatgpt_account_id: 'test-account' }
@@ -351,15 +352,53 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="excel-bps-toggle"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="bps-enabled"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('[data-testid="openai-outbound-protocol"]').exists()).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
-    expect(extra.openai_excel_bps).toBeUndefined()
-    expect(extra.openai_excel_bps_models).toBeUndefined()
-    expect(extra.openai_excel_bps_cache_creation_as_input).toBeUndefined()
-    expect(extra.openai_excel_bps_auto_disable_on_403).toBeUndefined()
+    expect(extra.openai_excel_bps).toEqual(true)
+    expect(extra.openai_excel_bps_models).toEqual(['gpt-5'])
+    expect(extra.openai_excel_bps_cache_creation_as_input).toEqual(true)
+    expect(extra.openai_excel_bps_auto_disable_on_403).toEqual(true)
     expect(extra.unrelated).toBe('preserve')
+  })
+
+  it('keeps Excel BPS off by default and saves explicit session proxy settings', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="bps-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('[data-testid="bps-session-proxy"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="bps-enabled"]').setValue(true)
+    expect((wrapper.get('[data-testid="bps-session-proxy"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('[data-testid="bps-session-proxy"]').setValue(true)
+    await wrapper.get('[data-testid="bps-all-models"]').setValue(false)
+    wrapper.findComponent({ name: 'BPSAccountSettings' }).findComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', ['gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6-luna'])
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps).toBe(true)
+    expect(extra.openai_excel_bps_mihomo).toBe(true)
+    expect(extra.openai_excel_bps_session_proxy).toBe(false)
+    expect(extra.openai_excel_bps_models).toEqual(['gpt-6.1-sol', 'gpt-6-luna'])
+    wrapper.unmount()
+  })
+
+  it('disables session proxy with BPS while preserving unrelated settings', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp' },
+      extra: { openai_excel_bps: true, openai_excel_bps_session_proxy: true, openai_excel_bps_models: ['gpt-6.1-sol'], unrelated: 'keep' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="bps-enabled"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_excel_bps).toBe(false)
+    expect(extra.openai_excel_bps_session_proxy).toBe(false)
+    expect(extra.unrelated).toBe('keep')
+    wrapper.unmount()
   })
 
   it('passes existing non-identity mappings to the whitelist selector and preserves them on save', async () => {
@@ -2019,4 +2058,21 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('auto_reset_credit_opt_in_version')
     wrapper.unmount()
   })
+})
+
+it('keeps automatic BPS opt-in and round-trips its independent options', () => {
+ const value=readBPSSettings({})
+ expect(value.enabled).toBe(false)
+ expect(value.autoPolicy?.enabled).toBe(false)
+ value.autoPolicy!.enabled=true
+ value.autoPolicy!.failureThreshold=3
+ value.autoPolicy!.options.sessionProxy=true
+ value.autoPolicy!.options.proxySource='ip_pool'
+ const payload=writeBPSSettings(value)
+ expect(payload.openai_excel_bps).toBe(false)
+ const restored=readBPSSettings(payload)
+ expect(restored.autoPolicy?.failureThreshold).toBe(3)
+ expect(restored.autoPolicy?.options.proxySource).toBe('ip_pool')
+ expect(restored.autoPolicy?.options.sessionProxy).toBe(true)
+ expect(fromBPSDefaults(bpsDefaultsPayload(initialBPSDefaults()))).toEqual(initialBPSDefaults())
 })

@@ -30803,6 +30803,7 @@ type ProxyMutation struct {
 	created_at             *time.Time
 	updated_at             *time.Time
 	deleted_at             *time.Time
+	mihomo_node_id         *string
 	name                   *string
 	protocol               *string
 	host                   *string
@@ -31046,6 +31047,55 @@ func (m *ProxyMutation) DeletedAtCleared() bool {
 func (m *ProxyMutation) ResetDeletedAt() {
 	m.deleted_at = nil
 	delete(m.clearedFields, proxy.FieldDeletedAt)
+}
+
+// SetMihomoNodeID sets the "mihomo_node_id" field.
+func (m *ProxyMutation) SetMihomoNodeID(s string) {
+	m.mihomo_node_id = &s
+}
+
+// MihomoNodeID returns the value of the "mihomo_node_id" field in the mutation.
+func (m *ProxyMutation) MihomoNodeID() (r string, exists bool) {
+	v := m.mihomo_node_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMihomoNodeID returns the old "mihomo_node_id" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldMihomoNodeID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMihomoNodeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMihomoNodeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMihomoNodeID: %w", err)
+	}
+	return oldValue.MihomoNodeID, nil
+}
+
+// ClearMihomoNodeID clears the value of the "mihomo_node_id" field.
+func (m *ProxyMutation) ClearMihomoNodeID() {
+	m.mihomo_node_id = nil
+	m.clearedFields[proxy.FieldMihomoNodeID] = struct{}{}
+}
+
+// MihomoNodeIDCleared returns if the "mihomo_node_id" field was cleared in this mutation.
+func (m *ProxyMutation) MihomoNodeIDCleared() bool {
+	_, ok := m.clearedFields[proxy.FieldMihomoNodeID]
+	return ok
+}
+
+// ResetMihomoNodeID resets all changes to the "mihomo_node_id" field.
+func (m *ProxyMutation) ResetMihomoNodeID() {
+	m.mihomo_node_id = nil
+	delete(m.clearedFields, proxy.FieldMihomoNodeID)
 }
 
 // SetName sets the "name" field.
@@ -31705,7 +31755,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -31714,6 +31764,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.deleted_at != nil {
 		fields = append(fields, proxy.FieldDeletedAt)
+	}
+	if m.mihomo_node_id != nil {
+		fields = append(fields, proxy.FieldMihomoNodeID)
 	}
 	if m.name != nil {
 		fields = append(fields, proxy.FieldName)
@@ -31762,6 +31815,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.UpdatedAt()
 	case proxy.FieldDeletedAt:
 		return m.DeletedAt()
+	case proxy.FieldMihomoNodeID:
+		return m.MihomoNodeID()
 	case proxy.FieldName:
 		return m.Name()
 	case proxy.FieldProtocol:
@@ -31799,6 +31854,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldUpdatedAt(ctx)
 	case proxy.FieldDeletedAt:
 		return m.OldDeletedAt(ctx)
+	case proxy.FieldMihomoNodeID:
+		return m.OldMihomoNodeID(ctx)
 	case proxy.FieldName:
 		return m.OldName(ctx)
 	case proxy.FieldProtocol:
@@ -31850,6 +31907,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDeletedAt(v)
+		return nil
+	case proxy.FieldMihomoNodeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMihomoNodeID(v)
 		return nil
 	case proxy.FieldName:
 		v, ok := value.(string)
@@ -31988,6 +32052,9 @@ func (m *ProxyMutation) ClearedFields() []string {
 	if m.FieldCleared(proxy.FieldDeletedAt) {
 		fields = append(fields, proxy.FieldDeletedAt)
 	}
+	if m.FieldCleared(proxy.FieldMihomoNodeID) {
+		fields = append(fields, proxy.FieldMihomoNodeID)
+	}
 	if m.FieldCleared(proxy.FieldUsername) {
 		fields = append(fields, proxy.FieldUsername)
 	}
@@ -32017,6 +32084,9 @@ func (m *ProxyMutation) ClearField(name string) error {
 	case proxy.FieldDeletedAt:
 		m.ClearDeletedAt()
 		return nil
+	case proxy.FieldMihomoNodeID:
+		m.ClearMihomoNodeID()
+		return nil
 	case proxy.FieldUsername:
 		m.ClearUsername()
 		return nil
@@ -32045,6 +32115,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldDeletedAt:
 		m.ResetDeletedAt()
+		return nil
+	case proxy.FieldMihomoNodeID:
+		m.ResetMihomoNodeID()
 		return nil
 	case proxy.FieldName:
 		m.ResetName()

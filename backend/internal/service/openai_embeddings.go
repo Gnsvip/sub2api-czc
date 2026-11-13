@@ -24,6 +24,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	body []byte,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.isBPSCredential() {
+		return nil, bpsRequestError(c, 400, "bps_responses_only", "This Excel BPS account supports HTTP /v1/responses only")
+	}
 	startTime := time.Now()
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())

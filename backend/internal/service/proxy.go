@@ -14,6 +14,7 @@ const (
 )
 
 type Proxy struct {
+	MihomoNodeID   string
 	ID             int64
 	Name           string
 	Protocol       string

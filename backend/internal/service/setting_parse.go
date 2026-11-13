@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"log/slog"
 	"math"
 	"sort"
@@ -192,6 +193,22 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpsMetricsIntervalSeconds:    "60",
 
 		// Channel monitor defaults (enabled, 60s)
+		SettingKeyExcelBPSEnabled:                      "false",
+		SettingKeyExcelBPSImageMode:                    ExcelBPSImageModeNative,
+		SettingKeyExcelBPSImageRelayEnabled:            "false",
+		SettingKeyExcelBPSImageBaseURL:                 "",
+		SettingKeyExcelBPSImageBodyLimitMiB:            strconv.Itoa(DefaultExcelBPSImageBodyLimitMiB),
+		SettingKeyExcelBPSImageBudgetMiB:               strconv.Itoa(DefaultExcelBPSImageBudgetMiB),
+		SettingKeyExcelBPSImageMaxRequests:             strconv.Itoa(DefaultExcelBPSImageMaxRequests),
+		SettingKeyExcelBPSImageMaxImageMiB:             "20",
+		SettingKeyExcelBPSImageLimitPolicy:             "off",
+		SettingKeyExcelBPSImageWarningRemaining:        "8",
+		SettingKeyExcelBPSImageCompactReserve:          "3",
+		SettingKeyExcelBPSImageMaxImages:               "20",
+		SettingKeyExcelBPSImageMaxTotalMiB:             "32",
+		SettingKeyExcelBPSImageStorageMiB:              "1024",
+		SettingKeyExcelBPSImageStorageEntries:          "512",
+		SettingKeyExcelBPSImageTTLMinutes:              "30",
 		SettingKeyChannelMonitorEnabled:                "true",
 		SettingKeyChannelMonitorMode:                   ChannelMonitorModeV1,
 		SettingKeyChannelMonitorDefaultIntervalSeconds: "60",
@@ -808,6 +825,38 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	// Channel monitor feature (default: enabled, 60s)
+	result.ExcelBPSImageMode = settings[SettingKeyExcelBPSImageMode]
+	if result.ExcelBPSImageMode == "" {
+		result.ExcelBPSImageMode = ExcelBPSImageModeNative
+	}
+	result.ExcelBPSImageRelayEnabled = settings[SettingKeyExcelBPSImageRelayEnabled] == "true"
+	result.ExcelBPSImageBaseURL = settings[SettingKeyExcelBPSImageBaseURL]
+	result.ExcelBPSImageBodyLimitMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBodyLimitMiB], DefaultExcelBPSImageBodyLimitMiB)
+	result.ExcelBPSImageBudgetMiB, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageBudgetMiB], DefaultExcelBPSImageBudgetMiB)
+	result.ExcelBPSImageMaxRequests, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageMaxRequests], DefaultExcelBPSImageMaxRequests)
+	if validateExcelBPSImageCapacity(result.ExcelBPSImageBodyLimitMiB, result.ExcelBPSImageBudgetMiB, result.ExcelBPSImageMaxRequests) != nil {
+		result.ExcelBPSImageBodyLimitMiB = DefaultExcelBPSImageBodyLimitMiB
+		result.ExcelBPSImageBudgetMiB = DefaultExcelBPSImageBudgetMiB
+		result.ExcelBPSImageMaxRequests = DefaultExcelBPSImageMaxRequests
+	}
+
+	imageLimits, imageLimitsErr := parseExcelBPSImageLimits(settings)
+	if imageLimitsErr != nil {
+		imageLimits = basispoints.DefaultImageRelayLimits()
+	}
+	result.ExcelBPSImageMaxImageMiB = imageLimits.MaxImageMiB
+	result.ExcelBPSImageMaxImages = imageLimits.MaxImages
+	result.ExcelBPSImageLimitPolicy = settings[SettingKeyExcelBPSImageLimitPolicy]
+	if result.ExcelBPSImageLimitPolicy == "" {
+		result.ExcelBPSImageLimitPolicy = "off"
+	}
+	result.ExcelBPSImageWarningRemaining, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageWarningRemaining], 8)
+	result.ExcelBPSImageCompactReserve, _ = parseExcelBPSImageCapacity(settings[SettingKeyExcelBPSImageCompactReserve], 3)
+	result.ExcelBPSImageMaxTotalMiB = imageLimits.MaxTotalMiB
+	result.ExcelBPSImageStorageMiB = imageLimits.StorageMiB
+	result.ExcelBPSImageStorageEntries = imageLimits.StorageEntries
+	result.ExcelBPSImageTTLMinutes = imageLimits.TTLMinutes
+	result.ExcelBPSEnabled = settings[SettingKeyExcelBPSEnabled] == "true"
 	result.ChannelMonitorEnabled = !isFalseSettingValue(settings[SettingKeyChannelMonitorEnabled])
 	result.ChannelMonitorMode = normalizeChannelMonitorMode(settings[SettingKeyChannelMonitorMode])
 	result.ChannelMonitorDefaultIntervalSeconds = parseChannelMonitorInterval(

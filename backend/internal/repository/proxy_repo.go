@@ -42,6 +42,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
 		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+	if proxyIn.MihomoNodeID != "" {
+		builder.SetMihomoNodeID(proxyIn.MihomoNodeID)
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	}
@@ -156,6 +159,9 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
 		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+	if proxyIn.MihomoNodeID != "" {
+		builder.SetMihomoNodeID(proxyIn.MihomoNodeID)
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -591,6 +597,7 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 	out := &service.Proxy{
 		ID:             m.ID,
 		Name:           m.Name,
+		MihomoNodeID:   valueOrEmpty(m.MihomoNodeID),
 		Protocol:       m.Protocol,
 		Host:           m.Host,
 		Port:           m.Port,
@@ -825,4 +832,15 @@ func (r *proxyRepository) CountExpiringSoon(ctx context.Context, now time.Time) 
 		  AND expires_at > $2 AND expires_at <= $2 + (expiry_warn_days || ' days')::interval`,
 		[]any{service.StatusActive, now}, &c)
 	return c, err
+}
+
+func (r *proxyRepository) GetByMihomoNodeID(ctx context.Context, name string) (*service.Proxy, error) {
+	m, err := r.client.Proxy.Query().Where(proxy.MihomoNodeIDEQ(name)).Only(ctx)
+	if dbent.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return proxyEntityToService(m), nil
 }

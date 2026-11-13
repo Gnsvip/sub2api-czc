@@ -22,6 +22,8 @@ import (
 )
 
 type Account struct {
+	// Request-local routing view; never persisted to account or scheduler caches.
+	excelBPSRoutingDisabled bool
 	ID                      int64
 	Name                    string
 	Notes                   *string
@@ -194,6 +196,9 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	if a.isBPSCredential() && !a.isBPSEnabled() {
+		return false
+	}
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -1409,6 +1414,9 @@ func isCodexOAuthAccount(a *Account) bool {
 // cli-chat-proxy 报 "version (none)" 426)。Codex 保真仅适用 openai(或
 // platform 缺省视为 openai 的 legacy 账号);其余 OAuth 平台一律排除。
 func (a *Account) UsesOpenAICodexProtocol() bool {
+	if a.isBPSCredential() {
+		return false
+	}
 	if a == nil {
 		return false
 	}
@@ -1911,6 +1919,11 @@ func (a *Account) GetOpenAISessionID() string {
 func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
 	if a == nil {
 		return false
+	}
+	if a.isBPSCredential() {
+		// ChatCompletions is also the scheduler's generic text capability.
+		// The actual ingress is checked before forwarding to BPS.
+		return capability == "" || capability == OpenAIEndpointCapabilityChatCompletions || capability == OpenAIEndpointCapabilityResponses
 	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()

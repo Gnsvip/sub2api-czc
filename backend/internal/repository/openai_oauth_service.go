@@ -26,6 +26,9 @@ type openaiOAuthService struct {
 }
 
 func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
+	if strings.TrimSpace(clientID) == openai.ExcelClientID {
+		return s.excelTokenRequest(ctx, proxyURL, url.Values{"grant_type": {"authorization_code"}, "client_id": {clientID}, "code": {code}, "code_verifier": {codeVerifier}, "redirect_uri": {openai.ExcelRedirectURI}})
+	}
 	client, err := createOpenAICodeExchangeClient(proxyURL)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_CLIENT_INIT_FAILED", "create HTTP client: %v", err)
@@ -94,6 +97,9 @@ func (s *openaiOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 }
 
 func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL, clientID string) (*openai.TokenResponse, error) {
+	if clientID == openai.ExcelClientID {
+		return s.excelTokenRequest(ctx, proxyURL, url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "refresh_token": {refreshToken}})
+	}
 	client, err := createOpenAIReqClient(proxyURL)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_CLIENT_INIT_FAILED", "create HTTP client: %v", err)
@@ -185,4 +191,28 @@ func newOpenAINoProxyHintError(cause error) error {
 		"OPENAI_OAUTH_PROXY_REQUIRED",
 		"OpenAI OAuth request failed: no proxy is configured and this server could not reach OpenAI directly. Select a proxy that can access OpenAI, then retry; if the authorization code has expired, regenerate the authorization URL.",
 	).WithCause(cause)
+}
+
+// Excel uses unified form grants, without Codex scope, fingerprint or headers.
+func (s *openaiOAuthService) excelTokenRequest(ctx context.Context, proxyURL string, form url.Values) (*openai.TokenResponse, error) {
+	client, err := getSharedReqClient(reqClientOptions{ProxyURL: proxyURL, Timeout: 120 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse(s.tokenURL)
+	if err != nil {
+		return nil, err
+	}
+	query := endpoint.Query()
+	query.Set("unified", "true")
+	endpoint.RawQuery = query.Encode()
+	var token openai.TokenResponse
+	resp, err := client.R().SetContext(ctx).SetFormDataFromValues(form).SetSuccessResult(&token).Post(endpoint.String())
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_OAUTH_REQUEST_FAILED", "Excel OAuth request failed")
+	}
+	if !resp.IsSuccessState() {
+		return nil, openai.NewRefreshTokenError(resp.StatusCode, resp.Bytes())
+	}
+	return &token, nil
 }

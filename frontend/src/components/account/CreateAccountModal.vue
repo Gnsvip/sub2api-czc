@@ -3755,6 +3755,15 @@
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <BPSAccountSettings v-if="form.platform === 'openai'" v-model="bpsSettings" :groups="groups" />
+      <label v-if="form.platform === 'openai'" class="block">
+        <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
+        <select v-model="openaiOAuthFlow" class="input" :disabled="openaiOAuth.loading.value" data-testid="openai-oauth-flow" @change="openaiOAuth.resetState(); oauthFlowRef?.reset()">
+          <option value="openai">Codex</option>
+          <option value="excel_bps">Excel BPS</option>
+        </select>
+        <p v-if="openaiOAuthFlow === 'excel_bps'" class="mt-1 text-xs text-gray-500">{{ t('admin.accounts.openai.bpsAuthHint') }}</p>
+      </label>
       <OAuthAuthorizationFlow
         ref="oauthFlowRef"
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
@@ -3766,13 +3775,13 @@
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
-        :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
-        :show-mobile-refresh-token-option="form.platform === 'openai'"
+        :show-refresh-token-option="(form.platform === 'openai' && openaiOAuthFlow === 'openai') || form.platform === 'antigravity' || form.platform === 'grok'"
+        :show-mobile-refresh-token-option="form.platform === 'openai' && openaiOAuthFlow === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
-        :show-codex-session-import-option="form.platform === 'openai'"
-        :show-agent-identity-option="form.platform === 'openai'"
-        :show-codex-pat-option="form.platform === 'openai'"
+        :show-codex-session-import-option="form.platform === 'openai' && openaiOAuthFlow === 'openai'"
+        :show-agent-identity-option="form.platform === 'openai' && openaiOAuthFlow === 'openai'"
+        :show-codex-pat-option="form.platform === 'openai' && openaiOAuthFlow === 'openai'"
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
         :show-manual-option="true"
@@ -4105,6 +4114,9 @@
 </template>
 
 <script setup lang="ts">
+import BPSAccountSettings from './BPSAccountSettings.vue'
+import { readBPSSettings, writeBPSSettings } from './bpsSettings'
+
 import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -4329,6 +4341,8 @@ const appStore = useAppStore()
 
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
+const bpsSettings = ref(readBPSSettings())
+const openaiOAuthFlow = ref<'openai' | 'excel_bps'>('openai')
 const openaiOAuth = useOpenAIOAuth() // For OpenAI OAuth
 const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
 const antigravityOAuth = useAntigravityOAuth() // For Antigravity OAuth
@@ -5605,6 +5619,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  openaiOAuthFlow.value = 'openai'
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5778,10 +5793,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.openai_responses_flatten_namespaces
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
-  delete extra.openai_excel_bps
-  delete extra.openai_excel_bps_models
-  delete extra.openai_excel_bps_cache_creation_as_input
-  delete extra.openai_excel_bps_auto_disable_on_403
+  if (form.type === 'oauth') Object.assign(extra, writeBPSSettings(bpsSettings.value))
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
@@ -6239,7 +6251,7 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(form.proxy_id)
+    await openaiOAuth.generateAuthUrl(form.proxy_id, undefined, openaiOAuthFlow.value)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
       form.proxy_id,
@@ -6657,7 +6669,12 @@ const handleOpenAIExchange = async (authCode: string) => {
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
-    const extra = buildOpenAIExtra(oauthExtra)
+    const extra = buildOpenAIExtra(oauthExtra) || {}
+    if (openaiOAuthFlow.value === 'excel_bps') {
+      extra.openai_oauth_responses_websockets_v2_enabled = false
+      extra.openai_oauth_responses_websockets_v2_mode = 'off'
+      extra.openai_astra_probe_enabled = false
+    }
     const shouldCreateOpenAI = form.platform === 'openai'
 
     // OAuth model access is managed by the latest Astra sample.

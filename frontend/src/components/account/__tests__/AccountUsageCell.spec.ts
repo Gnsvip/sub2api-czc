@@ -215,7 +215,10 @@ describe('AccountUsageCell', () => {
   })
 
   it('runs one manual probe while automatic probes are off and ignores a stale result', async () => {
-    const account = makeAccount({ platform: 'openai', type: 'apikey', extra: { openai_astra_probe_enabled: false } })
+    // A stale server-side probing snapshot must not lock the button. The
+    // backend joins a running probe when one still exists.
+    const account = makeAccount({ platform: 'openai', type: 'apikey', extra: { openai_astra_probe_enabled: false },
+      codex_turn_tickets: [{ model: 'gpt-6-astra', tibo_routes: [{ route: 'http', verdict: 'unknown', probes_hour: 1, flips_hour: 0, probing: true }] }] })
     const wrapper = mount(AccountUsageCell, { props: { account } })
     let finish!: (value: Account) => void
     runAstraProbe.mockImplementationOnce(() => new Promise<Account>(resolve => { finish = resolve }))

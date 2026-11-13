@@ -153,6 +153,7 @@ type openAITiboRouteState struct {
 	// on every enrollment, so a lifted rate limit can never leave a probe
 	// stranded days in the future.
 	nextProbeAt time.Time
+	interval    time.Duration
 	// holdUntil defers probes while the account is rate-limited, overloaded
 	// or temporarily unschedulable; parked stops them while it is paused,
 	// disabled or expired (no known end time).
@@ -550,12 +551,13 @@ func (s *OpenAIGatewayService) openAITiboEffective(accountID int64, route openAI
 // active, seeds persisted verdicts, waits (bounded) only for an account whose
 // HTTP route has never been sampled, and queues due probes without blocking.
 func (s *OpenAIGatewayService) openAITiboRequestVerdicts(ctx context.Context, account *Account) openAITiboVerdict {
-	cfg := s.openAITiboRouteConfig()
+	cfg := s.openAITiboConfigForAccount(account)
 	state := s.openAITiboAccountState(account.ID)
 	now := time.Now()
 	state.mu.Lock()
 	state.lastUsedAt = now
 	s.seedOpenAITiboStateLocked(state, account.Extra, now, cfg)
+	s.configureOpenAITiboIntervalLocked(state, account, cfg)
 	var wait <-chan struct{}
 	if skip := openAITiboAccountSkipReason(account, now); skip == "" {
 		if state.http.cold() {

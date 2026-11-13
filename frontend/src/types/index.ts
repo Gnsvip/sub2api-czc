@@ -1283,6 +1283,9 @@ export type TiboRouteVerdict = 'healthy' | 'unknown' | 'degraded' | 'unavailable
 // for routing; `confirmed` is the last confirmed one and may differ from it
 // once the confirmation goes stale.
 export interface TiboRouteStatus {
+  last_sample_at?: string
+  probe_interval_minutes?: number
+  probing?: boolean
   route: TiboRouteName
   verdict: TiboRouteVerdict
   confirmed?: 'healthy' | 'degraded'

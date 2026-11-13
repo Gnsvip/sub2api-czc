@@ -741,7 +741,7 @@ func lockAndMergeAccountProbeExtra(
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
 	// Preserve independently managed state under the row lock. A stale edit
 	// must not erase reset reservations or undo the account's probe switch.
-	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey} {
+	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey} {
 		delete(extra, key)
 		if state, ok := currentExtra[key]; ok {
 			if extra == nil {

@@ -119,6 +119,7 @@ type AdminService interface {
 	// 开启时解除当前限流，让账号立即恢复调度并由上游消耗点数。
 	SetOpenAICreditsEnabled(ctx context.Context, id int64, enabled bool) (*Account, error)
 	SetOpenAIAstraProbeEnabled(ctx context.Context, id int64, enabled bool) (*Account, error)
+	SetOpenAIAstraProbeInterval(ctx context.Context, id int64, minutes int) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。

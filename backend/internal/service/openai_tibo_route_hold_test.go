@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,4 +259,140 @@ func TestTiboAccountHold(t *testing.T) {
 	hold := openAITiboAccountHold(ctx, limited, now)
 	require.False(t, hold.parked)
 	require.Equal(t, overload, hold.until, "the latest active window")
+}
+
+func TestTiboManualProbeWhileAutomaticDisabled(t *testing.T) {
+	for _, kind := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
+		t.Run(kind, func(t *testing.T) {
+			tc := newTiboRouteCase(t, false, false, cookieWSHTTPResponse("True"))
+			repo := mustTestValue[*tiboAccountRepo](t, tc.svc.accountRepo)
+			repo.setAccount(func(a *Account) {
+				a.Type = kind
+				a.Extra[OpenAIAstraProbeEnabledExtraKey] = false
+				a.Extra[OpenAIAstraProbeIntervalExtraKey] = 30
+				a.Credentials["api_key"] = "test-only"
+			})
+			require.NoError(t, tc.svc.RunOpenAIAstraProbe(context.Background(), tc.account.ID))
+			tc.svc.openaiTiboProbeWG.Wait()
+			require.Len(t, tc.upstream.requests, 1)
+			requireTiboProbe(t, tc.upstream.bodies[0])
+			latest, err := repo.GetByID(context.Background(), tc.account.ID)
+			require.NoError(t, err)
+			require.False(t, latest.IsOpenAIAstraProbeEnabled())
+			statuses := tc.svc.openAITiboRouteStatuses(latest, time.Now())
+			require.Len(t, statuses, 1)
+			require.NotNil(t, statuses[0].LastSampleAt)
+			require.Equal(t, 30, statuses[0].ProbeIntervalMinutes)
+			require.False(t, statuses[0].Probing)
+			require.Len(t, statuses[0].RecentSamples, 1)
+			tc.svc.openaiTiboEnrolledAt.Store(0)
+			tc.svc.probeOpenAITiboRoutes(context.Background())
+			tc.svc.openaiTiboProbeWG.Wait()
+			require.Len(t, tc.upstream.requests, 1, "manual probe never enables periodic probes")
+		})
+	}
+}
+
+func TestTiboManualProbeSharesInflightAndSurvivesCallerCancellation(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		t.Run(map[bool]string{false: "automatic", true: "manual"}[manual], func(t *testing.T) {
+			tc := newTiboRouteCase(t, false, false)
+			safe := &tiboSafeUpstream{probeGate: make(chan struct{})}
+			tc.svc.httpUpstream = safe
+			release := sync.OnceFunc(func() { close(safe.probeGate) })
+			defer func() {
+				release()
+				tc.svc.openaiTiboProbeWG.Wait()
+			}()
+			state := tc.svc.openAITiboAccountState(tc.account.ID)
+			state.mu.Lock()
+			done := tc.svc.startOpenAITiboProbeCtxLocked(context.Background(), state, openAITiboRouteHTTP, nil, true, tc.svc.openAITiboRouteConfig(), time.Now(), manual)
+			state.mu.Unlock()
+			require.NotNil(t, done)
+			// The fake repository serves the row even after cancellation. Each
+			// manual waiter must join the same probe and must not cancel it.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			for range 2 {
+				require.ErrorIs(t, tc.svc.RunOpenAIAstraProbe(ctx, tc.account.ID), context.Canceled)
+			}
+			state.mu.Lock()
+			inflight, sharedDone, reservations := state.http.inflight, state.http.done, len(state.http.probes)
+			state.mu.Unlock()
+			require.True(t, inflight)
+			require.Equal(t, done, (<-chan struct{})(sharedDone))
+			require.Equal(t, 1, reservations, "all callers share the same budget reservation")
+			release()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("shared probe did not finish")
+			}
+			safe.mu.Lock()
+			probes := safe.probes
+			safe.mu.Unlock()
+			require.Equal(t, 1, probes)
+		})
+	}
+}
+
+func TestTiboManualProbeHonorsHoldsAndBudget(t *testing.T) {
+	for _, mode := range []string{"disabled", "expired", "quota", "budget"} {
+		t.Run(mode, func(t *testing.T) {
+			tc := newTiboRouteCase(t, false, false)
+			repo := mustTestValue[*tiboAccountRepo](t, tc.svc.accountRepo)
+			repo.setAccount(func(a *Account) {
+				switch mode {
+				case "disabled":
+					a.Status = StatusDisabled
+				case "expired":
+					at := time.Now().Add(-time.Hour)
+					a.AutoPauseOnExpired = true
+					a.ExpiresAt = &at
+				case "quota":
+					at := time.Now().Add(time.Hour)
+					a.RateLimitResetAt = &at
+				}
+			})
+			if mode == "budget" {
+				state := tc.svc.openAITiboAccountState(tc.account.ID)
+				state.mu.Lock()
+				for i := 0; i < tc.svc.openAITiboRouteConfig().maxProbesPerHour; i++ {
+					state.http.probes = append(state.http.probes, time.Now())
+				}
+				state.mu.Unlock()
+			}
+			require.Error(t, tc.svc.RunOpenAIAstraProbe(context.Background(), tc.account.ID))
+			require.Empty(t, tc.upstream.requests)
+		})
+	}
+}
+
+func TestTiboAccountIntervalReschedulesWithoutErasingGuards(t *testing.T) {
+	tc := newTiboRouteCase(t, false, false)
+	now := time.Now()
+	state := tc.svc.openAITiboAccountState(tc.account.ID)
+	tc.account.Extra[OpenAIAstraProbeIntervalExtraKey] = float64(30)
+	cfg := tc.svc.openAITiboConfigForAccount(tc.account)
+	require.Equal(t, 30*time.Minute, cfg.interval)
+	require.Zero(t, cfg.spread)
+	state.http = openAITiboRouteState{interval: 10 * time.Minute, lastSampleAt: now, nextProbeAt: now.Add(10 * time.Minute)}
+	tc.svc.configureOpenAITiboIntervalLocked(state, tc.account, cfg)
+	require.Equal(t, now.Add(30*time.Minute), state.http.nextProbeAt)
+	for _, guard := range []string{"confirmation", "backoff", "inflight"} {
+		state.http = openAITiboRouteState{interval: 10 * time.Minute, lastSampleAt: now, nextProbeAt: now.Add(time.Hour)}
+		switch guard {
+		case "confirmation":
+			state.http.pending = []openAITiboVerdict{openAITiboDegraded}
+		case "backoff":
+			state.http.clientErrorStreak = 2
+		case "inflight":
+			state.http.inflight = true
+		}
+		tc.svc.configureOpenAITiboIntervalLocked(state, tc.account, cfg)
+		require.Equal(t, now.Add(time.Hour), state.http.nextProbeAt, guard)
+	}
+	state.http = openAITiboRouteState{}
+	tc.svc.recordOpenAITiboSample(state, openAITiboRouteHTTP, tc.account, tiboSample(openAITiboHealthy))
+	require.WithinDuration(t, state.http.lastSampleAt.Add(30*time.Minute), state.http.nextProbeAt, time.Second)
 }

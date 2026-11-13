@@ -446,6 +446,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/schedulable", h.Admin.Account.SetSchedulable)
 		accounts.POST("/:id/openai-credits", h.Admin.Account.SetOpenAICreditsEnabled)
 		accounts.PUT("/:id/astra-probe", h.Admin.Account.SetOpenAIAstraProbeEnabled)
+		accounts.PUT("/:id/astra-probe/interval", h.Admin.Account.SetOpenAIAstraProbeInterval)
+		accounts.POST("/:id/astra-probe/run", h.Admin.Account.RunOpenAIAstraProbe)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)
 		accounts.POST("/:id/models/sync-upstream", h.Admin.Account.SyncUpstreamModels)

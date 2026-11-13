@@ -858,6 +858,10 @@ func (s *stubAdminService) RevertAccountProxyFallback(ctx context.Context, id in
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)
 
+func (s *stubAdminService) SetOpenAIAstraProbeInterval(ctx context.Context, id int64, minutes int) (*service.Account, error) {
+	return &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAIAstraProbeIntervalExtraKey: minutes}}, nil
+}
+
 func (*stubAdminService) TestMihomoNode(context.Context, service.MihomoNodeProber, string) (*service.ProxyTestResult, error) {
 	panic("unexpected Mihomo node test")
 }

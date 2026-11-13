@@ -86,6 +86,20 @@ func (s *adminServiceImpl) validateExcelBPS403GroupSettings(ctx context.Context,
 }
 
 func (s *adminServiceImpl) validateExcelBPSGroupPolicy(ctx context.Context, account *Account) error {
+	policy, err := ParseExcelBPSAutoPolicy(account.Extra[ExcelBPSAutoPolicyKey])
+	if err != nil {
+		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", err.Error())
+	}
+	if policy != nil && policy.Enabled {
+		if !QualityBPSEligible(account) {
+			return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "Automatic BPS requires an eligible OAuth account")
+		}
+		candidate := *account
+		candidate.Extra = QualityBPSExtra(policy.BPS)
+		if err := s.validateExcelBPSGroupPolicy(ctx, &candidate); err != nil {
+			return err
+		}
+	}
 	if account.Extra["openai_excel_bps"] == true && strings.EqualFold(strings.TrimSpace(account.GetCredential("plan_type")), "free") {
 		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "Excel BPS is unavailable for free accounts")
 	}

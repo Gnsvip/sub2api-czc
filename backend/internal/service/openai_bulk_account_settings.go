@@ -98,6 +98,12 @@ func stripRemovedOpenAIExcelBPSExtra(extra map[string]any) {
 // A nil model scope removes the key (all models); an empty list selects no models.
 func normalizeBulkExcelBPSExtra(extra map[string]any) (bool, error) {
 	changed := false
+	if raw, exists := extra[ExcelBPSAutoPolicyKey]; exists {
+		changed = true
+		if _, err := ParseExcelBPSAutoPolicy(raw); err != nil {
+			return true, infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", err.Error())
+		}
+	}
 	if _, exists := extra[ExcelBPS403RecoveryIntervalMinutesKey]; exists {
 		changed = true
 		if err := validateExcelBPS403RecoveryExtra(extra); err != nil {

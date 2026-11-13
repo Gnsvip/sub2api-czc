@@ -116,7 +116,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	ctx := context.Background()
 	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
-	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql"} {
+	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql"} {
 		raw, e := os.ReadFile("../../migrations/" + migration)
 		require.NoError(t, e)
 		_, e = db.Exec(string(raw))
@@ -308,6 +308,28 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 		active, e = repo.HasActiveExcelLogins(ctx)
 		require.NoError(t, e)
 		require.False(t, active)
+	})
+
+	t.Run("automatic policy persists without touching credentials or groups", func(t *testing.T) {
+		now := time.Now().Add(-time.Hour)
+		config := map[string]any{service.ExcelBPSAutoPolicyKey: map[string]any{"enabled": true, "auto_restore": true, "bps": map[string]any{"failure_threshold": 1, "pass_threshold": 1, "all_models": true}}, "keep": "value"}
+		raw, e := json.Marshal(config)
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO accounts(id,credentials,extra) VALUES(400,$1,$2::jsonb)`, string(primaryJSON), string(raw))
+		require.NoError(t, e)
+		require.NoError(t, repo.ApplyExcelBPSAutoPolicy(ctx, 400, now))
+		config[service.OpenAIAstraPolicyExtraKey] = map[string]any{"model": "gpt-6-astra", "recent_samples": []map[string]any{{"verdict": "degraded", "at": now.Add(time.Second).Format(time.RFC3339Nano)}}}
+		raw, e = json.Marshal(config)
+		require.NoError(t, e)
+		_, e = db.Exec(`UPDATE accounts SET extra=$1::jsonb WHERE id=400`, string(raw))
+		require.NoError(t, e)
+		require.NoError(t, repo.ApplyExcelBPSAutoPolicy(ctx, 400, now.Add(2*time.Second)))
+		var enabled, pending, token, keep string
+		require.NoError(t, db.QueryRow(`SELECT extra->>'openai_excel_bps',extra->>'openai_excel_bps_authorization_pending',credentials->>'access_token',extra->>'keep' FROM accounts WHERE id=400`).Scan(&enabled, &pending, &token, &keep))
+		require.Equal(t, "true", enabled)
+		require.Equal(t, "true", pending)
+		require.Equal(t, "native-primary", token)
+		require.Equal(t, "value", keep)
 	})
 
 }

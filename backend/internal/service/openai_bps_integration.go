@@ -42,7 +42,7 @@ func (s *OpenAIGatewayService) excelGrants() *OpenAIExcelOAuthService {
 }
 func (a *Account) IsExcelOAuth() bool { return a.isBPSCredential() }
 func QualityBPSEligible(a *Account) bool {
-	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth && !a.IsOpenAIAgentIdentity() && !strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free")
+	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth && !a.IsOpenAIAgentIdentity() && !a.IsOpenAIPersonalAccessToken() && !strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free")
 }
 
 // Explicit admin probes observe BPS availability without mutating account health.

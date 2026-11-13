@@ -1,3 +1,4 @@
+import { readBPSSettings, writeBPSSettings, fromBPSDefaults, bpsDefaultsPayload, initialBPSDefaults } from '../bpsSettings'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -2057,4 +2058,21 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('auto_reset_credit_opt_in_version')
     wrapper.unmount()
   })
+})
+
+it('keeps automatic BPS opt-in and round-trips its independent options', () => {
+ const value=readBPSSettings({})
+ expect(value.enabled).toBe(false)
+ expect(value.autoPolicy?.enabled).toBe(false)
+ value.autoPolicy!.enabled=true
+ value.autoPolicy!.failureThreshold=3
+ value.autoPolicy!.options.sessionProxy=true
+ value.autoPolicy!.options.proxySource='ip_pool'
+ const payload=writeBPSSettings(value)
+ expect(payload.openai_excel_bps).toBe(false)
+ const restored=readBPSSettings(payload)
+ expect(restored.autoPolicy?.failureThreshold).toBe(3)
+ expect(restored.autoPolicy?.options.proxySource).toBe('ip_pool')
+ expect(restored.autoPolicy?.options.sessionProxy).toBe(true)
+ expect(fromBPSDefaults(bpsDefaultsPayload(initialBPSDefaults()))).toEqual(initialBPSDefaults())
 })

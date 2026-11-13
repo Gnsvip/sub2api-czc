@@ -71,3 +71,8 @@ WHERE id = $1 AND deleted_at IS NULL
 	}
 	return true, nil
 }
+
+func excelBPSPendingExtraSQL(expression string) string {
+	extra := "(" + expression + ")"
+	return "CASE WHEN platform='openai' AND type='oauth' AND " + extra + "->'openai_excel_bps'='true'::jsonb AND COALESCE(credentials->>'client_id','')<>'app_fnr0pYvVwwFDocDumLG3H2Bp' AND NOT EXISTS(SELECT 1 FROM openai_excel_oauth_credentials g WHERE g.account_id=accounts.id AND g.credentials_ciphertext<>'') THEN " + extra + "||'{\"openai_excel_bps_authorization_pending\":true}'::jsonb ELSE " + extra + "-'openai_excel_bps_authorization_pending' END"
+}

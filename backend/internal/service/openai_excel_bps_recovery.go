@@ -179,6 +179,18 @@ func (s *OpenAIGatewayService) syncExcelBPS403Recovery(ctx context.Context) {
 	slots := make(chan struct{}, excelBPS403RecoveryConcurrency)
 	for i := range accounts {
 		account := &accounts[i]
+		if account.Extra[ExcelBPSAutoPolicyKey] != nil {
+			if grant := s.excelGrants(); grant != nil {
+				if policyRepo, ok := grant.repo.(ExcelBPSAutoRepository); ok {
+					policyCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+					policyErr := policyRepo.ApplyExcelBPSAutoPolicy(policyCtx, account.ID, time.Now())
+					stop()
+					if policyErr != nil {
+						logger.FromContext(ctx).Warn("excel_bps.auto_policy_failed", zap.Int64("account_id", account.ID))
+					}
+				}
+			}
+		}
 		if !account.ExcelBPS403RecoveryDue(time.Now()) {
 			continue
 		}

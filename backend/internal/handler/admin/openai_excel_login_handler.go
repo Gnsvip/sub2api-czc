@@ -118,3 +118,25 @@ func (h *OpenAIOAuthHandler) ExcelLoginWorkerUpdate(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"ok": true})
 }
+
+func (h *OpenAIOAuthHandler) GetBPSDefaults(c *gin.Context) {
+	defaults, err := h.openaiOAuthService.ExcelBPSDefaults(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, defaults)
+}
+func (h *OpenAIOAuthHandler) SaveBPSDefaults(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
+	var input service.ExcelBPSDefaults
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid BPS defaults")
+		return
+	}
+	if err := h.openaiOAuthService.SaveExcelBPSDefaults(c.Request.Context(), input); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, input)
+}

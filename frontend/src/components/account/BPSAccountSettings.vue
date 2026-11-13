@@ -1,9 +1,14 @@
 <template>
   <fieldset class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
     <legend class="px-1 font-medium">Excel / BPS</legend>
-    <label class="flex items-center gap-2"><input v-model="value.enabled" type="checkbox" data-testid="bps-enabled" />启用 BPS 协议</label>
+    <label v-if="!optionsOnly" class="flex items-center gap-2"><input v-model="value.enabled" type="checkbox" data-testid="bps-enabled" />启用 BPS 协议</label>
     <p class="text-xs text-gray-500">需同时开启系统 BPS 开关；需要账号具备 BPS 授权。保存设置不会替换 OAuth 凭据。</p>
-    <template v-if="value.enabled || recoveryPending">
+    <div v-if="templateControls" class="flex flex-wrap gap-2">
+      <button type="button" class="btn btn-secondary" :disabled="loadingTemplate" @click="applyTemplate">应用已保存模板</button>
+      <button type="button" class="btn btn-secondary" @click="applyInitial">使用初始设置</button>
+    </div>
+    <p v-if="templateError" role="alert" class="text-xs text-red-600">{{ templateError }}</p>
+    <template v-if="value.enabled || recoveryPending || optionsOnly">
       <label class="flex items-center gap-2"><input v-model="value.allModels" type="checkbox" data-testid="bps-all-models" />所有文本模型使用 BPS</label>
       <ModelWhitelistSelector v-if="!value.allModels" v-model="value.models" platform="openai" />
       <p class="text-xs text-gray-500">生图需单独选择 gpt-image-2；取消全选且未选择模型时，不使用 BPS。</p>
@@ -20,12 +25,41 @@
       <label class="flex items-center gap-2"><input v-model="value.ignoreEncrypted" type="checkbox" />用缺失提示替代不支持的加密历史</label>
       <p v-if="value.ignoreEncrypted || value.omitTools" class="text-xs text-amber-600">这些兼容选项会省略不支持的历史内容或工具，默认关闭。</p>
     </template>
+    <div v-if="policyControls && value.autoPolicy" class="space-y-2 border-t pt-3">
+      <label class="flex items-center gap-2"><input v-model="value.autoPolicy.enabled" type="checkbox" />按 Astra 检测 / 用量自动开启 BPS</label>
+      <template v-if="value.autoPolicy.enabled">
+        <p class="text-xs text-gray-500">仅统计保存后的新 Astra 结果，不使用鹈鹕评分；不修改原有自动换组。仍需系统 BPS 开关开启。</p>
+        <label class="block text-sm">连续降智次数（0 为不使用）<input v-model.number="value.autoPolicy.failureThreshold" class="input" type="number" min="0" max="100" /></label>
+        <label class="block text-sm">5h / 7d 已用额度达到百分比（0 为不使用）<input v-model.number="value.autoPolicy.usagePercent" class="input" type="number" min="0" max="100" /></label>
+        <label class="flex items-center gap-2"><input v-model="value.autoPolicy.requireAll" type="checkbox" />两个条件都满足才开启</label>
+        <label class="flex items-center gap-2"><input v-model="value.autoPolicy.autoRestore" type="checkbox" />恢复健康后还原原设置</label>
+        <template v-if="value.autoPolicy.autoRestore">
+          <label class="block text-sm">连续健康次数<input v-model.number="value.autoPolicy.passThreshold" class="input" type="number" min="1" max="100" /></label>
+          <label class="flex items-center gap-2"><input v-model="value.autoPolicy.holdOnUsage" type="checkbox" />额度仍高于阈值时保持 BPS</label>
+        </template>
+        <p class="text-xs text-gray-500">下方是自动开启时使用的设置。手动修改 BPS 或因 403 关闭后，规则不会覆盖；关闭自动规则只停止后续动作。</p>
+        <BPSAccountSettings v-model="value.autoPolicy.options" :groups="groups" :policy-controls="false" :options-only="true" />
+      </template>
+    </div>
   </fieldset>
 </template>
 
 <script setup lang="ts">
 import ModelWhitelistSelector from './ModelWhitelistSelector.vue'
-import type { BPSSettings } from './bpsSettings'
+import { onBeforeUnmount, ref } from 'vue'
+import apiClient from '@/api/client'
+import { extractApiErrorMessage } from '@/utils/apiError'
+import { fromBPSDefaults, initialBPSDefaults, type BPSDefaults, type BPSSettings } from './bpsSettings'
 const value = defineModel<BPSSettings>({ required: true })
-defineProps<{ groups: { id: number; name: string; platform: string }[]; recoveryPending?: boolean }>()
+withDefaults(defineProps<{ groups: { id: number; name: string; platform: string }[]; recoveryPending?: boolean; templateControls?: boolean; policyControls?: boolean; optionsOnly?: boolean }>(), {templateControls:true,policyControls:true,optionsOnly:false})
+const loadingTemplate=ref(false), templateError=ref('')
+let generation=0
+onBeforeUnmount(()=>{generation++})
+function applyInitial(){generation++;loadingTemplate.value=false;templateError.value='';value.value={...initialBPSDefaults(),autoPolicy:value.value.autoPolicy}}
+async function applyTemplate(){
+ const version=++generation;loadingTemplate.value=true;templateError.value=''
+ try {const {data}=await apiClient.get<BPSDefaults>('/admin/openai/bps-defaults');if(version===generation)value.value={...fromBPSDefaults(data),autoPolicy:value.value.autoPolicy}}
+ catch(e){if(version===generation)templateError.value=extractApiErrorMessage(e,'读取模板失败')}
+ finally{if(version===generation)loadingTemplate.value=false}
+}
 </script>

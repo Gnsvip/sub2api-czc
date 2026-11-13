@@ -64,6 +64,12 @@ func bpsModelList(raw any) ([]string, error) {
 }
 
 func validateOpenAIBPSSettings(account *Account) error {
+	if p, err := ParseExcelBPSAutoPolicy(account.Extra[ExcelBPSAutoPolicyKey]); err != nil {
+		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", err.Error())
+	} else if p != nil && p.Enabled && !QualityBPSEligible(account) {
+		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", "Automatic BPS requires an eligible OAuth account")
+	}
+
 	delete(account.Extra, ExcelBPSCredentialStateExtraKey)
 	if raw, exists := account.Extra[OpenAIExcelBPSModelsKey]; exists && raw == nil {
 		delete(account.Extra, OpenAIExcelBPSModelsKey)

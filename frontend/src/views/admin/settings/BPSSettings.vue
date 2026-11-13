@@ -21,8 +21,10 @@
       <p v-if="saved" role="status" class="text-sm text-green-600">{{ text('已保存','Saved') }}</p>
     </template>
   </section>
+  <BPSDefaultsCard />
 </template>
 <script setup lang="ts">
+import BPSDefaultsCard from '@/components/account/BPSDefaultsCard.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'

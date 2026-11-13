@@ -58,7 +58,7 @@ func TestNewExcelBPSRequestHeaders(t *testing.T) {
 
 func bpsUpstreamTestAccount() *Account {
 	return &Account{ID: 300, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 10,
-		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}, Extra: map[string]any{"openai_excel_bps": true, "openai_passthrough": true}}
+		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}, Extra: astraHealthyTestExtra(map[string]any{"openai_excel_bps": true, "openai_passthrough": true})}
 }
 func TestExcelBPSForwardContract(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -263,4 +263,49 @@ func TestExcelBPSAnonymousIdentityIsRequestLocal(t *testing.T) {
 	require.Equal(t, explicit, same)
 	otherKey, _ := resolveExcelBPSIdentity(second, body, 2, true)
 	require.NotEqual(t, explicit, otherKey)
+}
+
+func TestExcelBPSUsagePreservesRequestedEffortBeforeGroupMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name, requested, ceiling, forwarded string
+	}{
+		{"bps caps max", "max", "", "xhigh"},
+		{"group maps max to xhigh", "max", "xhigh", "xhigh"},
+		{"group maps max to high", "max", "high", "high"},
+		{"unchanged high", "high", "", "high"},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				wire := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_bps_effort\",\"status\":\"completed\",\"model\":\"gpt-5.6-sol\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n"
+				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}}
+				svc := excelBPSTestService(upstream)
+				body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"reasoning":{"effort":%q},"input":"test"}`, stream, tc.requested))
+				ctx := WithRequestedReasoningEffort(context.Background(), tc.requested)
+				if tc.ceiling != "" {
+					var changed bool
+					var err error
+					body, changed, err = ApplyOpenAIReasoningEffortPolicy(body, tc.ceiling, nil, "downgrade")
+					require.NoError(t, err)
+					require.True(t, changed)
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body)).WithContext(ctx)
+				account := bpsUpstreamTestAccount()
+				result, err := svc.Forward(ctx, c, account, body)
+				require.NoError(t, err)
+				require.Equal(t, tc.forwarded, gjson.GetBytes(upstream.lastBody, "reasoning_effort").String())
+				require.Equal(t, tc.requested, optionalStringValue(result.RequestedReasoningEffort))
+				require.Equal(t, tc.forwarded, optionalStringValue(result.ReasoningEffort))
+
+				usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+				usageService := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+				require.NoError(t, usageService.RecordUsage(ctx, &OpenAIRecordUsageInput{
+					Result: result, APIKey: &APIKey{ID: 10}, User: &User{ID: 20}, Account: account,
+				}))
+				require.NotNil(t, usageRepo.lastLog)
+				require.Equal(t, tc.requested, optionalStringValue(usageRepo.lastLog.RequestedReasoningEffort))
+				require.Equal(t, tc.forwarded, optionalStringValue(usageRepo.lastLog.ReasoningEffort))
+			})
+		}
+	}
 }

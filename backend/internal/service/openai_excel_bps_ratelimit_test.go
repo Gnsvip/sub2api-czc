@@ -232,7 +232,7 @@ func TestExcelBPS429FailsOverWithoutChangingCodexState(t *testing.T) {
 				svc := excelBPSTestService(upstream)
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
-				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 				svc.rateLimitService.SetSettingService(NewSettingService(&excelBPSQuotaSettingsRepo{cooldown: `{"enabled":true,"cooldown_seconds":11}`}, svc.cfg))
 				svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 				account := bpsUpstreamTestAccount()
@@ -297,7 +297,7 @@ func TestExcelBPSNon429DoesNotChangeQuotaState(t *testing.T) {
 			svc := excelBPSTestService(upstream)
 			repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 			svc.accountRepo = repo
-			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 			svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 			account := bpsUpstreamTestAccount()
 			rec := httptest.NewRecorder()
@@ -337,7 +337,7 @@ func TestExcelBPS429FallbackCooldownFollowsSetting(t *testing.T) {
 			if !tc.noRateLimit {
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
-				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 				svc.rateLimitService.SetSettingService(NewSettingService(&excelBPSQuotaSettingsRepo{cooldown: tc.setting}, svc.cfg))
 			}
 			account := bpsUpstreamTestAccount()
@@ -421,7 +421,7 @@ func TestExcelBPS429AfterOutputCoolsWithoutReplay(t *testing.T) {
 				svc := excelBPSTestService(upstream)
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
-				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 				svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 				account := bpsUpstreamTestAccount()
 				rec := httptest.NewRecorder()

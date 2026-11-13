@@ -855,6 +855,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 					MarkOpsStreamErrorValue(c, OpsStreamError{
 						ErrType: "server_error", Code: "basispoints_protocol_error", Message: bridgeFailure.Message,
 						IntendedStatus: http.StatusBadGateway, CountTowardsSLA: true, NonStream: !stream,
+						UpstreamStatus: resp.StatusCode, BridgeFailure: bridgeFailure,
 					})
 				}
 				if upstreamFailure != nil {

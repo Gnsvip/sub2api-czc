@@ -52,7 +52,6 @@ func TestExcelBPS403RecoveryDue(t *testing.T) {
 		{"paused", func(a *Account) { a.Schedulable = false }, false},
 		{"expired", func(a *Account) { at := now.Add(-time.Minute); a.ExpiresAt = &at; a.AutoPauseOnExpired = true }, false},
 		{"API key", func(a *Account) { a.Type = AccountTypeAPIKey }, false},
-		{"shadow", func(a *Account) { id := int64(1); a.ParentAccountID = &id }, false},
 		{"invalid shutdown", func(a *Account) { a.Extra[ExcelBPS403DisabledAtKey] = "bad" }, false},
 		{"invalid attempt", func(a *Account) { a.Extra[ExcelBPS403LastProbeAtKey] = 123 }, false},
 	} {

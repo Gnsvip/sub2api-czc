@@ -143,7 +143,6 @@ func TestAccount_IsExcelBPSAutoDisableOn403Enabled(t *testing.T) {
 		func(a *Account) { a.Extra["openai_excel_bps"] = false },
 		func(a *Account) { a.Type = AccountTypeAPIKey },
 		func(a *Account) { a.Platform = PlatformAnthropic },
-		func(a *Account) { parent := int64(1); a.ParentAccountID = &parent },
 		func(a *Account) { a.Credentials["auth_mode"] = OpenAIAuthModeAgentIdentity },
 		func(a *Account) { a.Credentials["auth_mode"] = "personal_access_token" },
 	} {

@@ -5,7 +5,7 @@ import "strings"
 // IsExcelBPSEnabled routes an existing ChatGPT OAuth account to the Excel gateway.
 // Credentials and refresh remain on the original account; no sidecar is involved.
 func (a *Account) IsExcelBPSEnabled() bool {
-	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsOpenAIAgentIdentity() {
+	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(a.GetCredential("plan_type")), "free") {

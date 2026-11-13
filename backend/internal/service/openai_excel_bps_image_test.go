@@ -120,7 +120,7 @@ func TestExcelBPS429ImageAndCompactFailOverWithoutCodexState(t *testing.T) {
 				svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSEnabled: "true", SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: "https://images.example"}}, svc.cfg)
 				repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 				svc.accountRepo = repo
-				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+				svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 				svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 				body := []byte(fmt.Sprintf(`{"model":"gpt-6-astra","stream":%t,"input":[{"role":"user","content":[{"type":"input_image","image_url":%q}]}]}`, stream, dataURL))
 				rec := httptest.NewRecorder()

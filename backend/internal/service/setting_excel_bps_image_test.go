@@ -189,13 +189,11 @@ func TestProtocolFeatureSwitchesApplyImmediately(t *testing.T) {
 	settings := NewSettingService(repo, &config.Config{})
 	gateway := &OpenAIGatewayService{settingService: settings}
 
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{ExcelBPSEnabled: true, PrismBrowserEnabled: false}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{ExcelBPSEnabled: true}))
 	require.True(t, gateway.excelBPSGloballyEnabled(ctx))
-	require.False(t, gateway.prismBrowserGloballyEnabled(ctx))
 
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{ExcelBPSEnabled: false, PrismBrowserEnabled: true}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{ExcelBPSEnabled: false}))
 	require.False(t, gateway.excelBPSGloballyEnabled(ctx))
-	require.True(t, gateway.prismBrowserGloballyEnabled(ctx))
 }
 
 func TestExcelBPSImageLimitsHotReload(t *testing.T) {

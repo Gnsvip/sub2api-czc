@@ -151,7 +151,7 @@ func TestExcelBPSNativeUploadFailureStopsWithoutQuotaWrite(t *testing.T) {
 			enableNativeAttachments(svc)
 			repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 			svc.accountRepo = repo
-			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 			svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 			calls := 0
 			closed := &nativeAttachmentBody{Reader: strings.NewReader(tc.body)}

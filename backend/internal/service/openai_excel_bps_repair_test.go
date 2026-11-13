@@ -213,7 +213,7 @@ func TestExcelBPS429CorrectionDoesNotChangeCodexState(t *testing.T) {
 			svc := excelBPSTestService(upstream)
 			repo := &excelBPSQuotaRepo{writes: make(chan excelBPSQuotaWrite, 4)}
 			svc.accountRepo = repo
-			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil)
 			svc.rateLimitService.SetAccountRuntimeBlocker(svc)
 			account := bpsUpstreamTestAccount()
 			body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"input":"test","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, stream))

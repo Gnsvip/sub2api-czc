@@ -1339,6 +1339,30 @@ func (s *adminServiceImpl) AdminEnableAPIKey(ctx context.Context, keyID int64) (
 	return apiKey, nil
 }
 
+// AdminDisableAPIKey disables only the selected key and invalidates its auth cache.
+// The owner, other keys, usage and access restrictions remain unchanged.
+func (s *adminServiceImpl) AdminDisableAPIKey(ctx context.Context, keyID int64) (*APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	switch apiKey.Status {
+	case StatusAPIKeyDisabled, "inactive":
+		return apiKey, nil
+	case StatusAPIKeyActive:
+		apiKey.Status = StatusAPIKeyDisabled
+	default:
+		return nil, infraerrors.BadRequest("API_KEY_NOT_ACTIVE", "only active API keys can be disabled")
+	}
+	if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{Status: true}); err != nil {
+		return nil, fmt.Errorf("disable api key: %w", err)
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	}
+	return apiKey, nil
+}
+
 // AdminUpdateAPIKeyGroupID 管理员修改 API Key 分组绑定
 // groupID: nil=不修改, 指向0=解绑, 指向正整数=绑定到目标分组
 func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error) {

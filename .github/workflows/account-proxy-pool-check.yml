@@ -41,7 +41,7 @@ jobs:
           git diff --binary > "$RUNNER_TEMP/proxy-pool-generated.patch"
       - name: Proxy pool race and persistence regressions
         working-directory: backend
-        run: go test -race -tags=unit ./internal/repository ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestProxyPool|TestAccountProxy|Test.*Pool.*Proxy|Test.*Proxy.*Pool|TestOpenAIWSConnPool|TestNormalizeOpenAIWS|TestScoped|TestExportData|TestImportData)' -count=1 -json > "$RUNNER_TEMP/proxy-pool-tests.jsonl"
+        run: go test -race -tags=unit ./internal/repository ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestProxyPool|TestAccountProxy|Test.*Pool.*Proxy|Test.*Proxy.*Pool|TestOpenAIWSConnPool|TestNormalizeOpenAIWS|TestScoped|TestExportData|TestImportData|TestAccountReadableSnapshot|TestListPluginAccounts|TestProxyUpdate|TestAstraOAuthModelPolicyPersistence|TestGrokCatalogCASRefreshesSingleAccount)' -count=1 -json > "$RUNNER_TEMP/proxy-pool-tests.jsonl"
       - name: Require committed schema and formatting
         run: test ! -s "$RUNNER_TEMP/proxy-pool-generated.patch"
       - uses: actions/upload-artifact@v7

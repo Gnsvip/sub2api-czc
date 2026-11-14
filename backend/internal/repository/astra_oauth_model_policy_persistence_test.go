@@ -81,6 +81,7 @@ func TestAstraOAuthModelPolicyPersistenceMonotonicAndDurable(t *testing.T) {
 				cache = &astraPolicyCacheFailure{fail: sentinel}
 				raw, _ := json.Marshal(updates)
 				mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE .*`).WithArgs(previous.ID).WillReturnRows(updatedAccountRows(previous.ID, string(raw)))
+				mock.ExpectQuery(`(?s)SELECT .* FROM "account_proxies"`).WillReturnRows(sqlmock.NewRows([]string{"account_id", "proxy_id", "position", "created_at"}))
 				mock.ExpectQuery(`(?s)account_groups`).WillReturnRows(sqlmock.NewRows([]string{"account_id", "group_id", "priority", "created_at"}))
 			}
 			repo := newAccountRepositoryWithSQL(client, db, cache)

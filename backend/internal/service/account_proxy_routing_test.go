@@ -185,7 +185,7 @@ func TestProxyPoolRenewalOwnedByReleaseNotQueueContext(t *testing.T) {
 	require.Eventually(t, func() bool { return cache.renewals.Load() > 1 }, time.Second, time.Millisecond)
 	result.ReleaseFunc()
 	count := cache.renewals.Load()
-	require.Consistently(t, func() bool { return cache.renewals.Load() == count }, 10*time.Millisecond, time.Millisecond)
+	require.Never(t, func() bool { return cache.renewals.Load() != count }, 10*time.Millisecond, time.Millisecond)
 	result.ReleaseFunc()
 	require.Equal(t, int64(22), cache.released)
 }

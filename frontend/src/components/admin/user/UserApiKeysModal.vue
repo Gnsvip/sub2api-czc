@@ -29,6 +29,15 @@
               :disabled="updatingKeyIds.has(key.id)"
               @click="enableKey(key)"
             >{{ t('admin.users.enable') }}</button>
+            <button
+              v-else-if="key.status === 'active'"
+              type="button"
+              class="btn btn-danger btn-sm ml-3 shrink-0"
+              data-testid="admin-key-disable"
+              :aria-label="t('admin.users.disableApiKey', { name: key.name })"
+              :disabled="updatingKeyIds.has(key.id)"
+              @click="disableKey(key)"
+            >{{ t('admin.users.disable') }}</button>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div class="flex items-center gap-1">
@@ -231,21 +240,29 @@ const closeGroupSelector = () => {
   dropdownPosition.value = null
 }
 
-const enableKey = async (key: ApiKey) => {
+const enableKey = (key: ApiKey) => updateKeyStatus(key, true)
+
+const disableKey = (key: ApiKey) => {
+  if (key.status !== 'active' || updatingKeyIds.value.has(key.id)) return
+  if (!window.confirm(t('admin.users.disableApiKeyConfirm', { name: key.name }))) return
+  return updateKeyStatus(key, false)
+}
+
+const updateKeyStatus = async (key: ApiKey, enabled: boolean) => {
   if (updatingKeyIds.value.has(key.id)) return
   closeGroupSelector()
   const version = requestVersion
   updatingKeyIds.value.add(key.id)
   try {
-    const updated = await adminAPI.apiKeys.enableApiKey(key.id)
+    const updated = await (enabled ? adminAPI.apiKeys.enableApiKey(key.id) : adminAPI.apiKeys.disableApiKey(key.id))
     if (version !== requestVersion) return
     const idx = apiKeys.value.findIndex((k) => k.id === key.id)
     if (idx !== -1) apiKeys.value[idx] = updated
-    appStore.showSuccess(t('admin.users.apiKeyEnabled'))
+    appStore.showSuccess(t(enabled ? 'admin.users.apiKeyEnabled' : 'admin.users.apiKeyDisabled'))
   } catch (error: unknown) {
     if (version !== requestVersion) return
     const message = error && typeof error === 'object' && 'message' in error ? error.message : undefined
-    appStore.showError(typeof message === 'string' && message ? message : t('admin.users.apiKeyEnableFailed'))
+    appStore.showError(typeof message === 'string' && message ? message : t(enabled ? 'admin.users.apiKeyEnableFailed' : 'admin.users.apiKeyDisableFailed'))
   } finally {
     updatingKeyIds.value.delete(key.id)
   }

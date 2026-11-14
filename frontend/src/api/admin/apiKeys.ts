@@ -36,8 +36,14 @@ export async function enableApiKey(id: number): Promise<ApiKey> {
   return data
 }
 
+export async function disableApiKey(id: number): Promise<ApiKey> {
+  const { data } = await apiClient.post<ApiKey>(`/admin/api-keys/${id}/disable`)
+  return data
+}
+
 export const apiKeysAPI = {
   enableApiKey,
+  disableApiKey,
   updateApiKeyGroup,
   updateApiKey
 }

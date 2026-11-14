@@ -3,19 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UserApiKeysModal from '../UserApiKeysModal.vue'
 import type { AdminUser } from '@/types'
 
-const { getKeys, enableApiKey, showError, showSuccess } = vi.hoisted(() => ({
-  getKeys: vi.fn(), enableApiKey: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(),
+const { getKeys, enableApiKey, disableApiKey, showError, showSuccess } = vi.hoisted(() => ({
+  getKeys: vi.fn(), enableApiKey: vi.fn(), disableApiKey: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(),
 }))
 vi.mock('@/api/admin', () => ({ adminAPI: {
   users: { getUserApiKeys: getKeys }, groups: { getAll: vi.fn().mockResolvedValue([]) },
-  apiKeys: { enableApiKey },
+  apiKeys: { enableApiKey, disableApiKey },
 } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { name: string }) => params?.name ? `${key}:${params.name}` : key }) }))
 enableAutoUnmount(afterEach)
 beforeEach(() => {
-  getKeys.mockReset(); enableApiKey.mockReset(); showError.mockReset(); showSuccess.mockReset()
+  getKeys.mockReset(); enableApiKey.mockReset(); disableApiKey.mockReset(); showError.mockReset(); showSuccess.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => vi.restoreAllMocks())
@@ -147,6 +147,80 @@ describe('admin API key enablement', () => {
     pending.resolve(keys(11, 'old-user-key').items[0]); await flushPromises()
     expect(wrapper.text()).toContain('current-user-key')
     expect(wrapper.text()).not.toContain('old-user-key')
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('admin API key disablement', () => {
+  it('requires confirmation and disables only the selected active key', async () => {
+    const first = keys(11, 'selected-key').items[0]
+    const second = keys(12, 'other-key').items[0]
+    getKeys.mockResolvedValue({ items: [first, second] })
+    disableApiKey.mockResolvedValue({ ...first, status: 'disabled' })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const wrapper = await open(); await flushPromises()
+    const button = wrapper.findAll('[data-testid="admin-key-disable"]')[0]
+    await button.trigger('click'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('admin.users.disableApiKeyConfirm:selected-key')
+    expect(disableApiKey).not.toHaveBeenCalled()
+    expect(wrapper.findAll('[data-testid="admin-key-disable"]')).toHaveLength(2)
+    await button.trigger('click'); await flushPromises()
+    expect(disableApiKey).toHaveBeenCalledTimes(1)
+    expect(disableApiKey).toHaveBeenCalledWith(11)
+    expect(wrapper.findAll('[data-testid="admin-key-disable"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="admin-key-enable"]')).toHaveLength(1)
+    expect(wrapper.props('user')?.status).toBe('active')
+    expect(showSuccess).toHaveBeenCalledWith('admin.users.apiKeyDisabled')
+    enableApiKey.mockResolvedValue(first)
+    await wrapper.get('[data-testid="admin-key-enable"]').trigger('click'); await flushPromises()
+    expect(enableApiKey).toHaveBeenCalledWith(11)
+    expect(wrapper.findAll('[data-testid="admin-key-disable"]')).toHaveLength(2)
+  })
+
+  it('does not offer disablement for inactive, disabled, expired or exhausted keys', async () => {
+    getKeys.mockResolvedValue({ items: ['inactive', 'disabled', 'expired', 'quota_exhausted'].map((status, id) => ({ ...keys(id, status).items[0], status })) })
+    const wrapper = await open(); await flushPromises()
+    expect(wrapper.find('[data-testid="admin-key-disable"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid="admin-key-enable"]')).toHaveLength(2)
+  })
+
+  it('prevents duplicate requests and edits, keeps active on failure, and allows retry', async () => {
+    const first = keys(11, 'selected-key').items[0]
+    getKeys.mockResolvedValue({ items: [first] })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = deferred()
+    disableApiKey.mockReturnValueOnce(pending.promise)
+    const wrapper = await open(); await flushPromises()
+    const button = wrapper.get('[data-testid="admin-key-disable"]')
+    await button.trigger('click')
+    expect((button.element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('[data-testid="admin-key-concurrency"]').element as HTMLInputElement).disabled).toBe(true)
+    await button.trigger('click')
+    expect(disableApiKey).toHaveBeenCalledTimes(1)
+    pending.reject({ message: 'disable failed' } as Error); await flushPromises()
+    expect(showError).toHaveBeenCalledWith('disable failed')
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="admin-key-enable"]').exists()).toBe(false)
+    expect((button.element as HTMLButtonElement).disabled).toBe(false)
+    disableApiKey.mockResolvedValue({ ...first, status: 'disabled' })
+    await button.trigger('click'); await flushPromises()
+    expect(disableApiKey).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="admin-key-disable"]').exists()).toBe(false)
+  })
+
+  it('ignores a late disable response after switching users', async () => {
+    getKeys.mockResolvedValueOnce(keys(11, 'old-user-key')).mockResolvedValueOnce(keys(22, 'current-user-key'))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = deferred()
+    disableApiKey.mockReturnValue(pending.promise)
+    const wrapper = await open(); await flushPromises()
+    await wrapper.get('[data-testid="admin-key-disable"]').trigger('click')
+    await switchUser(wrapper); await flushPromises()
+    pending.resolve({ ...keys(11, 'old-user-key').items[0], status: 'disabled' }); await flushPromises()
+    expect(wrapper.text()).toContain('current-user-key')
+    expect(wrapper.text()).not.toContain('old-user-key')
+    expect(wrapper.find('[data-testid="admin-key-enable"]').exists()).toBe(false)
     expect(showSuccess).not.toHaveBeenCalled()
   })
 })

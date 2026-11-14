@@ -55,6 +55,11 @@ func TestAPIKeyAuthEnabledKeyStillRequiresActiveUser(t *testing.T) {
 				require.Equal(t, http.StatusUnauthorized, request())
 				key.User.Status = service.StatusActive
 				require.Equal(t, http.StatusOK, request())
+				for _, status := range []string{service.StatusAPIKeyDisabled, "inactive"} {
+					key.Status = status
+					svc.InvalidateAuthCacheByKey(context.Background(), key.Key)
+					require.Equal(t, http.StatusUnauthorized, request(), "disabled keys must reject new requests")
+				}
 			})
 		}
 	}

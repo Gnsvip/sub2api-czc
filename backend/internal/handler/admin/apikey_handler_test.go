@@ -23,6 +23,7 @@ func setupAPIKeyHandler(adminSvc service.AdminService) *gin.Engine {
 	router := gin.New()
 	h := NewAdminAPIKeyHandler(adminSvc)
 	router.POST("/api/v1/admin/api-keys/:id/enable", h.Enable)
+	router.POST("/api/v1/admin/api-keys/:id/disable", h.Disable)
 	router.PUT("/api/v1/admin/api-keys/:id", h.UpdateGroup)
 	return router
 }
@@ -58,6 +59,42 @@ func TestAdminAPIKeyHandler_Enable(t *testing.T) {
 				require.Equal(t, service.StatusAPIKeyDisabled, svc.apiKeys[0].Status)
 			}
 			require.Equal(t, service.StatusAPIKeyDisabled, svc.apiKeys[1].Status)
+			require.Equal(t, service.StatusDisabled, svc.users[0].Status)
+		})
+	}
+}
+
+func TestAdminAPIKeyHandler_Disable(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		want int
+	}{
+		{"10", http.StatusOK}, {"999", http.StatusNotFound},
+		{"abc", http.StatusBadRequest}, {"0", http.StatusBadRequest}, {"-1", http.StatusBadRequest},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			svc := newStubAdminService()
+			svc.users[0].Status = service.StatusDisabled
+			svc.apiKeys[0].Status = service.StatusAPIKeyActive
+			svc.apiKeys = append(svc.apiKeys, service.APIKey{ID: 12, UserID: svc.users[0].ID, Status: service.StatusAPIKeyActive})
+			router := setupAPIKeyHandler(svc)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys/"+tc.id+"/disable", nil))
+			require.Equal(t, tc.want, rec.Code)
+			if tc.want == http.StatusOK {
+				var result struct {
+					Data struct {
+						ID     int64  `json:"id"`
+						Status string `json:"status"`
+					} `json:"data"`
+				}
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+				require.Equal(t, int64(10), result.Data.ID)
+				require.Equal(t, service.StatusAPIKeyDisabled, result.Data.Status)
+			} else {
+				require.Equal(t, service.StatusAPIKeyActive, svc.apiKeys[0].Status)
+			}
+			require.Equal(t, service.StatusAPIKeyActive, svc.apiKeys[1].Status)
 			require.Equal(t, service.StatusDisabled, svc.users[0].Status)
 		})
 	}
@@ -109,6 +146,44 @@ func TestAdminAPIKeyHandler_EnableRequiresAdmin(t *testing.T) {
 			require.Equal(t, tc.want, rec.Code, rec.Body.String())
 			if tc.want != http.StatusOK {
 				require.Equal(t, service.StatusAPIKeyDisabled, svc.apiKeys[0].Status)
+			}
+		})
+	}
+}
+
+func TestAdminAPIKeyHandler_DisableRequiresAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	auth := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil)
+	for _, tc := range []struct {
+		name  string
+		role  string
+		token bool
+		want  int
+	}{
+		{"anonymous", service.RoleUser, false, http.StatusUnauthorized},
+		{"user", service.RoleUser, true, http.StatusForbidden},
+		{"admin", service.RoleAdmin, true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user := &service.User{ID: 9, Role: tc.role, Status: service.StatusActive}
+			users := service.NewUserService(&keyEnableAuthUserRepo{user: user}, nil, nil, nil)
+			svc := newStubAdminService()
+			svc.apiKeys[0].Status = service.StatusAPIKeyActive
+			router := gin.New()
+			admin := router.Group("/api/v1/admin", gin.HandlerFunc(middleware.NewAdminAuthMiddleware(auth, users, nil, nil)))
+			admin.POST("/api-keys/:id/disable", NewAdminAPIKeyHandler(svc).Disable)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys/10/disable", nil)
+			if tc.token {
+				token, err := auth.GenerateToken(context.Background(), user)
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			require.Equal(t, tc.want, rec.Code, rec.Body.String())
+			if tc.want != http.StatusOK {
+				require.Equal(t, service.StatusAPIKeyActive, svc.apiKeys[0].Status)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -117,4 +118,48 @@ func TestProxyPoolRejectsStaleLegacyReservation(t *testing.T) {
 	require.NoError(t, validateProxyReservation(current, hydrated))
 	hydrated.Concurrency++
 	require.Error(t, validateProxyReservation(current, hydrated))
+}
+
+func TestProxyPoolAuthorizationKeepsPrimaryAndBusinessRoute(t *testing.T) {
+	original := proxyRoutingAccount()
+	business, err := original.WithProxyRoute(22)
+	require.NoError(t, err)
+	auth, err := business.PrimaryProxyAccount()
+	require.NoError(t, err)
+	require.Equal(t, int64(11), *auth.ProxyID)
+	require.Zero(t, auth.SelectedProxyID)
+	require.Equal(t, int64(22), *business.ProxyID)
+	require.Equal(t, int64(11), *original.ProxyID)
+	business.ProxyIDs = []int64{11, 33}
+	_, err = business.WithProxyRoute(22)
+	require.Error(t, err)
+}
+
+func TestProxyPoolRejectsBPSDoubleRouting(t *testing.T) {
+	account := proxyRoutingAccount()
+	account.Platform, account.Type = PlatformOpenAI, AccountTypeOAuth
+	account.Extra = map[string]any{OpenAIExcelBPSEnabledKey: true}
+	require.ErrorContains(t, validateAccountProxyPoolRouting(account), "cannot be combined")
+	_, err := NewConcurrencyService(&proxyLegacyCache{}).AcquireAccountRoute(context.Background(), &account, 2)
+	require.Error(t, err)
+	delete(account.Extra, OpenAIExcelBPSEnabledKey)
+	require.NoError(t, validateAccountProxyPoolRouting(account))
+}
+
+func TestProxyPoolScopedModeConflicts(t *testing.T) {
+	ids := []int64{11, 22}
+	_, err := NormalizeAccountProxyMode("specified", nil, false, ids)
+	require.NoError(t, err)
+	for _, mode := range []string{"direct", "random", "least_used"} {
+		_, err = NormalizeAccountProxyMode(mode, nil, false, ids)
+		require.Error(t, err)
+	}
+	_, err = NormalizeAccountProxyMode("", nil, true, ids)
+	require.Error(t, err)
+	other := int64(22)
+	_, err = NormalizeAccountProxyMode("", &other, false, ids)
+	require.Error(t, err)
+	permissions, err := scopedAccountFieldPermissions(map[string]json.RawMessage{"proxy_ids": json.RawMessage(`[11,22]`)}, false)
+	require.NoError(t, err)
+	require.Contains(t, permissions, "accounts.network")
 }

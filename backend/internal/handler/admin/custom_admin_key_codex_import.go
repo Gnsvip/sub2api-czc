@@ -21,7 +21,7 @@ type scopedCodexSessionImportRequest struct {
 }
 
 func validateScopedCodexRequest(req scopedCodexSessionImportRequest) error {
-	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, req.RandomProxy); err != nil {
+	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, req.RandomProxy, req.ProxyIDs); err != nil {
 		return err
 	}
 	if req.GroupIDs == nil || (req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk) {
@@ -90,7 +90,7 @@ func (h *AccountHandler) scopedAdminImportCodexSession(c *gin.Context) {
 }
 
 func (h *AccountHandler) importScopedCodexSessions(ctx context.Context, api service.ScopedAdminCodexAccounts, req scopedCodexSessionImportRequest, entries []codexImportEntry) (CodexSessionImportResult, error) {
-	proxyMode, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, req.RandomProxy)
+	proxyMode, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, req.RandomProxy, req.ProxyIDs)
 	if err != nil {
 		return CodexSessionImportResult{}, err
 	}
@@ -145,6 +145,9 @@ func (h *AccountHandler) importScopedCodexSessions(ctx context.Context, api serv
 			if len(req.GroupIDs) > 0 {
 				input.GroupIDs = &req.GroupIDs
 			}
+			if req.ProxyIDs != nil {
+				input.ProxyIDs = &req.ProxyIDs
+			}
 			account, err = api.ScopedAdminUpdateCodex(ctx, existing.ID, input, func(current *service.Account, safe *service.UpdateAccountInput) error {
 				// 锁内重新匹配，不能将候选快照匹配结果应用到已被其他操作换绑的身份。
 				fresh := buildCodexAccountIndex([]service.Account{*current})
@@ -167,7 +170,7 @@ func (h *AccountHandler) importScopedCodexSessions(ctx context.Context, api serv
 			if req.Priority != nil {
 				priority = *req.Priority
 			}
-			account, err = api.ScopedAdminCreateCodex(ctx, &service.CreateAccountInput{ProxyMode: proxyMode, Name: name, Notes: req.Notes, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: credentials, Extra: extra, GroupIDs: req.GroupIDs, ProxyID: req.ProxyID, Concurrency: concurrency, ConcurrencyProvided: req.Concurrency != nil, Priority: priority, RateMultiplier: req.RateMultiplier, LoadFactor: req.LoadFactor, ExpiresAt: expires, AutoPauseOnExpired: autoPause, SkipDefaultGroupBind: true})
+			account, err = api.ScopedAdminCreateCodex(ctx, &service.CreateAccountInput{ProxyIDs: req.ProxyIDs, ProxyMode: proxyMode, Name: name, Notes: req.Notes, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: credentials, Extra: extra, GroupIDs: req.GroupIDs, ProxyID: req.ProxyID, Concurrency: concurrency, ConcurrencyProvided: req.Concurrency != nil, Priority: priority, RateMultiplier: req.RateMultiplier, LoadFactor: req.LoadFactor, ExpiresAt: expires, AutoPauseOnExpired: autoPause, SkipDefaultGroupBind: true})
 		}
 		if err != nil {
 			fail(entry.Index, err)

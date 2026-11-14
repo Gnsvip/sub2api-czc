@@ -39,3 +39,17 @@ func (s *adminServiceImpl) validateAccountProxyIDs(ctx context.Context, ids []in
 	}
 	return out, nil
 }
+
+func validateAccountProxyPoolRouting(a *Account) error {
+	if a == nil || len(a.ProxyIDs) < 2 {
+		return nil
+	}
+	policy, err := ParseExcelBPSAutoPolicy(a.Extra[ExcelBPSAutoPolicyKey])
+	if err != nil {
+		return err
+	}
+	if a.isBPSCredential() || a.Extra[OpenAIExcelBPSEnabledKey] == true || (policy != nil && policy.Enabled) {
+		return infraerrors.BadRequest("PROXY_POOL_BPS_CONFLICT", "Native multi-proxy routing cannot be combined with BPS or automatic BPS on the same account")
+	}
+	return nil
+}

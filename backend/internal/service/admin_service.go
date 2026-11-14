@@ -412,7 +412,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
-	ProxyIDs []int64
+	ProxyIDs    []int64
 	ProxyMode   string // 受限写入在验权后选择代理。
 	Name        string
 	Notes       *string

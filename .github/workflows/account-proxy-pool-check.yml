@@ -41,7 +41,12 @@ jobs:
           git diff --binary > "$RUNNER_TEMP/proxy-pool-generated.patch"
       - name: Proxy pool race and persistence regressions
         working-directory: backend
-        run: go test -race -tags=unit ./internal/repository ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestProxyPool|TestAccountProxy|Test.*Pool.*Proxy|Test.*Proxy.*Pool)' -count=1 -json > "$RUNNER_TEMP/proxy-pool-tests.jsonl"
+        run: go test -race -tags=unit ./internal/repository ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestProxyPool|TestAccountProxy|Test.*Pool.*Proxy|Test.*Proxy.*Pool|TestOpenAIWSConnPool|TestNormalizeOpenAIWS|TestScoped|TestExportData|TestImportData)' -count=1 -json > "$RUNNER_TEMP/proxy-pool-tests.jsonl"
+      - name: Proxy selection database integration
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: go test -tags=integration ./internal/repository -run '^TestAccountProxySelection' -count=1 -json > "$RUNNER_TEMP/proxy-pool-integration.jsonl"
       - name: Require committed schema and formatting
         run: test ! -s "$RUNNER_TEMP/proxy-pool-generated.patch"
       - uses: actions/upload-artifact@v7
@@ -51,4 +56,5 @@ jobs:
           path: |
             ${{ runner.temp }}/proxy-pool-generated.patch
             ${{ runner.temp }}/proxy-pool-tests.jsonl
+            ${{ runner.temp }}/proxy-pool-integration.jsonl
           retention-days: 7

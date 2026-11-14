@@ -31,9 +31,38 @@ func (s *ConcurrencyService) acquireAccountProxyPoolSlot(ctx context.Context, ac
 	if proxyID == 0 {
 		return &AcquireResult{}, nil
 	}
+	stopRenewal := func() {}
+	if renewer, ok := cache.(interface {
+		ProxyPoolRenewInterval() time.Duration
+		RefreshAccountProxyPoolSlot(context.Context, int64, int64, string) error
+	}); ok {
+		// Acquisition may use a short queue-wait context. Only release owns the
+		// stream reservation lifetime, so cancelling that wait cannot free it.
+		stop, done := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(done)
+			ticker := time.NewTicker(renewer.ProxyPoolRenewInterval())
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					renewalCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					err := renewer.RefreshAccountProxyPoolSlot(renewalCtx, accountID, proxyID, requestID)
+					cancel()
+					if err != nil {
+						slog.Warn("proxy slot renewal failed", "account_id", accountID, "proxy_id", proxyID, "error", err)
+					}
+				}
+			}
+		}()
+		stopRenewal = func() { close(stop); <-done }
+	}
 	var once sync.Once
 	return &AcquireResult{Acquired: true, ProxyID: proxyID, ReleaseFunc: func() {
 		once.Do(func() {
+			stopRenewal()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := cache.ReleaseAccountProxyPoolSlot(ctx, accountID, proxyID, requestID); err != nil {
@@ -49,6 +78,9 @@ func (s *ConcurrencyService) acquireAccountProxyPoolSlot(ctx context.Context, ac
 func (a *Account) WithProxyRoute(proxyID int64) (*Account, error) {
 	if proxyID == 0 {
 		return a, nil
+	}
+	if !slices.Contains(a.ProxyIDs, proxyID) {
+		return nil, fmt.Errorf("selected proxy is no longer assigned to account %d", a.ID)
 	}
 	for _, p := range a.Proxies {
 		if p != nil && p.ID == proxyID && p.IsActive() && !p.IsExpired(time.Now()) {
@@ -80,6 +112,9 @@ func (s *ConcurrencyService) AcquireAccountRoute(ctx context.Context, account **
 		return nil, fmt.Errorf("missing account for proxy routing")
 	}
 	a := *account
+	if err := validateAccountProxyPoolRouting(a); err != nil {
+		return nil, err
+	}
 	var result *AcquireResult
 	var err error
 	if len(a.ProxyIDs) > 1 {
@@ -191,4 +226,21 @@ func validateProxyReservation(selected, hydrated *Account) error {
 		return fmt.Errorf("account %d proxy configuration changed during admission", selected.ID)
 	}
 	return nil
+}
+
+// Authorization and token refresh use the first configured proxy. The business
+// request retains its reserved exit and shared account snapshots stay immutable.
+func (a *Account) PrimaryProxyAccount() (*Account, error) {
+	if a == nil || a.SelectedProxyID == 0 {
+		return a, nil
+	}
+	if len(a.ProxyIDs) < 2 {
+		return nil, fmt.Errorf("missing primary proxy configuration")
+	}
+	primary, err := a.WithProxyRoute(a.ProxyIDs[0])
+	if err != nil {
+		return nil, err
+	}
+	primary.SelectedProxyID = 0
+	return primary, nil
 }

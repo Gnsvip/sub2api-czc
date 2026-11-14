@@ -118,3 +118,26 @@ func TestProxyPoolPinnedTurnDoesNotMoveToFreeProxy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(22), id)
 }
+
+func TestProxyPoolLongStreamRenewalDoesNotResurrectReleasedSlot(t *testing.T) {
+	server := miniredis.RunT(t)
+	now := time.Now().Truncate(time.Second)
+	server.SetTime(now)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	ctx := context.Background()
+	_, err := cache.AcquireAccountProxyPoolSlot(ctx, 7, []int64{11, 22}, 1, "stream", 11)
+	require.NoError(t, err)
+	for i := 1; i <= 4; i++ {
+		server.FastForward(10 * time.Minute)
+		server.SetTime(now.Add(time.Duration(i) * 10 * time.Minute))
+		require.NoError(t, cache.RefreshAccountProxyPoolSlot(ctx, 7, 11, "stream"))
+		id, err := cache.AcquireAccountProxyPoolSlot(ctx, 7, []int64{11, 22}, 1, "other", 11)
+		require.NoError(t, err)
+		require.Zero(t, id)
+	}
+	require.NoError(t, cache.ReleaseAccountProxyPoolSlot(ctx, 7, 11, "stream"))
+	require.Error(t, cache.RefreshAccountProxyPoolSlot(ctx, 7, 11, "stream"))
+	require.Zero(t, client.ZCard(ctx, accountProxySlotKey(7, 11)).Val())
+}

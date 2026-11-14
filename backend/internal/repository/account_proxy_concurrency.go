@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -119,4 +120,35 @@ func (c *concurrencyCache) GetAccountProxyConcurrencyBatch(ctx context.Context, 
 		}
 	}
 	return out, nil
+}
+
+var refreshProxyPoolScript = redis.NewScript(`
+local now = tonumber(redis.call('TIME')[1])
+local ttl = tonumber(ARGV[2])
+local score = redis.call('ZSCORE', KEYS[2], ARGV[1])
+if score == false or tonumber(score) <= now-ttl then return 0 end
+redis.call('ZADD', KEYS[1], now, ARGV[1])
+redis.call('ZADD', KEYS[2], now, ARGV[1])
+redis.call('EXPIRE', KEYS[1], ttl)
+redis.call('EXPIRE', KEYS[2], ttl)
+return 1
+`)
+
+func (c *concurrencyCache) ProxyPoolRenewInterval() time.Duration {
+	return max(time.Second, min(30*time.Second, time.Duration(c.slotTTLSeconds)*time.Second/3))
+}
+
+// Refresh only this still-live reservation; never resurrect released/expired work.
+func (c *concurrencyCache) RefreshAccountProxyPoolSlot(ctx context.Context, accountID, proxyID int64, requestID string) error {
+	ok, err := refreshProxyPoolScript.Run(ctx, c.rdb, []string{accountSlotKey(accountID), accountProxySlotKey(accountID, proxyID)}, requestID, c.slotTTLSeconds).Int()
+	if err != nil {
+		return err
+	}
+	if ok == 0 {
+		return fmt.Errorf("proxy slot lease lost")
+	}
+	if now, e := c.rdb.Time(ctx).Result(); e == nil {
+		c.touchActiveIndexAt(ctx, accountActiveIndexKey, accountID, now.Unix()+int64(c.slotTTLSeconds))
+	}
+	return nil
 }

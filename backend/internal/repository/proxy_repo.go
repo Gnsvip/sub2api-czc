@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/accountproxy"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -188,6 +189,17 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		return nil, service.ErrProxyNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	poolIDs, err := client.AccountProxy.Query().Where(accountproxy.ProxyIDEQ(proxyIn.ID)).Select(accountproxy.FieldAccountID).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dependent := make([]int64, 0, len(poolIDs))
+	for _, entry := range poolIDs {
+		dependent = append(dependent, entry.AccountID)
+	}
+	if err := enqueueProxyProbeAccountChanges(ctx, client, dependent); err != nil {
 		return nil, err
 	}
 	if currentIdentity == proxyProbeIdentityFromService(proxyIn) {

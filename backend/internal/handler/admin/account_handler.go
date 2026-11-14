@@ -126,7 +126,7 @@ func NewAccountHandlerWithGoogleServices(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	ProxyIDs []int64 `json:"proxy_ids"`
+	ProxyIDs                []int64        `json:"proxy_ids"`
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai grok kimi zhipu deepseek minimax opencode_go command_code cline gemini antigravity"`
@@ -857,7 +857,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 	if h.concurrencyService != nil {
 		if pools, err := h.concurrencyService.GetProxyPoolUsage(c.Request.Context(), accounts); err == nil {
-			for i := range result { result[i].ProxyPool = pools[result[i].ID] }
+			for i := range result {
+				result[i].ProxyPool = pools[result[i].ID]
+			}
 		}
 	}
 
@@ -1078,7 +1080,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			Credentials:           req.Credentials,
 			Extra:                 req.Extra,
 			ProxyID:               req.ProxyID,
-			ProxyIDs: req.ProxyIDs,
+			ProxyIDs:              req.ProxyIDs,
 			Concurrency:           service.ResolveAccountCreateConcurrency(req.Platform, req.Type, req.Concurrency),
 			ConcurrencyProvided:   req.Concurrency != nil,
 			Priority:              req.Priority,
@@ -2133,7 +2135,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
-				ProxyIDs: item.ProxyIDs,
+				ProxyIDs:              item.ProxyIDs,
 				Concurrency:           service.ResolveAccountCreateConcurrency(item.Platform, item.Type, item.Concurrency),
 				ConcurrencyProvided:   item.Concurrency != nil,
 				Priority:              item.Priority,

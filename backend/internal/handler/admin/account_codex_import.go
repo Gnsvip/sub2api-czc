@@ -335,7 +335,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			Credentials:           credentials,
 			Extra:                 extra,
 			ProxyID:               req.ProxyID,
-			ProxyIDs: req.ProxyIDs,
+			ProxyIDs:              req.ProxyIDs,
 			Concurrency:           concurrency,
 			ConcurrencyProvided:   req.Concurrency != nil,
 			Priority:              priority,

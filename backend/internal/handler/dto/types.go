@@ -229,7 +229,7 @@ type Account struct {
 	OllamaCloudUsage        *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
 	OpenCodeGoUsage         *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
 	CodexTurnTickets        []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
-	ProxyIDs []int64 `json:"proxy_ids,omitempty"`
+	ProxyIDs                []int64                           `json:"proxy_ids,omitempty"`
 	ProxyID                 *int64                            `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64                            `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                           `json:"proxy_fallback_origin_name,omitempty"`

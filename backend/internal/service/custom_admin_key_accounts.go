@@ -43,7 +43,7 @@ func scopedAccountFieldPermissions(fields map[string]json.RawMessage, create boo
 			permission = "accounts.status"
 		case "concurrency", "priority", "load_factor", "expires_at", "auto_pause_on_expired":
 			permission = "accounts.schedule"
-		case "proxy_id", "proxy_mode", "random_proxy":
+		case "proxy_id", "proxy_ids", "proxy_mode", "random_proxy":
 			permission = "accounts.network"
 		case "rate_multiplier":
 			var rate float64
@@ -156,6 +156,7 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 	if id == 0 {
 		var input struct {
 			ProxyID        *int64         `json:"proxy_id"`
+			ProxyIDs       []int64        `json:"proxy_ids"`
 			ProxyMode      string         `json:"proxy_mode"`
 			RandomProxy    bool           `json:"random_proxy"`
 			Name           string         `json:"name"`
@@ -205,11 +206,11 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 				return nil, infraerrors.Forbidden("SCOPED_ACCOUNT_FORBIDDEN", "字段权限不足")
 			}
 		}
-		proxyMode, e := NormalizeAccountProxyMode(input.ProxyMode, input.ProxyID, input.RandomProxy)
+		proxyMode, e := NormalizeAccountProxyMode(input.ProxyMode, input.ProxyID, input.RandomProxy, input.ProxyIDs)
 		if e != nil {
 			return nil, e
 		}
-		return s.scopedAdminCreateTransaction(ctx, &CreateAccountInput{ProxyID: input.ProxyID, ProxyMode: proxyMode, Name: input.Name, Notes: input.Notes, Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra, RateMultiplier: input.RateMultiplier, GroupIDs: input.GroupIDs, Concurrency: input.Concurrency, ConcurrencyProvided: fields["concurrency"] != nil, Priority: input.Priority, LoadFactor: input.LoadFactor, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause, SkipDefaultGroupBind: true})
+		return s.scopedAdminCreateTransaction(ctx, &CreateAccountInput{ProxyIDs: input.ProxyIDs, ProxyID: input.ProxyID, ProxyMode: proxyMode, Name: input.Name, Notes: input.Notes, Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra, RateMultiplier: input.RateMultiplier, GroupIDs: input.GroupIDs, Concurrency: input.Concurrency, ConcurrencyProvided: fields["concurrency"] != nil, Priority: input.Priority, LoadFactor: input.LoadFactor, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause, SkipDefaultGroupBind: true})
 	}
 	result, err := s.scopedAdminTransaction(ctx, id, action == "accounts.delete", func(txctx context.Context) (*Account, error) {
 		a, e := s.accountRepo.GetByID(txctx, id)
@@ -251,6 +252,7 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 		}
 		var input struct {
 			ProxyID        *int64         `json:"proxy_id"`
+			ProxyIDs       *[]int64       `json:"proxy_ids"`
 			ProxyMode      string         `json:"proxy_mode"`
 			RandomProxy    bool           `json:"random_proxy"`
 			Name           string         `json:"name"`
@@ -277,9 +279,12 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 			}
 			input.GroupIDs = &groups
 		}
-		proxyMode, e := NormalizeAccountProxyMode(input.ProxyMode, input.ProxyID, input.RandomProxy)
+		proxyMode, e := NormalizeAccountProxyMode(input.ProxyMode, input.ProxyID, input.RandomProxy, accountProxyIDsValue(input.ProxyIDs))
 		if e != nil {
 			return nil, e
+		}
+		if input.ProxyIDs != nil && len(*input.ProxyIDs) > 0 {
+			input.ProxyID = &(*input.ProxyIDs)[0]
 		}
 		input.ProxyID, e = s.scopedAccountProxySelection(txctx, proxyMode, input.ProxyID)
 		if e != nil {
@@ -294,7 +299,7 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 			maps.Copy(merged, input.Credentials)
 			input.Credentials = merged
 		}
-		updated, e := s.UpdateAccount(txctx, id, &UpdateAccountInput{ProxyID: input.ProxyID, Name: input.Name, Notes: input.Notes, Credentials: input.Credentials, RateMultiplier: input.RateMultiplier, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, Status: input.Status, GroupIDs: input.GroupIDs, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause})
+		updated, e := s.UpdateAccount(txctx, id, &UpdateAccountInput{ProxyIDs: input.ProxyIDs, ProxyID: input.ProxyID, Name: input.Name, Notes: input.Notes, Credentials: input.Credentials, RateMultiplier: input.RateMultiplier, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, Status: input.Status, GroupIDs: input.GroupIDs, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause})
 		if e != nil {
 			return nil, e
 		}
@@ -372,6 +377,12 @@ func (s *adminServiceImpl) scopedAdminCreateTransaction(ctx context.Context, inp
 	defer func() { _ = tx.Rollback() }()
 	txctx := dbent.NewTxContext(ctx, tx)
 	safe := *input
+	if _, err := NormalizeAccountProxyMode(safe.ProxyMode, safe.ProxyID, false, safe.ProxyIDs); err != nil {
+		return nil, err
+	}
+	if len(safe.ProxyIDs) > 0 {
+		safe.ProxyID = &safe.ProxyIDs[0]
+	}
 	safe.ProxyID, err = s.scopedAccountProxySelection(txctx, safe.ProxyMode, safe.ProxyID)
 	if err != nil {
 		return nil, err

@@ -1809,13 +1809,17 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
 	}
-	if account.SelectedProxyID > 0 { return hydrated.WithProxyRoute(account.SelectedProxyID) }
+	if account.SelectedProxyID > 0 {
+		return hydrated.WithProxyRoute(account.SelectedProxyID)
+	}
 	return s.accountForExcelBPSRouting(ctx, hydrated), nil
 }
 
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
-	if err == nil && acquired { err = validateProxyReservation(account, hydrated) }
+	if err == nil && acquired {
+		err = validateProxyReservation(account, hydrated)
+	}
 	if err != nil {
 		return nil, err
 	}

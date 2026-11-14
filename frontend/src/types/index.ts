@@ -1945,7 +1945,18 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+export interface UsageCostDetails {
+  input_cost: number
+  image_input_cost: number
+  output_cost: number
+  image_output_cost: number
+  cache_creation_cost: number
+  cache_read_cost: number
+  total_cost: number
+}
+
 export interface UsageLog {
+  free_fast_cost?: UsageCostDetails | null
   id: number
   user_id: number
   api_key_id: number

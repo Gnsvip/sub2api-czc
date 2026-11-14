@@ -1717,3 +1717,20 @@ func (s *UsageLogRepoSuite) TestCacheWriteTTLAndCustomRoutingRoundTrip() {
 	s.Require().NotNil(saved.RouteDegraded)
 	s.True(*saved.RouteDegraded)
 }
+
+func (s *UsageLogRepoSuite) TestFreeFastCostRoundTrip() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "free-fast@test.com"})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-free-fast", Name: "free-fast"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "free-fast"})
+	for _, snapshot := range []*service.UsageCostDetails{nil, {InputCost: 4, OutputCost: 20, CacheReadCost: 0.2, TotalCost: 24.2}} {
+		row := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
+			Model: "gpt-6.1-sol", TotalCost: 48.4, ActualCost: 6.05, FreeFastCost: snapshot}
+		_, err := s.repo.Create(s.ctx, row)
+		s.Require().NoError(err)
+		stored, err := s.repo.GetByID(s.ctx, row.ID)
+		s.Require().NoError(err)
+		s.Equal(snapshot, stored.FreeFastCost)
+		s.Equal(48.4, stored.TotalCost)
+		s.Equal(6.05, stored.ActualCost)
+	}
+}

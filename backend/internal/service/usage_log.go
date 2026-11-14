@@ -101,13 +101,27 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 	}
 }
 
+// UsageCostDetails snapshots pre-multiplier customer prices for a Free Fast request.
+// Raw Priority costs stay on UsageLog for upstream/account accounting.
+type UsageCostDetails struct {
+	InputCost         float64 `json:"input_cost"`
+	ImageInputCost    float64 `json:"image_input_cost"`
+	OutputCost        float64 `json:"output_cost"`
+	ImageOutputCost   float64 `json:"image_output_cost"`
+	CacheCreationCost float64 `json:"cache_creation_cost"`
+	CacheReadCost     float64 `json:"cache_read_cost"`
+	TotalCost         float64 `json:"total_cost"`
+}
+
 type UsageLog struct {
-	ID        int64
-	UserID    int64
-	APIKeyID  int64
-	AccountID int64
-	RequestID string
-	Model     string
+	// Nil for ordinary Fast and historical rows without a billing snapshot.
+	FreeFastCost *UsageCostDetails
+	ID           int64
+	UserID       int64
+	APIKeyID     int64
+	AccountID    int64
+	RequestID    string
+	Model        string
 	// RequestedModel is the client-requested model name recorded for stable user/admin display.
 	// Empty should be treated as Model for backward compatibility with historical rows.
 	RequestedModel string

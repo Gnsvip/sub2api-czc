@@ -268,6 +268,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 		if standardErr == nil && cost != nil && standardCost != nil {
 			cost.ActualCost = standardCost.ActualCost
+			cost.FreeFastCost = &UsageCostDetails{
+				InputCost: standardCost.InputCost, ImageInputCost: standardCost.ImageInputCost,
+				OutputCost: standardCost.OutputCost, ImageOutputCost: standardCost.ImageOutputCost,
+				CacheCreationCost: standardCost.CacheCreationCost, CacheReadCost: standardCost.CacheReadCost,
+				TotalCost: standardCost.TotalCost,
+			}
 		}
 		return cost, nil
 	}
@@ -420,6 +426,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.CacheReadCost = cost.CacheReadCost
 		usageLog.TotalCost = cost.TotalCost
 		usageLog.ActualCost = cost.ActualCost
+		usageLog.FreeFastCost = cost.FreeFastCost
 		usageLog.LongContextBillingApplied = cost.LongContextBillingApplied
 	}
 	if isVideoUsage && (cost == nil || cost.BillingMode != string(BillingModeToken)) {

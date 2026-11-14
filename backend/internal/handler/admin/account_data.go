@@ -59,6 +59,7 @@ type DataAccount struct {
 	Credentials         map[string]any `json:"credentials"`
 	Extra               map[string]any `json:"extra,omitempty"`
 	ProxyKey            *string        `json:"proxy_key,omitempty"`
+	ProxyKeys           []string       `json:"proxy_keys,omitempty"`
 	Concurrency         int            `json:"concurrency"`
 	Priority            int            `json:"priority"`
 	RateMultiplier      *float64       `json:"rate_multiplier,omitempty"`
@@ -189,6 +190,12 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 				proxyKey = &key
 			}
 		}
+		var proxyKeys []string
+		for _, id := range acc.ProxyIDs {
+			if key, ok := proxyKeyByID[id]; ok {
+				proxyKeys = append(proxyKeys, key)
+			}
+		}
 		var expiresAt *int64
 		if acc.ExpiresAt != nil {
 			v := acc.ExpiresAt.Unix()
@@ -202,6 +209,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Credentials:        acc.Credentials,
 			Extra:              service.RedactOpenAICodexTicketExtra(acc.Extra),
 			ProxyKey:           proxyKey,
+			ProxyKeys:          proxyKeys,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
 			RateMultiplier:     acc.RateMultiplier,
@@ -409,20 +417,11 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			continue
 		}
 
-		var proxyID *int64
-		if item.ProxyKey != nil && *item.ProxyKey != "" {
-			if id, ok := proxyKeyToID[*item.ProxyKey]; ok {
-				proxyID = &id
-			} else {
-				result.AccountFailed++
-				result.Errors = append(result.Errors, DataImportError{
-					Kind:     "account",
-					Name:     item.Name,
-					ProxyKey: *item.ProxyKey,
-					Message:  "proxy_key not found",
-				})
-				continue
-			}
+		proxyID, proxyIDs, proxyErr := resolveImportedAccountProxies(item, proxyKeyToID)
+		if proxyErr != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: proxyErr.Error()})
+			continue
 		}
 
 		enrichCredentialsFromIDToken(&item)
@@ -435,6 +434,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Credentials:          item.Credentials,
 			Extra:                item.Extra,
 			ProxyID:              proxyID,
+			ProxyIDs:             proxyIDs,
 			Concurrency:          item.Concurrency,
 			ConcurrencyProvided:  item.concurrencyProvided,
 			Priority:             item.Priority,
@@ -570,18 +570,20 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 	seen := make(map[int64]struct{})
 	ids := make([]int64, 0)
 	for i := range accounts {
-		if accounts[i].ProxyID == nil {
-			continue
+		pool := append([]int64(nil), accounts[i].ProxyIDs...)
+		if accounts[i].ProxyID != nil {
+			pool = append(pool, *accounts[i].ProxyID)
 		}
-		id := *accounts[i].ProxyID
-		if id <= 0 {
-			continue
+		for _, id := range pool {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil
@@ -779,4 +781,33 @@ func normalizeProxyStatus(status string) string {
 	default:
 		return normalized
 	}
+}
+
+func resolveImportedAccountProxies(item DataAccount, keys map[string]int64) (*int64, []int64, error) {
+	if len(item.ProxyKeys) == 0 {
+		if item.ProxyKey == nil || *item.ProxyKey == "" {
+			return nil, nil, nil
+		}
+		id, ok := keys[*item.ProxyKey]
+		if !ok {
+			return nil, nil, fmt.Errorf("proxy_key not found")
+		}
+		return &id, nil, nil
+	}
+	ids := make([]int64, 0, len(item.ProxyKeys))
+	seen := make(map[int64]bool)
+	for _, key := range item.ProxyKeys {
+		id, ok := keys[key]
+		if !ok || id <= 0 {
+			return nil, nil, fmt.Errorf("proxy_keys contains missing proxy")
+		}
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	if item.ProxyKey != nil && *item.ProxyKey != "" && *item.ProxyKey != item.ProxyKeys[0] {
+		return nil, nil, fmt.Errorf("primary proxy conflicts with proxy_keys order")
+	}
+	return &ids[0], ids, nil
 }

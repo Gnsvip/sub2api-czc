@@ -64,6 +64,9 @@ func bpsModelList(raw any) ([]string, error) {
 }
 
 func validateOpenAIBPSSettings(account *Account) error {
+	if err := validateAccountProxyPoolRouting(account); err != nil {
+		return err
+	}
 	if p, err := ParseExcelBPSAutoPolicy(account.Extra[ExcelBPSAutoPolicyKey]); err != nil {
 		return infraerrors.BadRequest("OPENAI_EXCEL_BPS_INVALID", err.Error())
 	} else if p != nil && p.Enabled && !QualityBPSEligible(account) {

@@ -98,6 +98,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 			failed[account.ID] = struct{}{}
 			continue
 		}
+		account = candidate.Account
 		var credErr error
 		token, _, credErr = h.gatewayService.GetRequestCredential(c.Request.Context(), c, account)
 		if credErr != nil {
@@ -295,6 +296,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			failed[account.ID] = struct{}{}
 			continue
 		}
+		account = selection.Account
 		result, forwardErr := func() (*service.OpenAIForwardResult, error) {
 			defer release()
 			return h.gatewayService.ForwardGrokVoice(c.Request.Context(), c, account, endpoint, body, contentType)

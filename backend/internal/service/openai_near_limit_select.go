@@ -55,7 +55,7 @@ func (s *OpenAIGatewayService) trySelectOpenAINearLimitTarget(
 	for _, cand := range cands {
 		acc := cand.account
 		effective := effectiveOpenAIAccountConcurrency(acc, s.cfg)
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, effective)
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, effective, &acc)
 		if err != nil || result == nil || !result.Acquired {
 			continue
 		}
@@ -192,7 +192,7 @@ func (s *GatewayService) trySelectOpenAINearLimitTarget(
 	sortOpenAINearLimitCandidates(cands)
 	for _, cand := range cands {
 		acc := cand.account
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency, &acc)
 		if err != nil || result == nil || !result.Acquired {
 			continue
 		}

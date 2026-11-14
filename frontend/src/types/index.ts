@@ -1417,6 +1417,7 @@ export interface Account {
     // 额度用尽后是否允许上游消耗点数；缺省为 false（用尽即 429 限流）。
     openai_credits_enabled?: boolean
   } & Record<string, unknown>)
+  proxy_ids?: number[]
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
@@ -1510,6 +1511,7 @@ export interface Account {
   current_rpm?: number | null // 当前分钟 RPM 计数
 
   grok_model_diagnostics?: GrokModelDiagnostics
+  proxy_pool?: Array<{ proxy_id: number; proxy_name: string; current_concurrency: number; max_concurrency: number }>
 }
 
 // The admin account list may return this compact shape when lite=1. Detail
@@ -1736,6 +1738,7 @@ export interface CreateAccountRequest {
   type: AccountType
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
+  proxy_ids?: number[]
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
@@ -1754,6 +1757,7 @@ export interface UpdateAccountRequest {
   type?: AccountType
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
+  proxy_ids?: number[]
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
@@ -1852,6 +1856,7 @@ export interface AdminDataAccount {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_key?: string | null
+  proxy_keys?: string[]
   concurrency: number
   priority: number
   rate_multiplier?: number | null
@@ -1881,6 +1886,7 @@ export interface CodexSessionImportRequest {
   name?: string
   notes?: string | null
   group_ids?: number[]
+  proxy_ids?: number[]
   proxy_id?: number | null
   concurrency?: number
   priority?: number
@@ -1896,6 +1902,7 @@ export interface CodexSessionImportRequest {
 }
 
 export interface OpenAICodexPATCreateRequest {
+  proxy_ids?: number[]
   access_token: string
   name?: string
   notes?: string | null

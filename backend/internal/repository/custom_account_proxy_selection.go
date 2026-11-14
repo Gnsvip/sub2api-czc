@@ -24,6 +24,7 @@ func (r *proxyRepository) SelectAccountProxy(ctx context.Context, mode string) (
 		}
 		query = `WITH bindings AS (
    SELECT a.id AS account_id,a.proxy_id FROM accounts a WHERE a.deleted_at IS NULL AND a.proxy_id IS NOT NULL
+   UNION SELECT a.id,ap.proxy_id FROM accounts a JOIN account_proxies ap ON ap.account_id=a.id WHERE a.deleted_at IS NULL
   ), counts AS (SELECT proxy_id,COUNT(*) AS n FROM bindings GROUP BY proxy_id)
   SELECT p.id FROM proxies p LEFT JOIN counts c ON c.proxy_id=p.id
   WHERE p.deleted_at IS NULL AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at>NOW())

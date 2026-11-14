@@ -211,6 +211,7 @@ func TestGrokCatalogCASRefreshesSingleAccountOutsideTransaction(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE .*`).
 		WithArgs(int64(25)).
 		WillReturnRows(updatedAccountRows(25, `{"unrelated":"keep","grok_observed_models":{"models":["grok-4.7"],"fetched_at":"2026-10-25T02:00:01Z"}}`))
+	mock.ExpectQuery(`(?s)SELECT .* FROM "account_proxies"`).WillReturnRows(sqlmock.NewRows([]string{"account_id", "proxy_id", "position", "created_at"}))
 	mock.ExpectQuery(`(?s)account_groups`).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "group_id", "priority", "created_at"}))
 

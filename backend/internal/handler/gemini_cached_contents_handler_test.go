@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -261,4 +264,42 @@ func TestWriteGeminiCachedContentUpstreamError_RateLimitMappedUnlessUpstreamGate
 	h.writeGeminiCachedContentUpstreamError(c, &service.GeminiCachedContentUpstreamError{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":{"code":400,"message":"Cached content is too small","status":"INVALID_ARGUMENT"}}`)})
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "too small", "请求校验类错误仍原样回写")
+}
+
+// Queue admission must return the reserved exit to the cache creation caller.
+func TestProxyPoolGeminiCachedContentWaitRetainsRoute(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := repository.NewConcurrencyCache(client, 15, 900)
+	helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), "", time.Second)
+	primary := int64(11)
+	original := &service.Account{ID: 7, Platform: service.PlatformGemini, Concurrency: 1,
+		ProxyID: &primary, ProxyIDs: []int64{11, 22},
+		Proxies: []*service.Proxy{{ID: 11, Status: service.StatusActive}, {ID: 22, Status: service.StatusActive}}}
+	h := &GatewayHandler{}
+	var releases []func()
+	for _, expected := range []int64{11, 22} {
+		selection := &service.AccountSelectionResult{Account: original,
+			WaitPlan: &service.AccountWaitPlan{MaxConcurrency: 1, Timeout: time.Second, MaxWaiting: 10}}
+		c, _ := newGeminiCachedContentTestContext(http.MethodPost, "/v1beta/cachedContents", geminiCachedContentTestAPIKey(service.PlatformGemini))
+		release, ok := h.acquireGeminiCachedContentAccountSlot(c, zap.NewNop(), helper, selection)
+		require.True(t, ok)
+		t.Cleanup(release)
+		releases = append(releases, release)
+		require.Equal(t, expected, selection.Account.SelectedProxyID)
+		require.Equal(t, expected, *selection.Account.ProxyID)
+		require.Equal(t, expected, selection.Account.Proxy.ID)
+	}
+	require.Zero(t, original.SelectedProxyID)
+	require.Equal(t, primary, *original.ProxyID)
+	count, err := cache.GetAccountConcurrency(context.Background(), original.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+	for _, release := range releases {
+		release()
+	}
+	count, err = cache.GetAccountConcurrency(context.Background(), original.ID)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }

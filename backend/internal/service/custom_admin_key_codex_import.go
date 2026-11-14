@@ -93,7 +93,7 @@ func (s *adminServiceImpl) ScopedAdminCreateCodex(ctx context.Context, input *Cr
 		return nil, infraerrors.BadRequest("SCOPED_CODEX_INPUT", "导入须明确 OAuth 类型和目标分组，且不能跳过分组风险检查")
 	}
 	permissions, err := scopedCodexPermissions(input.Credentials, input.Extra, input.ProxyID)
-	if input.ProxyMode != "" {
+	if input.ProxyMode != "" || input.ProxyIDs != nil {
 		permissions = append(permissions, "accounts.network")
 	}
 	if err != nil {
@@ -118,7 +118,7 @@ func (s *adminServiceImpl) ScopedAdminCreateCodex(ctx context.Context, input *Cr
 
 func (s *adminServiceImpl) ScopedAdminUpdateCodex(ctx context.Context, id int64, input *UpdateAccountInput, prepare func(*Account, *UpdateAccountInput) error) (*Account, error) {
 	permissions, err := scopedCodexPermissions(input.Credentials, input.Extra, input.ProxyID)
-	if input.ProxyMode != "" {
+	if input.ProxyMode != "" || input.ProxyIDs != nil {
 		permissions = append(permissions, "accounts.network")
 	}
 	if err != nil {
@@ -153,6 +153,12 @@ func (s *adminServiceImpl) ScopedAdminUpdateCodex(ctx context.Context, id int64,
 		safe.RateMultiplier = nil
 		if err := prepare(current, &safe); err != nil {
 			return nil, err
+		}
+		if _, err := NormalizeAccountProxyMode(safe.ProxyMode, safe.ProxyID, false, accountProxyIDsValue(safe.ProxyIDs)); err != nil {
+			return nil, err
+		}
+		if safe.ProxyIDs != nil && len(*safe.ProxyIDs) > 0 {
+			safe.ProxyID = &(*safe.ProxyIDs)[0]
 		}
 		safe.ProxyID, err = s.scopedAccountProxySelection(txctx, safe.ProxyMode, safe.ProxyID)
 		if err != nil {

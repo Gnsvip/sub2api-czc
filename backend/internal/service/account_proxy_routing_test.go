@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,4 +163,29 @@ func TestProxyPoolScopedModeConflicts(t *testing.T) {
 	permissions, err := scopedAccountFieldPermissions(map[string]json.RawMessage{"proxy_ids": json.RawMessage(`[11,22]`)}, false)
 	require.NoError(t, err)
 	require.Contains(t, permissions, "accounts.network")
+}
+
+type renewingRoutingTestCache struct {
+	routingTestCache
+	renewals atomic.Int32
+}
+
+func (c *renewingRoutingTestCache) ProxyPoolRenewInterval() time.Duration { return time.Millisecond }
+func (c *renewingRoutingTestCache) RefreshAccountProxyPoolSlot(context.Context, int64, int64, string) error {
+	c.renewals.Add(1)
+	return nil
+}
+func TestProxyPoolRenewalOwnedByReleaseNotQueueContext(t *testing.T) {
+	cache := &renewingRoutingTestCache{routingTestCache: routingTestCache{proxyLegacyCache: &proxyLegacyCache{}, selected: 22}}
+	a := proxyRoutingAccount()
+	queueCtx, cancel := context.WithCancel(context.Background())
+	result, err := NewConcurrencyService(cache).AcquireAccountRoute(queueCtx, &a, 2)
+	require.NoError(t, err)
+	cancel()
+	require.Eventually(t, func() bool { return cache.renewals.Load() > 1 }, time.Second, time.Millisecond)
+	result.ReleaseFunc()
+	count := cache.renewals.Load()
+	require.Consistently(t, func() bool { return cache.renewals.Load() == count }, 10*time.Millisecond, time.Millisecond)
+	result.ReleaseFunc()
+	require.Equal(t, int64(22), cache.released)
 }

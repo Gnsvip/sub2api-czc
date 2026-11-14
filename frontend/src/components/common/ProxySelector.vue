@@ -219,7 +219,7 @@ const selectedProxy = computed(() => {
 
 const selectedLabel = computed(() => {
   if (props.multiple && Array.isArray(props.modelValue) && props.modelValue.length > 1) {
-    return t('admin.accounts.proxyPoolCount', { count: props.modelValue.length })
+    return `${t('admin.accounts.proxyPoolCount', { count: props.modelValue.length })} · ${selectedProxy.value?.name ?? `#${props.modelValue[0]}`}`
   }
   if (!selectedProxy.value) {
     return t('admin.accounts.noProxy')

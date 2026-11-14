@@ -3,9 +3,15 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -140,4 +146,65 @@ func TestProxyPoolLongStreamRenewalDoesNotResurrectReleasedSlot(t *testing.T) {
 	require.NoError(t, cache.ReleaseAccountProxyPoolSlot(ctx, 7, 11, "stream"))
 	require.Error(t, cache.RefreshAccountProxyPoolSlot(ctx, 7, 11, "stream"))
 	require.Zero(t, client.ZCard(ctx, accountProxySlotKey(7, 11)).Val())
+}
+
+func TestProxyPoolHTTPRequestsUseReservedExits(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	concurrency := service.NewConcurrencyService(NewConcurrencyCache(redisClient, 15, 900))
+	account := &service.Account{ID: 7, Concurrency: 1, ProxyIDs: []int64{11, 22}}
+	for i, id := range account.ProxyIDs {
+		label := fmt.Sprint(id)
+		proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "destination.invalid", r.URL.Host)
+			_, _ = io.WriteString(w, label)
+		}))
+		t.Cleanup(proxyServer.Close)
+		u, err := url.Parse(proxyServer.URL)
+		require.NoError(t, err)
+		port, err := strconv.Atoi(u.Port())
+		require.NoError(t, err)
+		p := &service.Proxy{ID: id, Protocol: "http", Host: u.Hostname(), Port: port, Status: service.StatusActive}
+		account.Proxies = append(account.Proxies, p)
+		if i == 0 {
+			account.ProxyID = &p.ID
+			account.Proxy = p
+		}
+	}
+	upstream := NewHTTPUpstream(nil).(*httpUpstreamService)
+	t.Cleanup(func() {
+		upstream.mu.Lock()
+		defer upstream.mu.Unlock()
+		for _, entry := range upstream.clients {
+			entry.client.CloseIdleConnections()
+		}
+	})
+	// The first request remains in flight while the second reserves another exit.
+	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for _, want := range []string{"11", "22"} {
+		routed := account
+		result, err := concurrency.AcquireAccountRoute(context.Background(), &routed, 1)
+		require.NoError(t, err)
+		require.True(t, result.Acquired)
+		releases = append(releases, result.ReleaseFunc)
+		req, err := http.NewRequestWithContext(service.WithHTTPUpstreamProfile(context.Background(), service.HTTPUpstreamProfileOpenAI), http.MethodGet, "http://destination.invalid/test", nil)
+		require.NoError(t, err)
+		resp, err := upstream.Do(req, routed.Proxy.URL(), routed.ID, routed.Concurrency)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, want, string(body))
+	}
+	routed := account
+	full, err := concurrency.AcquireAccountRoute(context.Background(), &routed, 1)
+	require.NoError(t, err)
+	require.False(t, full.Acquired)
+	require.Zero(t, account.SelectedProxyID)
 }

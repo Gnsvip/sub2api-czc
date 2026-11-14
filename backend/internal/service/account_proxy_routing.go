@@ -237,10 +237,20 @@ func (a *Account) PrimaryProxyAccount() (*Account, error) {
 	if len(a.ProxyIDs) < 2 {
 		return nil, fmt.Errorf("missing primary proxy configuration")
 	}
-	primary, err := a.WithProxyRoute(a.ProxyIDs[0])
-	if err != nil {
-		return nil, err
+	// A cached access token remains usable when the primary exit is disabled.
+	// Refresh retains the existing provider policy and rereads this primary
+	// binding from the database; it must not drift to a business-request exit.
+	primary := *a
+	id := a.ProxyIDs[0]
+	primary.ProxyID, primary.Proxy, primary.SelectedProxyID = &id, nil, 0
+	for _, proxy := range a.Proxies {
+		if proxy != nil && proxy.ID == id {
+			primary.Proxy = proxy
+			break
+		}
 	}
-	primary.SelectedProxyID = 0
-	return primary, nil
+	if primary.Proxy == nil {
+		return nil, fmt.Errorf("primary authorization proxy is unavailable")
+	}
+	return &primary, nil
 }

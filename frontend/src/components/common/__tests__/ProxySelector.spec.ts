@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Proxy } from '@/types'
 import ProxySelector from '../ProxySelector.vue'
 
-vi.mock('@/api/admin', () => ({ default: { proxies: {} } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { proxies: {} } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 const proxies = [
@@ -35,6 +35,7 @@ describe('ProxySelector', () => {
     expect(original).toEqual([11])
     expect(wrapper.find('.select-dropdown').exists()).toBe(true)
     await wrapper.setProps({ modelValue: [11, 22] })
+    expect(wrapper.get('.select-value').text()).toContain('Proxy A')
     await wrapper.findAll('.select-option')[1]!.trigger('click')
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([[22]])
     await wrapper.findAll('.select-option')[0]!.trigger('click')

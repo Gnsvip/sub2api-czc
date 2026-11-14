@@ -1914,7 +1914,8 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="selectedProxyIDs" :proxies="proxies" multiple />
+        <p class="input-hint">{{ t('admin.accounts.proxyPoolHint') }}</p>
       </div>
 
       <UpstreamRequestIdHeaderField
@@ -4612,6 +4613,7 @@ const form = reactive({
   name: '',
   notes: '',
   proxy_id: null as number | null,
+  proxy_ids: [] as number[],
   concurrency: 1,
   load_factor: null as number | null,
   priority: 1,
@@ -4620,6 +4622,15 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+
+const selectedProxyIDs = computed({
+  get: () => form.proxy_ids,
+  set: (ids: number[]) => {
+    form.proxy_ids = ids
+    form.proxy_id = ids[0] ?? null
+  }
+})
+
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
@@ -4721,6 +4732,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
+  form.proxy_ids = newAccount.proxy_ids?.length ? [...newAccount.proxy_ids] : (newAccount.proxy_id ? [newAccount.proxy_id] : [])
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -5766,9 +5778,8 @@ const handleSubmit = async () => {
   const updatePayload: Record<string, unknown> = { ...form }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    if (updatePayload.proxy_id === null) {
-      updatePayload.proxy_id = 0
-    }
+    updatePayload.proxy_id = form.proxy_ids[0] ?? 0
+    updatePayload.proxy_ids = [...form.proxy_ids]
     if (form.expires_at === null) {
       updatePayload.expires_at = 0
     }

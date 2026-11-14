@@ -412,6 +412,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ProxyIDs []int64
 	ProxyMode   string // 受限写入在验权后选择代理。
 	Name        string
 	Notes       *string
@@ -445,6 +446,7 @@ type UpdateAccountInput struct {
 	Credentials           map[string]any
 	Extra                 map[string]any
 	ProxyID               *int64
+	ProxyIDs              *[]int64
 	Concurrency           *int     // 使用指针区分"未提供"和"设置为0"
 	Priority              *int     // 使用指针区分"未提供"和"设置为0"
 	RateMultiplier        *float64 // 账号计费倍率（>=0，允许 0）
@@ -460,6 +462,7 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
+	ProxyIDs       *[]int64
 	AccountIDs     []int64
 	Filters        *BulkUpdateAccountFilters
 	Name           string

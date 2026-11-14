@@ -45,6 +45,7 @@ const messages: Record<string, string> = {
   'usage.perMillionTokens': '/ 1M tokens',
   'usage.serviceTier': 'Service tier',
   'usage.serviceTierPriority': 'Fast',
+  'usage.serviceTierFreeFast': 'Fast (Standard pricing)',
   'usage.serviceTierUltrafast': 'Ultrafast',
   'usage.serviceTierFlex': 'Flex',
   'usage.serviceTierStandard': 'Standard',
@@ -964,5 +965,36 @@ describe('admin UsageTable deleted-user badge', () => {
 
     expect(wrapper.text()).not.toContain('Deleted')
     expect(wrapper.text()).toContain('active@test.com')
+  })
+})
+
+describe('Free Fast customer cost display', () => {
+  it.each([true, false])('shows request-time customer prices with free Fast=%s', async (free) => {
+    const snapshot = { input_cost: 4, image_input_cost: 0, output_cost: 20,
+      image_output_cost: 0, cache_creation_cost: 0.8, cache_read_cost: 0.2, total_cost: 25 }
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', service_tier: 'priority',
+      input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000,
+      input_cost: 8, output_cost: 40, cache_creation_cost: 1.6, cache_read_cost: 0.4, total_cost: 50,
+      actual_cost: free ? 6.25 : 12.5, rate_multiplier: 0.25,
+      free_fast_cost: free ? snapshot : null }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [], showAccountBilling: true },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    try {
+      await wrapper.findAll('.group.relative').at(-1)!.trigger('mouseenter')
+      await nextTick()
+      const detail = wrapper.get('.fixed').text()
+      expect(detail).toContain(free ? 'Fast (Standard pricing)' : 'Fast')
+      expect(detail).toContain(free ? '$4.0000 / 1M tokens' : '$8.0000 / 1M tokens')
+      expect(detail).toContain(free ? '$20.0000 / 1M tokens' : '$40.0000 / 1M tokens')
+      expect(detail).toContain(free ? '$0.20000000' : '$0.40000000')
+      expect(detail).toContain(free ? '$0.80000000' : '$1.60000000')
+      expect(detail).toContain(free ? '$6.25000000' : '$12.50000000')
+      expect(detail).toContain('$50.00000000') // account billing retains Priority cost
+      if (!free) expect(detail).not.toContain('Standard pricing')
+      expect(row.total_cost).toBe(50)
+      expect(row.input_cost).toBe(8)
+    } finally { wrapper.unmount() }
   })
 })

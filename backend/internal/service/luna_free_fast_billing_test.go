@@ -52,6 +52,8 @@ func TestOpenAIGatewayServiceRecordUsage_LunaFreeFastUsesFinalChargeForResponseM
 				require.InDelta(t, tc.wantTotal, logs.lastLog.TotalCost, 1e-12, "retain Priority cost for the selected model")
 				require.InDelta(t, tc.wantPaid, logs.lastLog.ActualCost, 1e-12, "compare Standard charges before selecting the response model")
 				require.InDelta(t, tc.wantPaid, users.lastAmount, 1e-12)
+				require.NotNil(t, logs.lastLog.FreeFastCost)
+				require.InDelta(t, tc.wantPaid/tc.wantRate, logs.lastLog.FreeFastCost.TotalCost, 1e-12)
 				require.Equal(t, tier, *logs.lastLog.ServiceTier)
 			})
 		}

@@ -374,3 +374,19 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 func f64Ptr(value float64) *float64 {
 	return &value
 }
+
+func TestUsageLogFromService_FreeFastCostSnapshot(t *testing.T) {
+	snapshot := &service.UsageCostDetails{InputCost: 4, OutputCost: 20, CacheReadCost: 0.2, TotalCost: 24.2}
+	row := &service.UsageLog{FreeFastCost: snapshot, TotalCost: 48.4, ActualCost: 6.05}
+	for _, mapped := range []*UsageLog{UsageLogFromService(row), &UsageLogFromServiceAdmin(row).UsageLog} {
+		require.Equal(t, snapshot, mapped.FreeFastCost)
+		require.Equal(t, 48.4, mapped.TotalCost)
+		require.Equal(t, 6.05, mapped.ActualCost)
+		encoded, err := json.Marshal(mapped)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"free_fast_cost":{"input_cost":4`)
+	}
+	encoded, err := json.Marshal(UsageLogFromService(&service.UsageLog{}))
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), `"free_fast_cost"`)
+}

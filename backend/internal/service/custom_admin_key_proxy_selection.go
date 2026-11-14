@@ -9,7 +9,21 @@ import (
 )
 
 // NormalizeAccountProxyMode 显式模式与旧 proxy_id/random_proxy 互斥，省略时保留原绑定语义。
-func NormalizeAccountProxyMode(mode string, id *int64, random bool) (string, error) {
+func NormalizeAccountProxyMode(mode string, id *int64, random bool, pools ...[]int64) (string, error) {
+	if len(pools) > 0 && pools[0] != nil {
+		ids := pools[0]
+		if random || (mode != "" && mode != "specified" && !(mode == "direct" && len(ids) == 0)) {
+			return "", infraerrors.BadRequest("PROXY_SELECTION_CONFLICT", "proxy_ids cannot be combined with automatic proxy selection")
+		}
+		first := int64(0)
+		if len(ids) > 0 {
+			first = ids[0]
+		}
+		if id != nil && *id != first {
+			return "", infraerrors.BadRequest("PROXY_SELECTION_CONFLICT", "proxy_id must match the first proxy_ids entry")
+		}
+		id = &first
+	}
 	if id != nil && *id < 0 {
 		return "", infraerrors.BadRequest("PROXY_SELECTION_INVALID", "代理 ID 无效")
 	}
@@ -69,4 +83,14 @@ func (s *adminServiceImpl) scopedAccountProxySelection(ctx context.Context, mode
 		return nil, infraerrors.BadRequest("PROXY_POOL_EMPTY", "没有启用且未过期的代理")
 	}
 	return &selected, nil
+}
+
+func accountProxyIDsValue(ids *[]int64) []int64 {
+	if ids == nil {
+		return nil
+	}
+	if *ids == nil {
+		return []int64{}
+	}
+	return *ids
 }

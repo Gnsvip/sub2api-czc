@@ -183,6 +183,7 @@ type OpenAIRefreshTokenRequest struct {
 }
 
 type OpenAICodexPATCreateRequest struct {
+	ProxyIDs                []int64        `json:"proxy_ids"`
 	AccessToken             string         `json:"access_token" binding:"required"`
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
@@ -317,6 +318,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		State       string  `json:"state" binding:"required"`
 		RedirectURI string  `json:"redirect_uri"`
 		ProxyID     *int64  `json:"proxy_id"`
+		ProxyIDs    []int64 `json:"proxy_ids"`
 		Name        string  `json:"name"`
 		Concurrency *int    `json:"concurrency"`
 		Priority    int     `json:"priority"`
@@ -327,6 +329,9 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		return
 	}
 
+	if len(req.ProxyIDs) > 0 {
+		req.ProxyID = &req.ProxyIDs[0]
+	}
 	// Exchange code for tokens
 	tokenInfo, err := h.openaiOAuthService.ExchangeCode(c.Request.Context(), &service.OpenAIExchangeCodeInput{
 		SessionID:   req.SessionID,
@@ -362,6 +367,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		Credentials:         credentials,
 		Extra:               nil,
 		ProxyID:             req.ProxyID,
+		ProxyIDs:            req.ProxyIDs,
 		Concurrency:         service.ResolveAccountCreateConcurrency(platform, service.AccountTypeOAuth, req.Concurrency),
 		ConcurrencyProvided: req.Concurrency != nil,
 		Priority:            req.Priority,
@@ -458,6 +464,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		Credentials:           credentials,
 		Extra:                 extra,
 		ProxyID:               req.ProxyID,
+		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           concurrency,
 		ConcurrencyProvided:   req.Concurrency != nil,
 		Priority:              priority,

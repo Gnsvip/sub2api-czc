@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -90,6 +91,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	proxyRoute          [32]byte
 	cookieGeneration    string
 	cookieScope         string
 	cookieSlot          int
@@ -1315,7 +1317,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := normalizeOpenAIWSAcquireCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -1755,7 +1757,7 @@ func (p *openAIWSConnPool) recordLastSuccessfulAcquire(accountID int64, generati
 		ap.mu.Unlock()
 		return
 	}
-	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	key := normalizeOpenAIWSAcquireCompatibility(req)
 	if cookieGeneration := key.cookieGeneration; cookieGeneration != "" && (key.cookieProbe || cookieGeneration != ap.cookieGenerations[key.cookieSlot]) {
 		if _, retired := ap.retiredCookieGenerations[cookieGeneration]; !retired {
 			ap.candidateAcquires[key.cookieSlot] = cloneOpenAIWSAcquireRequestPtr(&req)
@@ -2241,7 +2243,7 @@ func (p *openAIWSConnPool) ensureTargetIdleAsync(accountID int64) {
 		return
 	}
 	req = cloneOpenAIWSAcquireRequest(*ap.lastAcquire)
-	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	key := normalizeOpenAIWSAcquireCompatibility(req)
 	if key.cookieGeneration != "" {
 		if key.cookieProbe || key.cookieGeneration != ap.cookieGenerations[key.cookieSlot] {
 			return
@@ -2312,7 +2314,7 @@ func (p *openAIWSConnPool) targetConnCountLocked(ap *openAIWSAccountPool, maxCon
 }
 
 func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequest, total int, generations ...uint64) {
-	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	key := normalizeOpenAIWSAcquireCompatibility(req)
 	if key.cookieGeneration != "" {
 		if ap, ok := p.getAccountPool(accountID); ok && ap != nil {
 			ap.mu.Lock()
@@ -2665,7 +2667,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = normalizeOpenAIWSAcquireCompatibility(req)
 	pooledConn.cookieScope = pooledConn.handshakeCompatibility.cookieScope
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	pooledConn.cookieExpiresAt = cookieExpiry
@@ -2750,7 +2752,7 @@ func (p *openAIWSConnPool) effectiveMaxConnsByAccount(account *Account) int {
 	if factor <= 0 {
 		factor = 1.0
 	}
-	effective := int(math.Ceil(float64(account.Concurrency) * factor))
+	effective := int(math.Ceil(float64(account.TotalConcurrency()) * factor))
 	if effective < 1 {
 		effective = 1
 	}
@@ -2848,7 +2850,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
+		normalizeOpenAIWSAcquireCompatibility(a) == normalizeOpenAIWSAcquireCompatibility(b)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
@@ -3001,4 +3003,14 @@ func closeOpenAIWSConns(conns []*openAIWSConn) {
 
 func stringsTrim(value string) string {
 	return strings.TrimSpace(value)
+}
+
+// The pool is account-scoped; socket reuse must additionally match its actual
+// outbound route. Hashing avoids retaining proxy credentials in diagnostic keys.
+func normalizeOpenAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	if route := strings.TrimSpace(req.ProxyURL); route != "" {
+		key.proxyRoute = sha256.Sum256([]byte(route))
+	}
+	return key
 }

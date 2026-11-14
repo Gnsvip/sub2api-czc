@@ -126,6 +126,7 @@ func NewAccountHandlerWithGoogleServices(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
+	ProxyIDs                []int64        `json:"proxy_ids"`
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required,oneof=anthropic openai grok kimi zhipu deepseek minimax opencode_go command_code cline gemini antigravity"`
@@ -153,6 +154,7 @@ type UpdateAccountRequest struct {
 	Credentials             map[string]any `json:"credentials"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`
+	ProxyIDs                *[]int64       `json:"proxy_ids"`
 	Concurrency             *int           `json:"concurrency"`
 	Priority                *int           `json:"priority"`
 	RateMultiplier          *float64       `json:"rate_multiplier"`
@@ -171,6 +173,7 @@ type BulkUpdateAccountsRequest struct {
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
 	Name                    string                    `json:"name"`
+	ProxyIDs                *[]int64                  `json:"proxy_ids"`
 	ProxyID                 *int64                    `json:"proxy_id"`
 	Concurrency             *int                      `json:"concurrency"`
 	Priority                *int                      `json:"priority"`
@@ -206,6 +209,7 @@ type AccountWithConcurrency struct {
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
+	ProxyPool          []service.ProxyPoolUsage     `json:"proxy_pool,omitempty"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
@@ -220,6 +224,7 @@ type AccountWithConcurrency struct {
 type AccountListItemWithConcurrency struct {
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
+	ProxyPool          []service.ProxyPoolUsage     `json:"proxy_pool,omitempty"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
@@ -398,6 +403,11 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
+	if h.concurrencyService != nil {
+		if pools, err := h.concurrencyService.GetProxyPoolUsage(ctx, []service.Account{*account}); err == nil {
+			item.ProxyPool = pools[account.ID]
+		}
+	}
 	if account.IsAnthropicOAuthOrSetupToken() {
 		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
 			startTime := account.GetCurrentWindowStartTime()
@@ -845,6 +855,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		result[i] = item
 	}
+	if h.concurrencyService != nil {
+		if pools, err := h.concurrencyService.GetProxyPoolUsage(c.Request.Context(), accounts); err == nil {
+			for i := range result {
+				result[i].ProxyPool = pools[result[i].ID]
+			}
+		}
+	}
 
 	if lite {
 		compact := make([]AccountListItemWithConcurrency, len(result))
@@ -853,6 +870,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			compact[i] = AccountListItemWithConcurrency{
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
 				CurrentConcurrency: item.CurrentConcurrency,
+				ProxyPool:          item.ProxyPool,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,
 				CurrentWindowCost:  item.CurrentWindowCost,
@@ -1062,6 +1080,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			Credentials:           req.Credentials,
 			Extra:                 req.Extra,
 			ProxyID:               req.ProxyID,
+			ProxyIDs:              req.ProxyIDs,
 			Concurrency:           service.ResolveAccountCreateConcurrency(req.Platform, req.Type, req.Concurrency),
 			ConcurrencyProvided:   req.Concurrency != nil,
 			Priority:              req.Priority,
@@ -1194,6 +1213,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		ProxyID:               req.ProxyID,
+		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供
 		Priority:              req.Priority,    // 指针类型，nil 表示未提供
 		RateMultiplier:        req.RateMultiplier,
@@ -2115,6 +2135,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
+				ProxyIDs:              item.ProxyIDs,
 				Concurrency:           service.ResolveAccountCreateConcurrency(item.Platform, item.Type, item.Concurrency),
 				ConcurrencyProvided:   item.Concurrency != nil,
 				Priority:              item.Priority,
@@ -2308,7 +2329,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	hasUpdates := req.Name != "" ||
-		req.ProxyID != nil ||
+		req.ProxyID != nil || req.ProxyIDs != nil ||
 		req.Concurrency != nil ||
 		req.Priority != nil ||
 		req.RateMultiplier != nil ||
@@ -2330,6 +2351,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
 		ProxyID:               req.ProxyID,
+		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           req.Concurrency,
 		Priority:              req.Priority,
 		RateMultiplier:        req.RateMultiplier,

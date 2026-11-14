@@ -196,6 +196,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		if !ok {
 			return
 		}
+		account = selection.Account
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
 		if vetoed {
@@ -638,7 +639,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 		return nil, false
 	}
 	streamStarted := false
-	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted)
+	release, acquireErr := helper.AcquireAccountSlotWithWaitTimeout(c, account.ID, selection.WaitPlan.MaxConcurrency, selection.WaitPlan.Timeout, false, &streamStarted, &account)
 	if err == nil {
 		helper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 	}
@@ -647,6 +648,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 		googleConcurrencyError(c, acquireErr, "account")
 		return nil, false
 	}
+	selection.Account = account
 	if release == nil {
 		release = func() {}
 	}

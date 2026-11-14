@@ -296,3 +296,31 @@ func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 	require.Contains(t, extra, "codex_turn_ticket:gpt-6-astra")
 	require.Contains(t, extra, "codex_harvest_proxy_url")
 }
+
+func TestProxyPoolExportImportPreservesOrderAndRejectsMissingMember(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	first := int64(22)
+	adminSvc.proxies = []service.Proxy{
+		{ID: 11, Name: "one", Protocol: "http", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive},
+		{ID: 22, Name: "two", Protocol: "http", Host: "127.0.0.1", Port: 8082, Status: service.StatusActive},
+	}
+	adminSvc.accounts = []service.Account{{ID: 7, Name: "pooled", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{}, ProxyID: &first, ProxyIDs: []int64{22, 11}}}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data DataPayload `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Data.Proxies, 2)
+	require.Len(t, response.Data.Accounts, 1)
+	account := response.Data.Accounts[0]
+	require.Len(t, account.ProxyKeys, 2)
+	require.Equal(t, *account.ProxyKey, account.ProxyKeys[0])
+	primary, ids, err := resolveImportedAccountProxies(account, map[string]int64{account.ProxyKeys[0]: 122, account.ProxyKeys[1]: 111})
+	require.NoError(t, err)
+	require.Equal(t, int64(122), *primary)
+	require.Equal(t, []int64{122, 111}, ids)
+	_, _, err = resolveImportedAccountProxies(account, map[string]int64{account.ProxyKeys[0]: 122})
+	require.Error(t, err)
+}

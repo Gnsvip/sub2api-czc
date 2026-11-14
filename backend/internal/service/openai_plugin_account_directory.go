@@ -83,8 +83,11 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 
 // accountReadableSnapshotJSON marshals the account's readable field set to JSON.
 // It is a DENYLIST on purpose: any non-secret field added to the account model
-// later flows through automatically with no host change. Only two categories are
+// later flows through automatically with no host change. Sensitive fields and cyclic relations are
 // stripped:
+//
+//   - Proxies: includes credentials for every pool member. Plugins may receive
+//     only the already-authorized primary Proxy, never all additional exits.
 //
 //   - Credentials: holds the refresh_token (and possibly api_key), a long-lived
 //     credential that ResolveOutboundIdentity does NOT hand out (that channel only
@@ -92,6 +95,7 @@ func accountToPluginInfo(account *Account) PluginAccountInfo {
 //     credential surface exactly what the outbound-identity channel already
 //     exposes. (Extra and the proxy — including its password, which is already
 //     handed out via the resolved ProxyURL — are intentionally NOT stripped.)
+//
 //   - Groups / AccountGroups: relational graphs with *Group/*Account
 //     back-references. encoding/json does NOT detect reference cycles and would
 //     recurse into a stack-overflow panic if the reverse relation is ever
@@ -105,6 +109,9 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
+	clone.Proxies = nil
+	clone.ProxyPoolChanged = false
+	clone.SelectedProxyID = 0
 	clone.Groups = nil
 	clone.AccountGroups = nil
 	data, err := json.Marshal(&clone)

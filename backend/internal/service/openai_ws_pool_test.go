@@ -2644,3 +2644,41 @@ func TestOpenAIWSConnPool_SnapshotTransportMetrics(t *testing.T) {
 	require.Equal(t, int64(2), snapshot.ProxyClientCacheMisses)
 	require.InDelta(t, 1.0/3.0, snapshot.TransportReuseRatio, 0.0001)
 }
+
+func TestProxyPoolWebSocketReuseIsolatedByExit(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 8
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 8
+	pool := newOpenAIWSConnPool(cfg)
+	t.Cleanup(pool.Close)
+	pool.setClientDialerForTest(&openAIWSFakeDialer{})
+	a := proxyRoutingAccount()
+	a.Platform, a.Type = PlatformOpenAI, AccountTypeOAuth
+	first := openAIWSAcquireRequest{Account: a, WSURL: "wss://example.com/v1/responses", ProxyURL: "http://one.invalid:8080"}
+	lease1, err := pool.Acquire(context.Background(), first)
+	require.NoError(t, err)
+	id1 := lease1.conn.id
+	lease1.Release()
+	second := first
+	second.ProxyURL = "http://two.invalid:8080"
+	lease2, err := pool.Acquire(context.Background(), second)
+	require.NoError(t, err)
+	require.NotEqual(t, id1, lease2.conn.id)
+	lease2.Release()
+	again, err := pool.Acquire(context.Background(), first)
+	require.NoError(t, err)
+	require.Equal(t, id1, again.conn.id)
+	again.Release()
+	// Preferred continuations and unassigned cookie warmups also compare exit.
+	key := normalizeOpenAIWSAcquireCompatibility(first)
+	conn := newOpenAIWSConn("warmup", a.ID, &openAIWSFakeConn{}, nil)
+	conn.handshakeCompatibility = key
+	require.False(t, conn.matchesPreferredHandshakeCompatibility(normalizeOpenAIWSAcquireCompatibility(second)))
+	conn.cookieUnassigned = true
+	conn.cookieVerified.Store(true)
+	ap := &openAIWSAccountPool{conns: map[string]*openAIWSConn{"warmup": conn}}
+	require.Nil(t, pool.adoptCookieWarmupConnLocked(ap, normalizeOpenAIWSAcquireCompatibility(second)))
+	adopted := pool.adoptCookieWarmupConnLocked(ap, key)
+	require.Same(t, conn, adopted)
+	adopted.release()
+}

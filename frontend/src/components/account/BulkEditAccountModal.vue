@@ -722,7 +722,8 @@
         </div>
         <div id="bulk-edit-proxy-body" :class="!enableProxy && 'pointer-events-none opacity-50'">
           <ProxySelector
-            v-model="proxyId"
+            v-model="proxyIds"
+            multiple
             :proxies="proxies"
             aria-labelledby="bulk-edit-proxy-label"
           />
@@ -1778,7 +1779,7 @@ const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
-const proxyId = ref<number | null>(null)
+const proxyIds = ref<number[]>([])
 const concurrency = ref(1)
 const loadFactor = ref<number | null>(null)
 const priority = ref(1)
@@ -2037,7 +2038,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
+    updates.proxy_id = proxyIds.value[0] ?? 0
+    updates.proxy_ids = [...proxyIds.value]
   }
 
   if (enableConcurrency.value) {
@@ -2488,7 +2490,7 @@ watch(
       interceptWarmupRequests.value = false
       headerOverrideEnabled.value = false
       headerOverrideRows.value = []
-      proxyId.value = null
+      proxyIds.value = []
       concurrency.value = 1
       loadFactor.value = null
       priority.value = 1

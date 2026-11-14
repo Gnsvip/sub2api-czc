@@ -53,6 +53,11 @@ func (p *ClaudeTokenProvider) SetRefreshPolicy(policy ProviderRefreshPolicy) {
 
 // GetAccessToken returns a valid access_token.
 func (p *ClaudeTokenProvider) GetAccessToken(ctx context.Context, account *Account) (string, error) {
+	var routeErr error
+	account, routeErr = account.PrimaryProxyAccount()
+	if routeErr != nil {
+		return "", routeErr
+	}
 	if account == nil {
 		return "", errors.New("account is nil")
 	}

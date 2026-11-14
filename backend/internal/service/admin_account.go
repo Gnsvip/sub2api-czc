@@ -300,6 +300,7 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		Credentials:           credentials,
 		Extra:                 extra,
 		ProxyID:               cloneAccountValuePointer(proxyID),
+		ProxyIDs:              append([]int64(nil), source.ProxyIDs...),
 		Concurrency:           source.Concurrency,
 		ConcurrencyProvided:   true,
 		Priority:              source.Priority,
@@ -441,6 +442,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Credentials: input.Credentials,
 		Extra:       accountExtra,
 		ProxyID:     input.ProxyID,
+		ProxyIDs:    multiProxyIDs(input.ProxyIDs),
 		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
 		Priority:    input.Priority,
 		Status:      StatusActive,
@@ -492,6 +494,17 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if input.ProxyIDs != nil {
+		ids, err := s.validateAccountProxyIDs(ctx, input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		input.ProxyIDs = ids
+		input.ProxyID = nil
+		if len(ids) > 0 {
+			input.ProxyID = &ids[0]
+		}
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -774,6 +787,22 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if requestedRateSyncEnabledUpdate != nil {
 		account.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *requestedRateSyncEnabledUpdate
 	}
+	if input.ProxyIDs != nil {
+		ids, err := s.validateAccountProxyIDs(ctx, *input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		account.ProxyIDs = multiProxyIDs(ids)
+		account.ProxyPoolChanged = true
+		primary := int64(0)
+		if len(ids) > 0 {
+			primary = ids[0]
+		}
+		input.ProxyID = &primary
+	} else if input.ProxyID != nil {
+		account.ProxyIDs = nil
+		account.ProxyPoolChanged = true
+	}
 	if input.ProxyID != nil {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
 		if *input.ProxyID == 0 {
@@ -782,6 +811,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	if err := validateAccountProxyPoolRouting(account); err != nil {
+		return nil, err
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
@@ -995,6 +1027,18 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if input.ProxyIDs != nil {
+		ids, err := s.validateAccountProxyIDs(ctx, *input.ProxyIDs)
+		if err != nil {
+			return nil, err
+		}
+		input.ProxyIDs = &ids
+		first := int64(0)
+		if len(ids) > 0 {
+			first = ids[0]
+		}
+		input.ProxyID = &first
+	}
 	delete(input.Extra, ExcelBPSCredentialStateExtraKey)
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
@@ -1066,15 +1110,23 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 
-	if openAISettings.bps {
+	if openAISettings.bps || input.ProxyIDs != nil {
 		for _, original := range targetsByID {
 			candidate := *original
+			if input.ProxyIDs != nil {
+				candidate.ProxyIDs = multiProxyIDs(*input.ProxyIDs)
+			} else if input.ProxyID != nil {
+				candidate.ProxyIDs = nil
+			}
 			candidate.Extra = make(map[string]any, len(original.Extra)+len(input.Extra))
 			for k, v := range original.Extra {
 				candidate.Extra[k] = v
 			}
 			for k, v := range input.Extra {
 				candidate.Extra[k] = v
+			}
+			if err := validateAccountProxyPoolRouting(&candidate); err != nil {
+				return nil, err
 			}
 			if err := s.validateExcelBPSGroupPolicy(ctx, &candidate); err != nil {
 				return nil, err
@@ -1152,6 +1204,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
+		ProxyIDs:                   input.ProxyIDs,
 		Credentials:                input.Credentials,
 		Extra:                      input.Extra,
 		ProbeEnabled:               input.ProbeEnabled,

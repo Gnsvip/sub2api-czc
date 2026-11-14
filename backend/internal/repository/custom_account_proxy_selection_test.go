@@ -23,6 +23,7 @@ func TestAccountProxySelectionLargePoolAndTransactionalLeastUsed(t *testing.T) {
  expires_at TIMESTAMPTZ,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW(),
  fallback_mode TEXT DEFAULT 'none',backup_proxy_id BIGINT,expiry_warn_days INT DEFAULT 7);
  CREATE TABLE accounts(id BIGINT PRIMARY KEY,proxy_id BIGINT,deleted_at TIMESTAMPTZ);
+ CREATE TABLE account_proxies(account_id BIGINT,proxy_id BIGINT,position INT);
  INSERT INTO proxies(id) SELECT generate_series(1,20005);
  UPDATE proxies SET status='inactive' WHERE id=1;
  UPDATE proxies SET status='inactive' WHERE id=2;

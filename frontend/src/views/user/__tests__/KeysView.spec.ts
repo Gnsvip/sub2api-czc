@@ -340,6 +340,22 @@ describe('user KeysView column settings', () => {
     wrapper.unmount()
   })
 
+  it.each(['disabled', 'quota_exhausted', 'expired'] as const)('preserves %s status when editing only the name', async (status) => {
+    const key = { ...createApiKey(), group_id: 1, status }
+    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    updateKey.mockResolvedValue(key)
+    const wrapper = await mountView()
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
+    await wrapper.get('[data-tour="key-form-name"]').setValue('Renamed key')
+    const statusSelect = wrapper.findAllComponents({ name: 'Select' })
+      .find((select) => select.props('options').length === 2 && select.props('options')[0].value === 'active')!
+    expect(statusSelect.props('modelValue')).toBe('inactive')
+    await wrapper.get('#key-form').trigger('submit'); await flushPromises()
+    expect(updateKey).toHaveBeenCalledExactlyOnceWith(key.id, expect.objectContaining({ name: 'Renamed key' }))
+    expect(updateKey.mock.calls[0][1]).not.toHaveProperty('status')
+    wrapper.unmount()
+  })
+
   it('uses the default API key columns with low-frequency columns hidden', async () => {
     const wrapper = await mountView()
 

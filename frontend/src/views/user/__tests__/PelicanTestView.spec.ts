@@ -23,7 +23,7 @@ const messages = {
       subtitle: '每半小时自动', passed: '通过', anomalous: '异常', unscored: '未评分', details: '评分与测试详情',
       empty: '暂无测试结果',
       scoringFailed: '评分失败',
-      time: '测试时间',
+      time: '发起时间（北京）',
       group: '测试分组',
       model: '模型',
       reasoning: '推理深度',
@@ -128,9 +128,9 @@ describe('PelicanTestView', () => {
           model: 'gpt-6-astra',
           group_name: 'GPT-PRO',
           reasoning_effort: 'low',
-          created_at: '2026-09-20T02:50:00Z',
-          finished_at: '2026-09-20T02:50:12Z',
-          duration_ms: 12000
+          created_at: '2026-09-20T16:00:00Z',
+          finished_at: '2026-09-20T16:02:12Z',
+          duration_ms: 132000
         },
         {
           id: 9,
@@ -140,9 +140,9 @@ describe('PelicanTestView', () => {
           model: 'gpt-6-astra',
           group_name: 'GPT-PRO',
           reasoning_effort: 'low',
-          created_at: '2026-09-20T02:40:00Z',
-          finished_at: '2026-09-20T02:40:12Z',
-          duration_ms: 11000
+          created_at: '2026-09-20T15:30:00Z',
+          finished_at: '2026-09-20T15:32:12Z',
+          duration_ms: 132000
         }
       ],
       total: 2,
@@ -151,7 +151,7 @@ describe('PelicanTestView', () => {
     })
     const wrapper = mountView()
     await flushPromises()
-    expect(pelicanTestsAPI.list).toHaveBeenCalledWith(1, 32)
+    expect(pelicanTestsAPI.list).toHaveBeenCalledWith(1, 33)
     expect(wrapper.findAll('h1')).toHaveLength(1)
     expect(wrapper.get('h1').classes()).toContain('lg:hidden')
     expect(wrapper.findAll('iframe')).toHaveLength(1)
@@ -161,6 +161,10 @@ describe('PelicanTestView', () => {
     expect(wrapper.text()).toContain('火烈鸟')
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(2)
+    expect(buttons[0].text()).toContain('09-21 00:00')
+    expect(buttons[1].text()).toContain('09-20 23:30')
+    expect(wrapper.text()).not.toContain('00:02')
+    expect(wrapper.get('dd').text()).toContain('00:00:00')
     const timeColumn = buttons[0].element.parentElement
     expect(timeColumn).toBeTruthy()
     expect(timeColumn?.parentElement).toBe(wrapper.find('article').element.parentElement)

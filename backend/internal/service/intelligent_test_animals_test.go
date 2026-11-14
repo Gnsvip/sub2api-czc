@@ -24,6 +24,10 @@ func TestPickIntelligentTestAnimalAvoidsLastChoice(t *testing.T) {
 	for i := 0; i < 256; i++ {
 		next := pickIntelligentTestAnimal(first)
 		require.NotEqual(t, first, next)
+		if next != "鹈鹕" {
+			require.Contains(t, intelligentRidingAnimals, next)
+		}
+		require.NotContains(t, intelligentAnimeCharacters, next)
 		require.Equal(t, next, intelligentJudgeAnimal(intelligentAnimalHTMLPrompt(next)))
 		for _, excluded := range []string{"抹香鲸", "海豚", "海马", "金鱼", "眼镜蛇", "蚓螈", "水母", "海星", "蜗牛", "蚯蚓", "佛法僧"} {
 			require.NotEqual(t, excluded, next)
@@ -91,10 +95,23 @@ func TestPelicanInBeijingWindowIsEightToMidnight(t *testing.T) {
 		require.NoError(t, err)
 		return ts
 	}
-	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T00:00:00Z")))  // 08:00
-	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T15:59:59Z")))  // 23:59
-	require.False(t, pelicanInBeijingWindow(parse("2026-09-20T16:00:00Z"))) // 00:00
-	require.False(t, pelicanInBeijingWindow(parse("2026-09-19T23:59:59Z"))) // 07:59
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T00:00:00Z")))     // 08:00
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T15:59:59Z")))     // 23:59
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T16:00:00Z")))     // 24:00 final slot
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T16:00:00.001Z"))) // timer wakeup
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T16:03:00Z")))     // retry the same slot
+	require.True(t, pelicanInBeijingWindow(parse("2026-09-20T16:29:59Z")))     // last slot's end
+	require.False(t, pelicanInBeijingWindow(parse("2026-09-20T16:30:00Z")))    // no 00:30 slot
+	require.False(t, pelicanInBeijingWindow(parse("2026-09-19T23:59:59Z")))    // 07:59
+	start := parse("2026-09-20T00:00:00Z")
+	runs := 0
+	for at := start; at.Before(start.Add(24 * time.Hour)); at = at.Add(pelicanScheduleInterval) {
+		if pelicanInBeijingWindow(at) {
+			runs++
+		}
+	}
+	require.Equal(t, 33, runs)
+	require.Equal(t, runs, pelicanUserPageSize)
 }
 
 func TestPelicanNextBoundaryAlignsToThirtyMinutes(t *testing.T) {
@@ -107,6 +124,11 @@ func TestPelicanNextBoundaryAlignsToThirtyMinutes(t *testing.T) {
 	inside, err := time.Parse(time.RFC3339, "2026-09-20T00:07:00Z") // 08:07 Beijing
 	require.NoError(t, err)
 	require.Equal(t, "2026-09-20T08:30:00+08:00", pelicanNextBoundary(inside).Format(time.RFC3339))
+	lastEvening := time.Date(2026, 9, 20, 23, 59, 59, 0, pelicanBeijingLocation())
+	midnight := pelicanNextBoundary(lastEvening)
+	require.Equal(t, "2026-09-21T00:00:00+08:00", midnight.Format(time.RFC3339))
+	require.True(t, pelicanInBeijingWindow(midnight))
+	require.False(t, pelicanInBeijingWindow(pelicanNextBoundary(midnight)))
 }
 
 func TestVisualJudgeUsesRequestedAnimal(t *testing.T) {

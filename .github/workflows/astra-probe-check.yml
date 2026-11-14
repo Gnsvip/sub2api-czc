@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/internal/service/*astra*'
       - 'backend/internal/service/*tibo*'
+      - 'backend/internal/service/intelligent_test*'
       - 'backend/internal/service/admin_service*'
       - 'backend/internal/handler/admin/account*'
       - 'backend/internal/repository/account_repo*'
@@ -46,11 +47,16 @@ jobs:
       - name: Astra scheduling, manual probe, admin and persistence regressions
         working-directory: backend
         run: go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run '^(TestTibo|TestOpenAITibo|TestOpenAIAstra|TestOpenAICodexAux|TestAdminService_SetOpenAIAstraProbe|TestAccountHandler_AstraProbe|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|Test.*SchedulerExtra)' -count=1 -json > "$RUNNER_TEMP/astra-tests.jsonl"
+      - name: Pelican subjects, midnight scheduling and existing slot safeguards
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/repository -run '^(TestPickIntelligentTestAnimal|TestIntelligentTestAnimals|TestIntelligentAnimalHTMLPrompt|TestAdminPelican|TestVisualJudgeUsesRequestedAnimal|TestPelicanSlot|TestPelicanInBeijing|TestPelicanNext|TestPelicanLoop|TestRunScheduledPelican|TestScheduledPelican|TestUserPelicanTests)' -count=1 -json > "$RUNNER_TEMP/pelican-tests.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: astra-backend-validation
-          path: ${{ runner.temp }}/astra-tests.jsonl
+          path: |
+            ${{ runner.temp }}/astra-tests.jsonl
+            ${{ runner.temp }}/pelican-tests.jsonl
           retention-days: 7
   frontend-and-embed:
     runs-on: ubuntu-latest

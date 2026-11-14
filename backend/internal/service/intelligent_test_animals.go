@@ -56,6 +56,8 @@ var intelligentRidingAnimals = []string{
 	"变色龙", "壁虎", "蜥蜴", "树蛙", "牛蛙", "蝾螈", "豆娘", "蜻蜓", "螳螂", "蟋蟀",
 }
 
+// Recognition only: historical/custom prompts can still be evaluated, but these
+// characters must never enter new randomly generated tasks.
 var intelligentAnimeCharacters = []string{
 	"哆啦A梦", "野比大雄", "江户川柯南", "漩涡鸣人", "路飞", "樱木花道",
 	"樱桃小丸子", "野原新之助", "阿童木", "月野兔", "龙猫", "皮卡丘",
@@ -87,15 +89,10 @@ func intelligentJudgeAnimal(prompt string) string {
 
 func pickIntelligentTestAnimal(exclude string) string {
 	exclude = strings.TrimSpace(exclude)
-	// Mix the original pelican task with anime characters and riding animals.
+	// Mix the original pelican task with riding animals only.
 	pool := intelligentRidingAnimals
-	switch randIntN(4) {
-	case 0:
-		if exclude != "鹈鹕" {
-			return "鹈鹕"
-		}
-	case 1:
-		pool = intelligentAnimeCharacters
+	if randIntN(4) == 0 && exclude != "鹈鹕" {
+		return "鹈鹕"
 	}
 	for i := 0; i < 12; i++ {
 		animal := pool[randIntN(len(pool))]

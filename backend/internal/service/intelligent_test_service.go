@@ -22,7 +22,7 @@ const (
 	pelicanScheduleInterval              = 30 * time.Minute
 	pelicanRetryInterval                 = 3 * time.Minute
 	pelicanSlotMaxAttempts               = 3
-	pelicanUserPageSize                  = 32 // 30-minute runs in 08:00–24:00 Beijing, 24h window
+	pelicanUserPageSize                  = 33 // 08:00 through 24:00 inclusive, every 30 minutes
 	IntelligentTestSourcePelicanSchedule = "pelican-schedule"
 )
 
@@ -516,9 +516,11 @@ func pelicanBeijingLocation() *time.Location {
 	return loc
 }
 
-// pelicanInBeijingWindow is [08:00, 24:00) Asia/Shanghai (hour 8–23).
+// Include the 24:00 slot as the final run. Its existing bounded retries and
+// delayed wakeups may run before 00:30; no new slots start overnight.
 func pelicanInBeijingWindow(now time.Time) bool {
-	return now.In(pelicanBeijingLocation()).Hour() >= 8
+	local := now.In(pelicanBeijingLocation())
+	return local.Hour() >= 8 || (local.Hour() == 0 && local.Minute() < 30)
 }
 
 func pelicanNextBoundary(now time.Time) time.Time {

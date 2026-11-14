@@ -24,7 +24,7 @@
               : 'border-gray-200 text-gray-600 hover:border-gray-300 dark:border-dark-600 dark:text-gray-300'"
             @click="selected = row"
           >
-            {{ formatSlot(row.finished_at || row.created_at) }}
+            {{ formatSlot(row.created_at) }}
             <span class="mt-1 block" :class="resultTone(row)">{{ resultLabel(row) }}</span>
             <span v-if="isIncomplete(row)" class="mt-1 block text-amber-700 dark:text-amber-400">{{ t('pelicanTest.incompleteLabel') }}</span>
           </button>
@@ -48,7 +48,7 @@
             <dl class="grid grid-cols-2 gap-3 py-4 text-sm sm:grid-cols-4">
               <div>
                 <dt class="text-xs text-gray-400">{{ t('pelicanTest.time') }}</dt>
-                <dd class="mt-1 text-gray-800 dark:text-gray-100">{{ formatTime(selected.finished_at || selected.created_at) }}</dd>
+                <dd class="mt-1 text-gray-800 dark:text-gray-100">{{ formatTime(selected.created_at) }}</dd>
               </div>
               <div>
                 <dt class="text-xs text-gray-400">{{ t('pelicanTest.group') }}</dt>
@@ -128,20 +128,24 @@ function previewMessage(item: PelicanTestItem) {
 function formatTime(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, { hour12: false }) : '—'
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, { timeZone: 'Asia/Shanghai', hourCycle: 'h23' }) : '—'
 }
 
 function formatSlot(value?: string | null) {
   if (!value) return '—'
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Shanghai', hourCycle: 'h23',
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? ''
+  return `${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`
 }
 
 onMounted(async () => {
   try {
-    const page = await pelicanTestsAPI.list(1, 32)
+    const page = await pelicanTestsAPI.list(1, 33)
     items.value = page.items || []
     selected.value = items.value.find((item) => item.html && !isIncomplete(item)) ?? items.value[0] ?? null
   } catch (err) {

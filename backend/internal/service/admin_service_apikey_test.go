@@ -137,25 +137,29 @@ func (s *userRepoStubForGroupUpdate) RemoveGroupFromUserAllowedGroups(context.Co
 
 // apiKeyRepoStubForGroupUpdate implements APIKeyRepository for AdminUpdateAPIKeyGroupID tests.
 type apiKeyRepoStubForGroupUpdate struct {
-	key       *APIKey
-	getErr    error
-	updateErr error
-	updated   *APIKey // captures what was passed to Update
+	key           *APIKey
+	getErr        error
+	updateErr     error
+	updated       *APIKey // captures what was passed to Update
+	updatedFields APIKeyUpdateFields
+	requestedID   int64
 }
 
-func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*APIKey, error) {
+func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, id int64) (*APIKey, error) {
+	s.requestedID = id
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
 	clone := *s.key
 	return &clone, nil
 }
-func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey, _ APIKeyUpdateFields) error {
+func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey, fields APIKeyUpdateFields) error {
 	if s.updateErr != nil {
 		return s.updateErr
 	}
 	clone := *key
 	s.updated = &clone
+	s.updatedFields = fields
 	return nil
 }
 
@@ -306,6 +310,76 @@ func (s *userSubRepoStubForGroupUpdate) GetActiveByUserIDAndGroupID(_ context.Co
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+func TestAdminService_AdminEnableAPIKey(t *testing.T) {
+	for _, status := range []string{"inactive", StatusAPIKeyDisabled} {
+		t.Run(status, func(t *testing.T) {
+			expiry := time.Now().Add(-time.Hour)
+			window := time.Now()
+			original := &APIKey{
+				ID: 11, UserID: 42, Key: "sk-test-enable", Name: "selected", Status: status,
+				User:    &User{ID: 42, Status: StatusDisabled, Balance: 23, Concurrency: 8},
+				GroupID: int64Ptr(9), Concurrency: 3, ExpiresAt: &expiry,
+				Quota: 10, QuotaUsed: 10, RateLimit5h: 2, Usage5h: 1, Window5hStart: &window,
+				IPWhitelist: []string{"127.0.0.1"}, IPBlacklist: []string{"192.0.2.1"},
+			}
+			repo := &apiKeyRepoStubForGroupUpdate{key: original}
+			cache := &authCacheInvalidatorStub{}
+			svc := &adminServiceImpl{apiKeyRepo: repo, userRepo: &userRepoStubForGroupUpdate{}, authCacheInvalidator: cache}
+			got, err := svc.AdminEnableAPIKey(context.Background(), 11)
+			require.NoError(t, err)
+			expected := *original
+			expected.Status = StatusAPIKeyActive
+			require.Equal(t, &expected, got)
+			require.Equal(t, &expected, repo.updated)
+			require.Equal(t, int64(11), repo.requestedID)
+			require.Equal(t, APIKeyUpdateFields{Status: true}, repo.updatedFields, "must not overwrite concurrent usage or other key fields")
+			require.Equal(t, []string{original.Key}, cache.keys)
+			require.Empty(t, cache.userIDs)
+			require.Empty(t, cache.groupIDs)
+			require.Equal(t, StatusDisabled, got.User.Status)
+			require.True(t, got.IsExpired())
+			require.True(t, got.IsQuotaExhausted())
+		})
+	}
+}
+
+func TestAdminService_AdminEnableAPIKey_NoOpAndErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     string
+		getErr     error
+		updateErr  error
+		wantReason string
+	}{
+		{name: "already active", status: StatusAPIKeyActive},
+		{name: "expired", status: StatusAPIKeyExpired, wantReason: "API_KEY_NOT_DISABLED"},
+		{name: "quota exhausted", status: StatusAPIKeyQuotaExhausted, wantReason: "API_KEY_NOT_DISABLED"},
+		{name: "unknown", status: "unknown", wantReason: "API_KEY_NOT_DISABLED"},
+		{name: "missing", getErr: ErrAPIKeyNotFound},
+		{name: "write failed", status: StatusAPIKeyDisabled, updateErr: errors.New("write failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &apiKeyRepoStubForGroupUpdate{key: &APIKey{ID: 11, Status: tc.status}, getErr: tc.getErr, updateErr: tc.updateErr}
+			cache := &authCacheInvalidatorStub{}
+			svc := &adminServiceImpl{apiKeyRepo: repo, authCacheInvalidator: cache}
+			got, err := svc.AdminEnableAPIKey(context.Background(), 11)
+			switch {
+			case tc.getErr != nil:
+				require.ErrorIs(t, err, tc.getErr)
+			case tc.updateErr != nil:
+				require.ErrorIs(t, err, tc.updateErr)
+			case tc.wantReason != "":
+				require.Equal(t, tc.wantReason, infraerrors.Reason(err))
+			default:
+				require.NoError(t, err)
+				require.Equal(t, repo.key, got)
+			}
+			require.Nil(t, repo.updated)
+			require.Empty(t, cache.keys)
+		})
+	}
+}
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_KeyNotFound(t *testing.T) {
 	repo := &apiKeyRepoStubForGroupUpdate{getErr: ErrAPIKeyNotFound}

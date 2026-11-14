@@ -72,6 +72,10 @@ jobs:
         working-directory: backend
         run: |
           go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|TestOpenAIBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+      - name: Admin API key enablement and authentication regressions
+        working-directory: backend
+        run: |
+          go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/server/middleware ./internal/pkg/adminaccess -run '^(TestAdminService_AdminEnableAPIKey|TestAdminService_AdminUpdateAPIKeyGroupID|TestAdminAPIKeyHandler_|TestAPIKeyAuthEnabledKeyStillRequiresActiveUser|TestGoogleAuthPreservesAdmissionGates|TestAdminAuth|Test.*FullAccess)' -count=1 -json > "$RUNNER_TEMP/bps-key-enable-tests.jsonl"
       - name: Compile shared packages and verify dependency wiring
         working-directory: backend
         run: |

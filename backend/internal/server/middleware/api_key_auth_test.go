@@ -22,6 +22,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAPIKeyAuthEnabledKeyStillRequiresActiveUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []string{config.RunModeStandard, config.RunModeSimple} {
+		for _, google := range []bool{false, true} {
+			name := mode + "/standard"
+			if google {
+				name = mode + "/google"
+			}
+			t.Run(name, func(t *testing.T) {
+				group := &service.Group{ID: 2, Status: service.StatusActive, Hydrated: true}
+				key := &service.APIKey{ID: 10, UserID: 7, Key: "sk-test-enable", Status: service.StatusAPIKeyActive,
+					GroupID: &group.ID, Group: group, User: &service.User{ID: 7, Status: service.StatusDisabled, Balance: 10}}
+				repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+				cfg := &config.Config{RunMode: mode}
+				svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+				router := gin.New()
+				auth := gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg))
+				if google {
+					auth = APIKeyAuthWithSubscriptionGoogle(svc, nil, cfg)
+				}
+				router.Use(auth)
+				router.GET("/t", func(c *gin.Context) { c.Status(http.StatusOK) })
+				request := func() int {
+					rec := httptest.NewRecorder()
+					req := httptest.NewRequest(http.MethodGet, "/t", nil)
+					req.Header.Set("x-api-key", key.Key)
+					req.Header.Set("x-goog-api-key", key.Key)
+					router.ServeHTTP(rec, req)
+					return rec.Code
+				}
+				require.Equal(t, http.StatusUnauthorized, request())
+				key.User.Status = service.StatusActive
+				require.Equal(t, http.StatusOK, request())
+			})
+		}
+	}
+}
+
 func TestAPIKeyAuthRejectsOversizedCredentialsBeforeLookup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var calls atomic.Int32

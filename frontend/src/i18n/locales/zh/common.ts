@@ -505,14 +505,14 @@ export default {
   },
 
   pelicanTest: {
-    subtitle: '每日 8:00–24:00 自动测试 · 每 30 分钟一张 · 保留 24 小时',
+    subtitle: '北京时间每半小时发起 · 08:00 首轮，24:00 末轮 · 保留 24 小时',
     passed: '通过',
     anomalous: '异常',
     unscored: '未评分',
     scoringFailed: '评分失败',
     details: '评分与测试详情',
     empty: '最近 24 小时暂无测试结果，请等待下一轮自动测试。',
-    time: '测试时间',
+    time: '发起时间（北京）',
     group: '测试分组',
     model: '模型',
     reasoning: '推理深度',

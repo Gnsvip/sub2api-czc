@@ -506,14 +506,14 @@ export default {
   },
 
   pelicanTest: {
-    subtitle: 'Automatic tests 08:00–24:00 Beijing · Every 30 minutes · Last 24 hours',
+    subtitle: 'Every 30 minutes, Beijing time · First run 08:00, final run 24:00 · Last 24 hours',
     passed: 'Passed',
     anomalous: 'Anomalous',
     unscored: 'Unscored',
     scoringFailed: 'Scoring failed',
     details: 'Score and test details',
     empty: 'No results in the last 24 hours. Wait for the next automatic run.',
-    time: 'Test time',
+    time: 'Requested at (Beijing)',
     group: 'Group',
     model: 'Model',
     reasoning: 'Reasoning',

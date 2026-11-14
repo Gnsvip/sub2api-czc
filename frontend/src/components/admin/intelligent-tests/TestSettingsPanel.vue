@@ -19,7 +19,7 @@
             <option v-if="setting.config.group_id && !groups.some(group => group.id === setting.config.group_id)" :value="setting.config.group_id" disabled>原分组已不可用，请重新选择</option>
           </select>
         </label>
-        <p class="text-xs leading-relaxed text-gray-500">开启后，北京时间每天 08:00–24:00 每 30 分钟从所选分组抽取可用的 OpenAI OAuth / Setup Token 账号生成动画，会消耗上游额度。用户页也只展示该分组的结果。关闭自动测试不影响手动测试，已在运行的请求会完成。</p>
+        <p class="text-xs leading-relaxed text-gray-500">开启后，北京时间每天 08:00–24:00 每 30 分钟从所选分组抽取可用的 OpenAI OAuth / Setup Token 账号生成动画，包含 24:00 最后一轮，会消耗上游额度。用户页也只展示该分组的结果。关闭自动测试不影响手动测试，已在运行的请求会完成。</p>
         <label class="flex items-center gap-2 text-sm">
           <input v-model="setting.config.visual_judge_enabled" type="checkbox" data-testid="pelican-visual-judge" class="rounded text-primary-600" :disabled="!setting.visual_judge_ready && !setting.config.visual_judge_enabled" @change="configureVisualJudge(setting)" />
           auto-pelican 多帧视觉评分

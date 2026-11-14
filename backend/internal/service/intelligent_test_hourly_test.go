@@ -316,10 +316,43 @@ func TestRunScheduledPelicanMarksLiveWSFromRunner(t *testing.T) {
 func TestRunScheduledPelicanSkipsOutsideBeijingWindow(t *testing.T) {
 	repo := &hourlyPelicanRepo{adminID: 3, accountIDs: []int64{42}}
 	svc := &IntelligentTestService{repo: repo}
-	night, err := time.Parse(time.RFC3339, "2026-09-20T16:00:00Z")
+	night, err := time.Parse(time.RFC3339, "2026-09-20T16:30:00Z")
 	require.NoError(t, err)
 	svc.runScheduledPelicanAt(context.Background(), night)
 	require.Empty(t, repo.enqueued)
+}
+
+func TestRunScheduledPelicanMidnightFinalSlot(t *testing.T) {
+	// The same slot key survives timer jitter, retries and process restarts.
+	midnight := time.Date(2026, 11, 15, 0, 0, 0, 20*int(time.Millisecond), pelicanBeijingLocation())
+	for _, tc := range []struct {
+		name     string
+		attempts []PelicanSlotAttempt
+		wantKey  string
+	}{
+		{name: "first run", wantKey: "pelican-slot-202611141600"},
+		{name: "retry", attempts: []PelicanSlotAttempt{{AccountID: 11, Status: "failed"}}, wantKey: "pelican-slot-202611141600-r1"},
+		{name: "already completed", attempts: []PelicanSlotAttempt{{AccountID: 11, Status: "completed", HasSVG: true}}},
+		{name: "still running", attempts: []PelicanSlotAttempt{{AccountID: 11, Status: "running"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &hourlyPelicanRepo{adminID: 3, accountIDs: []int64{11, 12}, attempts: tc.attempts}
+			svc := &IntelligentTestService{repo: repo}
+			at := midnight
+			if len(tc.attempts) > 0 {
+				at = at.Add(pelicanRetryInterval)
+			}
+			svc.runScheduledPelicanAt(context.Background(), at)
+			if tc.wantKey == "" {
+				require.Empty(t, repo.enqueued)
+				return
+			}
+			require.Len(t, repo.enqueued, 1)
+			require.Equal(t, tc.wantKey, repo.enqueued[0].IdempotencyKey)
+			svc.runScheduledPelicanAt(context.Background(), midnight.Add(pelicanScheduleInterval))
+			require.Len(t, repo.enqueued, 1, "00:30 must not enqueue a new slot")
+		})
+	}
 }
 
 func TestPelicanAttemptKeyAddsRetrySuffix(t *testing.T) {
@@ -403,7 +436,10 @@ func TestPelicanLoopWaitRetriesInsideWindowAndSleepsOvernight(t *testing.T) {
 	halfHourBoundary, err := time.Parse(time.RFC3339, "2026-09-20T04:29:00Z") // 12:29 Beijing
 	require.NoError(t, err)
 	require.InDelta(t, time.Minute.Seconds(), pelicanLoopWait(halfHourBoundary).Seconds(), 1)
-	night, err := time.Parse(time.RFC3339, "2026-09-20T16:10:00Z")
+	nearMidnight := time.Date(2026, 9, 20, 23, 59, 58, 0, pelicanBeijingLocation())
+	require.Equal(t, 2*time.Second, pelicanLoopWait(nearMidnight))
+	require.Equal(t, pelicanRetryInterval, pelicanLoopWait(nearMidnight.Add(2*time.Second)))
+	night, err := time.Parse(time.RFC3339, "2026-09-20T16:30:00Z")
 	require.NoError(t, err)
 	nextEight := time.Date(2026, 9, 21, 8, 0, 0, 0, pelicanBeijingLocation())
 	require.Equal(t, nextEight.Sub(night), pelicanLoopWait(night))

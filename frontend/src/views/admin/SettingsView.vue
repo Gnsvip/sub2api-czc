@@ -37,7 +37,7 @@
                   <Icon :name="tab.icon" size="sm" />
                 </span>
                 <span class="settings-tab-label">{{
-                  tab.key === "bps" ? "Excel BPS" : tab.key === "mihomo" ? "Mihomo" : t(`admin.settings.tabs.${tab.key}`)
+                  t(`admin.settings.tabs.${tab.key}`)
                 }}</span>
               </button>
             </div>
@@ -45,8 +45,6 @@
         </div>
 
         <!-- Tab: Security — Admin API Key -->
-        <BPSSettings v-if="activeTab === 'bps'" />
-        <MihomoSettings v-if="activeTab === 'mihomo'" />
         <div v-show="activeTab === 'security'" class="space-y-6">
           <AdminAccessKeysSettings />
           <!-- 已有全权密钥只提供轮换和删除入口。 -->
@@ -6330,6 +6328,29 @@
             </div>
           </div>
         </div>
+          <section class="space-y-3" :aria-label="t('admin.settings.gatewayAdvanced')">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.gatewayAdvanced') }}
+            </h2>
+            <details
+              class="card"
+              @toggle="($event.target as HTMLDetailsElement).open && (bpsSettingsLoaded = true)"
+            >
+              <summary class="cursor-pointer px-6 py-4 font-medium text-gray-900 dark:text-white">Excel BPS</summary>
+              <div class="space-y-4 p-4">
+                <BPSSettings v-if="activeTab === 'gateway' && bpsSettingsLoaded" />
+              </div>
+            </details>
+            <details
+              class="card"
+              @toggle="($event.target as HTMLDetailsElement).open && (mihomoSettingsLoaded = true)"
+            >
+              <summary class="cursor-pointer px-6 py-4 font-medium text-gray-900 dark:text-white">Mihomo</summary>
+              <div class="p-4">
+                <MihomoSettings v-if="activeTab === 'gateway' && mihomoSettingsLoaded" />
+              </div>
+            </details>
+          </section>
         </div>
         <!-- /Tab: Gateway — Claude Code, Scheduling -->
 
@@ -9065,8 +9086,6 @@ const paymentMethodsHref = computed(() =>
 );
 
 type SettingsTab =
- | "bps"
- | "mihomo"
   | "general"
   | "agreement"
   | "features"
@@ -9078,9 +9097,9 @@ type SettingsTab =
   | "guide"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const bpsSettingsLoaded = ref(false);
+const mihomoSettingsLoaded = ref(false);
 const settingsTabs = [
- { key: "bps" as SettingsTab, icon: "server" as const },
- { key: "mihomo" as SettingsTab, icon: "server" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },

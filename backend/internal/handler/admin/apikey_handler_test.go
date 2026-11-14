@@ -72,6 +72,10 @@ func (s *keyEnableAuthUserRepo) GetByID(context.Context, int64) (*service.User, 
 	return s.user, nil
 }
 
+func (s *keyEnableAuthUserRepo) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
+	return nil, nil
+}
+
 func TestAdminAPIKeyHandler_EnableRequiresAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}

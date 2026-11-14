@@ -94,10 +94,12 @@ describe('admin API key enablement', () => {
     const wrapper = await open(); await flushPromises()
     const banned = { ...user(1), status: 'disabled' } as AdminUser
     await wrapper.setProps({ user: banned })
+    await flushPromises()
     expect(wrapper.text()).toContain('admin.users.apiKeyEnableBannedHint')
     await wrapper.findAll('[data-testid="admin-key-enable"]')[0].trigger('click')
     await flushPromises()
-    expect(enableApiKey).toHaveBeenCalledExactlyOnceWith(11)
+    expect(enableApiKey).toHaveBeenCalledTimes(1)
+    expect(enableApiKey).toHaveBeenCalledWith(11)
     expect(wrapper.findAll('[data-testid="admin-key-enable"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('active')
     expect(wrapper.text()).toContain('disabled')

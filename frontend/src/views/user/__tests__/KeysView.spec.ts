@@ -351,7 +351,8 @@ describe('user KeysView column settings', () => {
       .find((select) => select.props('options').length === 2 && select.props('options')[0].value === 'active')!
     expect(statusSelect.props('modelValue')).toBe('inactive')
     await wrapper.get('#key-form').trigger('submit'); await flushPromises()
-    expect(updateKey).toHaveBeenCalledExactlyOnceWith(key.id, expect.objectContaining({ name: 'Renamed key' }))
+    expect(updateKey).toHaveBeenCalledTimes(1)
+    expect(updateKey).toHaveBeenCalledWith(key.id, expect.objectContaining({ name: 'Renamed key' }))
     expect(updateKey.mock.calls[0][1]).not.toHaveProperty('status')
     wrapper.unmount()
   })

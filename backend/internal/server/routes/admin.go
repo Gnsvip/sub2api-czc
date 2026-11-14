@@ -214,6 +214,7 @@ func registerIntelligentTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	apiKeys := admin.Group("/api-keys")
 	{
+		apiKeys.POST("/:id/enable", h.Admin.APIKey.Enable)
 		apiKeys.PUT("/:id", h.Admin.APIKey.UpdateGroup)
 	}
 }

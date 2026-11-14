@@ -22,6 +22,22 @@ func NewAdminAPIKeyHandler(adminService service.AdminService) *AdminAPIKeyHandle
 	}
 }
 
+// Enable reactivates one API key without changing its owner's status.
+// POST /api/v1/admin/api-keys/:id/enable
+func (h *AdminAPIKeyHandler) Enable(c *gin.Context) {
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || keyID <= 0 {
+		response.BadRequest(c, "Invalid API key ID")
+		return
+	}
+	key, err := h.adminService.AdminEnableAPIKey(c.Request.Context(), keyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, dto.APIKeyFromService(key))
+}
+
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
 	GroupID             *int64 `json:"group_id"` // nil=不修改, 0=解绑, >0=绑定到目标分组

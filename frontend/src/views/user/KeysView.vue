@@ -1507,7 +1507,7 @@ const statusOptions = computed(() => [
 ])
 
 const shouldSubmitEditStatus = (key: ApiKey, status: 'active' | 'inactive') => {
-  if (key.status === 'quota_exhausted' || key.status === 'expired') {
+  if (key.status === 'quota_exhausted' || key.status === 'expired' || key.status === 'disabled') {
     return status === 'active'
   }
   return true
@@ -1743,7 +1743,7 @@ const editKey = (key: ApiKey) => {
   formData.value = {
     name: key.name,
     group_id: key.group_id,
-    status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
+    status: key.status === 'active' ? 'active' : 'inactive',
     use_custom_key: false,
     custom_key: '',
     enable_ip_restriction: hasIPRestriction,

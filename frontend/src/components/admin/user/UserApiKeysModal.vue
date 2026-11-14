@@ -5,7 +5,11 @@
         <div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30">
           <span class="text-lg font-medium text-primary-700 dark:text-primary-300">{{ user.email.charAt(0).toUpperCase() }}</span>
         </div>
-        <div><p class="font-medium text-gray-900 dark:text-white">{{ user.email }}</p><p class="text-sm text-gray-500 dark:text-dark-400">{{ user.username }}</p></div>
+        <div>
+          <p class="font-medium text-gray-900 dark:text-white">{{ user.email }}</p>
+          <p class="text-sm text-gray-500 dark:text-dark-400">{{ user.username }}</p>
+          <p v-if="user.status === 'disabled'" class="mt-1 text-sm text-amber-600 dark:text-amber-400">{{ t('admin.users.apiKeyEnableBannedHint') }}</p>
+        </div>
       </div>
       <div v-if="loading" class="flex justify-center py-8"><svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
       <div v-else-if="apiKeys.length === 0" class="py-8 text-center"><p class="text-sm text-gray-500">{{ t('admin.users.noApiKeys') }}</p></div>
@@ -16,6 +20,15 @@
               <div class="mb-1 flex items-center gap-2"><span class="font-medium text-gray-900 dark:text-white">{{ key.name }}</span><span :class="['badge text-xs', key.status === 'active' ? 'badge-success' : 'badge-danger']">{{ key.status }}</span></div>
               <p class="truncate font-mono text-sm text-gray-500">{{ key.key.substring(0, 20) }}...{{ key.key.substring(key.key.length - 8) }}</p>
             </div>
+            <button
+              v-if="key.status === 'inactive' || key.status === 'disabled'"
+              type="button"
+              class="btn btn-primary btn-sm ml-3 shrink-0"
+              data-testid="admin-key-enable"
+              :aria-label="t('admin.users.enableApiKey', { name: key.name })"
+              :disabled="updatingKeyIds.has(key.id)"
+              @click="enableKey(key)"
+            >{{ t('admin.users.enable') }}</button>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div class="flex items-center gap-1">
@@ -51,6 +64,7 @@
                 min="0"
                 class="input h-7 w-20 text-xs"
                 data-testid="admin-key-concurrency"
+                :disabled="updatingKeyIds.has(key.id)"
                 @change="(event) => saveConcurrency(key, Number((event.target as HTMLInputElement).value))"
               />
             </label>
@@ -215,6 +229,26 @@ const openGroupSelector = (key: ApiKey) => {
 const closeGroupSelector = () => {
   groupSelectorKeyId.value = null
   dropdownPosition.value = null
+}
+
+const enableKey = async (key: ApiKey) => {
+  if (updatingKeyIds.value.has(key.id)) return
+  closeGroupSelector()
+  const version = requestVersion
+  updatingKeyIds.value.add(key.id)
+  try {
+    const updated = await adminAPI.apiKeys.enableApiKey(key.id)
+    if (version !== requestVersion) return
+    const idx = apiKeys.value.findIndex((k) => k.id === key.id)
+    if (idx !== -1) apiKeys.value[idx] = updated
+    appStore.showSuccess(t('admin.users.apiKeyEnabled'))
+  } catch (error: unknown) {
+    if (version !== requestVersion) return
+    const message = error && typeof error === 'object' && 'message' in error ? error.message : undefined
+    appStore.showError(typeof message === 'string' && message ? message : t('admin.users.apiKeyEnableFailed'))
+  } finally {
+    updatingKeyIds.value.delete(key.id)
+  }
 }
 
 const saveConcurrency = async (key: ApiKey, concurrency: number) => {

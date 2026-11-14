@@ -31,7 +31,13 @@ export async function updateApiKey(id: number, payload: { concurrency?: number; 
   return data
 }
 
+export async function enableApiKey(id: number): Promise<ApiKey> {
+  const { data } = await apiClient.post<ApiKey>(`/admin/api-keys/${id}/enable`)
+  return data
+}
+
 export const apiKeysAPI = {
+  enableApiKey,
   updateApiKeyGroup,
   updateApiKey
 }

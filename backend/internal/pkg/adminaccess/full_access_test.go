@@ -18,6 +18,7 @@ func TestAdminFullAccessRouteBoundary(t *testing.T) {
 	}{
 		{"/api/v1/admin/future-operation", true},
 		{"/api/v1/admin/accounts/:id", true},
+		{"/api/v1/admin/api-keys/:id/enable", true},
 		{"/api/v1/admin/settings/admin-api-keys", false},
 		{"/api/v1/admin/settings/admin-api-keys/:id/rotate", false},
 		{"/api/v1/admin/settings/admin-api-key/regenerate", false},
@@ -28,5 +29,8 @@ func TestAdminFullAccessRouteBoundary(t *testing.T) {
 		if got := RouteAllowed(policy, "POST", tc.path); got != tc.allowed {
 			t.Errorf("%s: got %v want %v", tc.path, got, tc.allowed)
 		}
+	}
+	if RouteAllowed(Policy{GlobalPermissions: []string{"users.read", "users.balance.write"}}, "POST", "/api/v1/admin/api-keys/:id/enable") {
+		t.Fatal("restricted admin keys must not gain API key enablement")
 	}
 }

@@ -174,14 +174,14 @@ func TestRuntimeCustomizationsAcceptance(t *testing.T) {
 		})
 		regularLogs := regularRepo.snapshotLogs()
 		require.Len(t, regularLogs, 1)
-		require.Equal(t, "user", regularLogs[0].DispositionTarget)
-		require.Equal(t, "disabled", regularLogs[0].DispositionStatus)
-		require.Equal(t, []int64{101}, regularInvalidator.userIDs)
+		require.Empty(t, regularLogs[0].DispositionTarget)
+		require.Equal(t, "not_counted", regularLogs[0].DispositionStatus)
+		require.Empty(t, regularInvalidator.userIDs)
 
 		adminRepo := &cyberDispositionTestRepo{userActive: true, keyActive: true, keyCredential: "sk-test-admin-triggering-key"}
 		adminInvalidator := &contentModerationTestAuthCacheInvalidator{}
 		adminService := NewContentModerationService(
-			&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true"}},
+			&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 			adminRepo, nil, nil, nil, nil, adminInvalidator, nil,
 		)
 		adminService.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
@@ -203,7 +203,7 @@ func TestRuntimeCustomizationsAcceptance(t *testing.T) {
 			Model: "claude-opus-5", Endpoint: "/v1/responses", UpstreamMessage: "cyber policy",
 		})
 		require.Len(t, nonGPTRepo.snapshotLogs(), 1)
-		require.Equal(t, 1, nonGPTRepo.disableUserCalls)
+		require.Zero(t, nonGPTRepo.disableUserCalls)
 	})
 
 	t.Run("raw HTTP SSE and WebSocket archives are exact", func(t *testing.T) {

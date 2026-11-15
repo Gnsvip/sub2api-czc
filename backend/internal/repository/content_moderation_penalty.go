@@ -106,7 +106,7 @@ func (r *contentModerationRepository) ApplyModerationPenalty(ctx context.Context
 	// Do not punish using the one-second runtime cache after an admin switches off.
 	current := *cfg
 	var raw string
-	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = $1`, service.SettingKeyContentModerationConfig).Scan(&raw)
+	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = $1 FOR SHARE`, service.SettingKeyContentModerationConfig).Scan(&raw)
 	if err != nil && err != sql.ErrNoRows {
 		return out, err
 	}
@@ -170,6 +170,40 @@ func (r *contentModerationRepository) ApplyModerationPenalty(ctx context.Context
 	}
 	if claimed == 0 {
 		out.Status = "duplicate"
+		// Recover a committed decision if the original transaction response was
+		// lost. Ordinary duplicate reports never repeat side effects or email.
+		if log.RetryPenaltyDecision && counted {
+			err = tx.QueryRowContext(ctx, `SELECT disposition_target, transitioned FROM content_moderation_penalty_events WHERE user_id=$1 AND event_key=$2`, *log.UserID, key).Scan(&out.Target, &out.Transitioned)
+			if err != nil {
+				return out, err
+			}
+			if out.Transitioned && (out.Target != "user" || status == "disabled") {
+				rows, err := tx.QueryContext(ctx, `SELECT key FROM api_keys WHERE user_id=$1 AND status='disabled' AND deleted_at IS NULL AND ($2='user' OR id=$3)`, *log.UserID, out.Target, log.APIKeyID)
+				if err != nil {
+					return out, err
+				}
+				for rows.Next() {
+					var credential string
+					if err = rows.Scan(&credential); err != nil {
+						_ = rows.Close()
+						return out, err
+					}
+					out.Credentials = append(out.Credentials, credential)
+				}
+				err = rows.Err()
+				_ = rows.Close()
+				if err != nil {
+					return out, err
+				}
+				out.Status = "disabled"
+				if out.Target == "api_key" && len(out.Credentials) == 0 {
+					out.Transitioned = false
+					out.Status = "duplicate"
+				}
+			} else {
+				out.Transitioned = false
+			}
+		}
 		return out, tx.Commit()
 	}
 	if !counted {
@@ -229,6 +263,9 @@ func (r *contentModerationRepository) ApplyModerationPenalty(ctx context.Context
 		}
 	}
 	out.Status, out.Transitioned = "disabled", true
+	if _, err = tx.ExecContext(ctx, `UPDATE content_moderation_penalty_events SET disposition_target=$3, transitioned=TRUE WHERE user_id=$1 AND event_key=$2`, *log.UserID, key, out.Target); err != nil {
+		return service.ContentModerationPenaltyResult{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return service.ContentModerationPenaltyResult{}, err
 	}

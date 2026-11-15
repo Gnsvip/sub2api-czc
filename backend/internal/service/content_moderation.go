@@ -376,6 +376,7 @@ type ContentModerationDecision struct {
 }
 
 type ContentModerationLog struct {
+	RetryPenaltyDecision  bool                              `json:"-"`
 	PenaltyEventKey       string                            `json:"penalty_event_key,omitempty"`
 	CurrentViolationCount *int                              `json:"current_violation_count,omitempty"`
 	ID                    int64                             `json:"id"`
@@ -3393,7 +3394,8 @@ func (s *ContentModerationService) retryCyberPolicyDisposition(ctx context.Conte
 	log := &ContentModerationLog{
 		ID: entry.LogID, ArchiveID: entry.ArchiveID, Action: ContentModerationActionCyberPolicy,
 		RequestID: entry.RequestID, PenaltyEventKey: entry.PenaltyEventKey, Flagged: true,
-		CreatedAt: entry.CreatedAt, DispositionTarget: entry.DispositionTarget,
+		RetryPenaltyDecision: true,
+		CreatedAt:            entry.CreatedAt, DispositionTarget: entry.DispositionTarget,
 		DispositionStatus: entry.DispositionStatus, DispositionTransitioned: entry.DispositionTransitioned,
 		AutoBanned: entry.AutoBanned, ViolationCount: entry.ViolationCount, UserEmail: entry.UserEmail,
 	}

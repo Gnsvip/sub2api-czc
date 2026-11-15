@@ -2005,7 +2005,9 @@ async function openLog(row: ContentModerationLog) {
   sourceLogError.value = false
   try {
     const detail = await adminAPI.riskControl.getLog(row.id)
-    if (selectedLog.value?.id === row.id) selectedLog.value = detail
+    if (selectedLog.value?.id === row.id && detail.id === row.id) {
+      selectedLog.value.current_violation_count = detail.current_violation_count
+    }
   } catch { /* Keep the audit snapshot if fresh counters are unavailable. */ }
 }
 

@@ -147,7 +147,7 @@ func cyberPolicyScope() *ContentModerationScopeSnapshot {
 	return &scope
 }
 
-func TestRecordCyberPolicyEvent_RiskControlOffStillForcesUserDisposition(t *testing.T) {
+func TestRecordCyberPolicyEvent_GeneralReviewOffExplicitImmediateStillApplies(t *testing.T) {
 	repo := &cyberDispositionTestRepo{userActive: true}
 	invalidator := &contentModerationTestAuthCacheInvalidator{}
 	svc := NewContentModerationService(
@@ -496,7 +496,9 @@ func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 	cfgExclude.CyberPolicyExcludeFromBanCount = true
 	svc.applyFlaggedAccountSideEffects(context.Background(), cfgExclude, &ContentModerationLog{Flagged: true, UserID: &userID})
 
-	cfgDefault := defaultContentModerationConfig() // 默认 false
+	cfgDefault := defaultContentModerationConfig()
+	cfgDefault.CyberPolicyBanMode = CyberPolicyBanCumulative
+	cfgDefault.normalize()
 	svc.applyFlaggedAccountSideEffects(context.Background(), cfgDefault, &ContentModerationLog{Flagged: true, UserID: &userID})
 
 	require.Equal(t, []bool{true, false}, repo.snapshotCountCalls(),

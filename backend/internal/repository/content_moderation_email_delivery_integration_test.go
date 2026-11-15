@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,60 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestContentModerationPenaltyCurrentConfigAndAdminKeyScope(t *testing.T) {
+	ctx := context.Background()
+	repo := NewContentModerationRepository(integrationDB).(service.ContentModerationPenaltyRepository)
+	var original string
+	err := integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyContentModerationConfig).Scan(&original)
+	require.True(t, err == nil || err == sql.ErrNoRows)
+	existed := err == nil
+	t.Cleanup(func() {
+		if existed {
+			_, _ = integrationDB.ExecContext(ctx, `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyContentModerationConfig, original)
+		} else {
+			_, _ = integrationDB.ExecContext(ctx, `DELETE FROM settings WHERE key=$1`, service.SettingKeyContentModerationConfig)
+		}
+	})
+	setPolicy := func(raw string) {
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, service.SettingKeyContentModerationConfig, raw)
+		require.NoError(t, err)
+	}
+	var userID, keyID, otherID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,role) VALUES($1,'test','admin') RETURNING id`, uuid.NewString()+"@admin-penalty.test").Scan(&userID))
+	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, userID) })
+	for _, id := range []*int64{&keyID, &otherID} {
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'test') RETURNING id`, userID, uuid.NewString()).Scan(id))
+	}
+	cfg := &service.ContentModerationConfig{AutoBanEnabled: true, CyberPolicyBanMode: service.CyberPolicyBanImmediate, BanThreshold: 20, ViolationWindowHours: 720}
+	makeEvent := func() *service.ContentModerationLog {
+		return &service.ContentModerationLog{UserID: &userID, APIKeyID: &keyID, RequestID: uuid.NewString(), CreatedAt: time.Now(), Flagged: true, Action: service.ContentModerationActionCyberPolicy}
+	}
+	setPolicy(`{"auto_ban_enabled":false,"cyber_policy_ban_mode":"immediate"}`)
+	out, err := repo.ApplyModerationPenalty(ctx, cfg, makeEvent())
+	require.NoError(t, err)
+	require.False(t, out.Transitioned)
+	setPolicy(`{invalid`)
+	_, err = repo.ApplyModerationPenalty(ctx, cfg, makeEvent())
+	require.Error(t, err)
+	setPolicy(`{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`)
+	event := makeEvent()
+	out, err = repo.ApplyModerationPenalty(ctx, cfg, event)
+	require.NoError(t, err)
+	require.True(t, out.Transitioned)
+	require.Equal(t, "api_key", out.Target)
+	var status string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT status FROM users WHERE id=$1`, userID).Scan(&status))
+	require.Equal(t, "active", status)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT status FROM api_keys WHERE id=$1`, otherID).Scan(&status))
+	require.Equal(t, "active", status)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE api_keys SET status='active' WHERE id=$1`, keyID)
+	require.NoError(t, err)
+	event.RetryPenaltyDecision = true
+	out, err = repo.ApplyModerationPenalty(ctx, cfg, event)
+	require.NoError(t, err)
+	require.False(t, out.Transitioned, "manually re-enabled administrator key must not be disabled by an old retry")
+}
 
 func TestContentModerationPenaltyAtomicCounterAndUnban(t *testing.T) {
 	ctx := context.Background()
@@ -62,6 +117,15 @@ func TestContentModerationPenaltyAtomicCounterAndUnban(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.Transitioned)
 	require.Equal(t, 20, out.Count)
+	twentieth.RetryPenaltyDecision = true
+	out, err = repo.ApplyModerationPenalty(ctx, cfg, twentieth)
+	require.NoError(t, err)
+	require.True(t, out.Transitioned, "recover a committed disposition after a lost response")
+	cfg.AutoBanEnabled = false
+	out, err = repo.ApplyModerationPenalty(ctx, cfg, twentieth)
+	require.NoError(t, err)
+	require.False(t, out.Transitioned, "current master also gates recovery side effects")
+	cfg.AutoBanEnabled = true
 	var status string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT status FROM api_keys WHERE id=$1`, keyID).Scan(&status))
 	require.Equal(t, "disabled", status)
@@ -89,6 +153,30 @@ func TestContentModerationPenaltyAtomicCounterAndUnban(t *testing.T) {
 	out, err = repo.ApplyModerationPenalty(ctx, cfg, event("new-immediate"))
 	require.NoError(t, err)
 	require.True(t, out.Transitioned)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE users SET status='active' WHERE id=$1`, userID)
+	require.NoError(t, err)
+	cfg.CyberPolicyBanMode = service.CyberPolicyBanCumulative
+	var winners, failed atomic.Int64
+	for range 24 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := repo.ApplyModerationPenalty(ctx, cfg, event(uuid.NewString()))
+			if err != nil {
+				failed.Add(1)
+				return
+			}
+			if out.Transitioned {
+				winners.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	require.Zero(t, failed.Load())
+	require.Equal(t, int64(1), winners.Load())
+	count, err = repo.CurrentModerationPenaltyCount(ctx, userID, cfg)
+	require.NoError(t, err)
+	require.Equal(t, 24, count, "concurrent distinct violations must not be lost")
 }
 
 func TestContentModerationPenaltyPreservesLegacyHistoryWithoutDuplicates(t *testing.T) {

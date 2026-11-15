@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS content_moderation_penalty_events (
     occurred_at timestamptz NOT NULL,
     cyber boolean NOT NULL,
     counted boolean NOT NULL,
+    disposition_target text NOT NULL DEFAULT '',
+    transitioned boolean NOT NULL DEFAULT FALSE,
     PRIMARY KEY (user_id, event_key)
 );
 CREATE INDEX IF NOT EXISTS idx_moderation_penalty_events_time
     ON content_moderation_penalty_events (occurred_at);
+CREATE INDEX IF NOT EXISTS idx_moderation_penalty_events_user_time
+    ON content_moderation_penalty_events (user_id, occurred_at);

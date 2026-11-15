@@ -6736,6 +6736,28 @@
             </div>
           </div>
 
+          <!-- Usage Guide: mount on first opening and retain unpublished edits. -->
+          <section id="settings-guide" class="card scroll-mt-6" data-testid="settings-guide-section">
+            <button
+              id="settings-guide-toggle"
+              type="button"
+              class="flex w-full items-center justify-between gap-4 px-6 py-4 text-left"
+              :aria-expanded="guideEditorOpen"
+              aria-controls="settings-guide-editor"
+              data-testid="settings-guide-toggle"
+              @click="toggleGuideEditor"
+            >
+              <span>
+                <span class="block text-lg font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.guideEditor.sectionTitle") }}</span>
+                <span class="mt-1 block text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.guideEditor.sectionHint") }}</span>
+              </span>
+              <Icon :name="guideEditorOpen ? 'chevronUp' : 'chevronDown'" size="sm" class="shrink-0 text-gray-400" />
+            </button>
+            <div v-show="guideEditorOpen" id="settings-guide-editor" class="border-t border-gray-100 p-4 dark:border-dark-700 sm:p-6">
+              <GuideEditor v-if="guideEditorLoaded" />
+            </div>
+          </section>
+
           <!-- Custom Menu Items -->
           <div class="card">
             <div
@@ -8884,13 +8906,8 @@
           <BackupSettings />
         </div>
 
-        <!-- Tab: Guide -->
-        <div v-if="activeTab === 'guide'">
-          <GuideEditor />
-        </div>
-
         <!-- Save dock stays reachable on long settings tabs. -->
-        <div v-show="activeTab !== 'backup' && activeTab !== 'guide'" class="settings-save-dock">
+        <div v-show="activeTab !== 'backup'" class="settings-save-dock">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -8963,7 +8980,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -9094,9 +9112,12 @@ type SettingsTab =
   | "gateway"
   | "payment"
   | "email"
-  | "guide"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const route = useRoute();
+const router = useRouter();
+const guideEditorOpen = ref(false);
+const guideEditorLoaded = ref(false);
 const bpsSettingsLoaded = ref(false);
 const mihomoSettingsLoaded = ref(false);
 const settingsTabs = [
@@ -9108,7 +9129,6 @@ const settingsTabs = [
   { key: "gateway" as SettingsTab, icon: "server" as const },
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
-  { key: "guide" as SettingsTab, icon: "book" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
 
@@ -9123,6 +9143,11 @@ const settingsTabKeyboardActions = {
 
 function selectSettingsTab(tab: SettingsTab): void {
   activeTab.value = tab;
+}
+
+function toggleGuideEditor(): void {
+  guideEditorOpen.value = !guideEditorOpen.value;
+  if (guideEditorOpen.value) guideEditorLoaded.value = true;
 }
 
 function focusSettingsTab(tab: SettingsTab): void {
@@ -9165,6 +9190,24 @@ function handleSettingsTabKeydown(event: KeyboardEvent, tab: SettingsTab): void 
 const { copyToClipboard } = useClipboard();
 
 const loading = ref(true);
+watch(
+  [() => route.query.tab, () => route.hash, loading],
+  async ([tab, hash, isLoading]) => {
+    const legacyGuideLink = tab === "guide";
+    if (isLoading || (!legacyGuideLink && !(tab === "general" && hash === "#settings-guide"))) return;
+    activeTab.value = "general";
+    guideEditorOpen.value = true;
+    guideEditorLoaded.value = true;
+    if (legacyGuideLink) {
+      await router.replace({ query: { ...route.query, tab: "general" }, hash: "#settings-guide" });
+    }
+    await nextTick();
+    window.requestAnimationFrame(() => {
+      document.getElementById("settings-guide")?.scrollIntoView?.({ block: "start" });
+    });
+  },
+  { immediate: true },
+);
 const loadFailed = ref(false);
 const saving = ref(false);
 const testingSmtp = ref(false);

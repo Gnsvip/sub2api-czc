@@ -27,7 +27,7 @@
       <p v-if="record.queue_reason" class="text-sm text-gray-500">{{ record.queue_reason }}</p>
       <p v-if="record.status === 'queued' && record.queue_reason && record.available_at" class="text-xs text-gray-500">下次检查：{{ testTime(record.available_at) }}</p>
       <div v-if="record.test_type === 'pelican' && !isPending(record.status)" class="rounded-xl border border-gray-200 p-3 dark:border-dark-700">
-        <div class="aspect-[4/3] overflow-hidden rounded-xl"><TestGeneratedImage :record-id="record.id" animated /></div>
+        <div class="overflow-hidden rounded-xl"><TestGeneratedImage :record-id="record.id" animated /></div>
       </div>
       <section v-if="!publicView && record.input"><h4 class="mb-2 text-sm font-semibold">测试输入</h4><pre class="test-output">{{ record.input }}</pre></section>
       <details v-if="record.test_type === 'pelican'"><summary class="cursor-pointer text-sm text-gray-500">模型原始答复 / SVG 源码</summary><pre class="test-output mt-2">{{ record.result || '暂无输出' }}</pre></details>

@@ -56,7 +56,9 @@ function injectPublicSettings(backendUrl: string): Plugin {
     apply: 'serve',
     transformIndexHtml: {
       order: 'pre',
-      async handler(html) {
+      async handler(html, context) {
+        // Keep the isolated tutorial free of inline app-settings scripts.
+        if (context.path.startsWith('/guide-content/')) return html
         try {
           const response = await fetch(`${backendUrl}/api/v1/settings/public`, {
             signal: AbortSignal.timeout(2000)
@@ -103,6 +105,10 @@ export default defineConfig(({ mode }) => {
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        app: resolve(__dirname, 'index.html'),
+        guide: resolve(__dirname, 'guide-content/index.html'),
+      },
       output: {
         /**
          * 手动分包配置

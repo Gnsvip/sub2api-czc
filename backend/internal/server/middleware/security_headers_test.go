@@ -82,6 +82,35 @@ func TestGetNonceFromContext(t *testing.T) {
 }
 
 func TestSecurityHeaders(t *testing.T) {
+	t.Run("only_bundled_guide_allows_same_origin_embedding", func(t *testing.T) {
+		for _, path := range []string{"/guide-content/", "/guide-content/index.html", "/guide-content/?v=1"} {
+			for _, enabled := range []bool{false, true} {
+				for _, method := range []string{http.MethodGet, http.MethodHead} {
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					c.Request = httptest.NewRequest(method, path, nil)
+					SecurityHeaders(config.CSPConfig{Enabled: enabled}, nil)(c)
+					assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"), path)
+					if enabled {
+						policy := w.Header().Get("Content-Security-Policy")
+						assert.Equal(t, 1, countDirectiveValue(policy, "frame-ancestors", "'self'"))
+						assert.NotContains(t, policy, "frame-ancestors 'none'")
+						assert.Contains(t, policy, "script-src 'self' 'nonce-")
+						assert.NotContains(t, policy, "script-src 'self' 'unsafe-inline'")
+					}
+				}
+			}
+		}
+		for _, path := range []string{"/guide", "/admin/settings", "/api/v1/settings/guide", "/guide-content/other.html", "/guide-content/index.html/extra", "/guide-content/../admin/settings", "/assets/guide.html"} {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+			SecurityHeaders(config.CSPConfig{Enabled: true}, nil)(c)
+			assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"), path)
+			assert.Contains(t, w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
+		}
+	})
+
 	t.Run("sets_basic_security_headers", func(t *testing.T) {
 		cfg := config.CSPConfig{Enabled: false}
 		middleware := SecurityHeaders(cfg, nil)

@@ -1,6 +1,6 @@
 <template>
-  <div class="flex h-full min-h-40 w-full items-center rounded-xl bg-white bg-[linear-gradient(45deg,#f3f4f6_25%,transparent_25%),linear-gradient(-45deg,#f3f4f6_25%,transparent_25%)] p-2 dark:bg-dark-900" :class="fullSize ? 'justify-start' : 'justify-center'" data-testid="generated-test-image">
-    <iframe v-if="animated && html && !failed" class="h-full min-h-40 w-full border-0 bg-[#0b1220]" sandbox="" referrerpolicy="no-referrer" title="鹈鹕测试动画" :srcdoc="html" />
+  <div class="w-full rounded-xl bg-white" :class="animated ? '' : ['flex h-full min-h-40 items-center bg-[linear-gradient(45deg,#f3f4f6_25%,transparent_25%),linear-gradient(-45deg,#f3f4f6_25%,transparent_25%)] p-2 dark:bg-dark-900', fullSize ? 'justify-start' : 'justify-center']" data-testid="generated-test-image">
+    <PelicanAnimationPreview v-if="animated && html && !failed" :html="html" title="鹈鹕测试动画" />
     <img v-else-if="url && !failed" :src="url" alt="模型生成的鹈鹕测试图像" :style="fullSize ? dimensions : undefined" :class="fullSize ? 'max-w-none shrink-0' : 'max-h-[65vh] max-w-full object-contain'" @error="failed = true" />
     <p v-else class="p-5 text-center text-xs text-gray-500">{{ loading ? '正在加载生成图像…' : '暂无可安全显示的图像，可查看原始答复或重新评估。' }}</p>
   </div>
@@ -8,6 +8,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { intelligentTestsAPI } from '@/api/intelligentTests'
+import PelicanAnimationPreview from '@/components/common/PelicanAnimationPreview.vue'
 import { testImageURL } from './display'
 const props = defineProps<{ source?: string; recordId?: number; publicView?: boolean; fullSize?: boolean; animated?: boolean }>()
 const inline = computed(() => props.animated ? '' : testImageURL(props.source))

@@ -122,11 +122,12 @@ jobs:
           if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
             pnpm exec playwright install-deps chromium
           fi
-      - name: Public and admin guide browser checks
+      - name: Guide and pelican preview browser checks
         working-directory: frontend
         env:
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/guide-browser-results
-        run: pnpm exec playwright test e2e/guide.spec.ts e2e/guide-admin.spec.ts
+          PLAYWRIGHT_PREVIEW_BUILD: '1'
+        run: pnpm exec playwright test e2e/guide.spec.ts e2e/guide-admin.spec.ts e2e/pelican-preview.spec.ts
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -203,6 +204,9 @@ jobs:
         with:
           name: frontend-dist
           path: backend/internal/web/dist/
+      - name: Verify embedded guide routing and headers with the built frontend
+        working-directory: backend
+        run: go test -tags=embed ./internal/web -count=1
       - name: Build Linux amd64 only
         working-directory: backend
         env:

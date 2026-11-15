@@ -32,15 +32,7 @@
         <article v-if="selected" class="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
           <span class="pointer-events-none absolute -right-9 top-6 z-10 w-36 rotate-45 py-1.5 text-center text-xs font-semibold text-white shadow-sm" :class="ribbonTone(selected)" data-testid="pelican-ribbon">{{ resultLabel(selected) }}</span>
           <p v-if="previewMessage(selected)" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" role="status">{{ previewMessage(selected) }}</p>
-          <div v-if="selected.html && !isIncomplete(selected)" class="aspect-[4/3] bg-[#0b1220]">
-            <iframe
-              class="h-full w-full border-0"
-              sandbox=""
-              referrerpolicy="no-referrer"
-              :title="t('nav.pelicanTest')"
-              :srcdoc="selected.html"
-            />
-          </div>
+          <PelicanAnimationPreview v-if="selected.html && !isIncomplete(selected)" :html="selected.html" :title="t('nav.pelicanTest')" />
           <p v-else class="flex aspect-[4/3] items-center justify-center px-6 text-center text-sm text-gray-400">{{ isIncomplete(selected) ? t('pelicanTest.incompletePreview') : t('pelicanTest.htmlUnavailable') }}</p>
           <details class="border-t border-gray-100 p-4 dark:border-dark-700" data-testid="pelican-details">
             <summary class="cursor-pointer text-sm text-gray-500">{{ t('pelicanTest.details') }}</summary>
@@ -81,6 +73,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import PelicanVisualAssessment from '@/components/common/PelicanVisualAssessment.vue'
+import PelicanAnimationPreview from '@/components/common/PelicanAnimationPreview.vue'
 import { pelicanTestsAPI, type PelicanTestItem } from '@/api/pelicanTests'
 import { extractApiErrorMessage } from '@/utils/apiError'
 

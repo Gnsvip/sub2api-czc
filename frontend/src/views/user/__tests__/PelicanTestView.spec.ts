@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { usePelicanStore } from '@/stores/pelican'
 import PelicanTestView from '../PelicanTestView.vue'
 import { pelicanTestsAPI } from '@/api/pelicanTests'
+import { pelicanPreviewViewport } from '@/utils/pelicanPreview'
 
 vi.mock('@/api/pelicanTests', () => ({
   pelicanTestsAPI: { list: vi.fn(), visibility: vi.fn() }
@@ -123,7 +124,7 @@ describe('PelicanTestView', () => {
         {
           id: 10,
           status: 'completed',
-          html: '<html><body><svg id="latest" viewBox="0 0 1 1"></svg></body></html>',
+          html: '<html><style>body{background:#193344}svg{width:100%}</style><body><svg id="latest" viewBox="0 0 1600 900"><animate attributeName="opacity" values="0;1" dur="2s" repeatCount="indefinite"/></svg></body></html>',
           prompt: '创建一个HTML，内容是SVG绘制一个火烈鸟骑自行车的2D动画',
           model: 'gpt-6-astra',
           group_name: 'GPT-PRO',
@@ -135,7 +136,7 @@ describe('PelicanTestView', () => {
         {
           id: 9,
           status: 'completed',
-          html: '<html><body><svg id="older" viewBox="0 0 1 1"></svg></body></html>',
+          html: '<html><body><svg id="older" viewBox="0 0 600 800"></svg></body></html>',
           prompt: '创建一个HTML，内容是SVG绘制一个鹈鹕骑自行车的2D动画',
           model: 'gpt-6-astra',
           group_name: 'GPT-PRO',
@@ -158,6 +159,13 @@ describe('PelicanTestView', () => {
     expect(wrapper.get('[data-testid="pelican-details"]').attributes('open')).toBeUndefined()
     expect(wrapper.get('[data-testid="pelican-details"]').find('pre').exists()).toBe(true)
     expect(wrapper.find('iframe').attributes('srcdoc')).toContain('id="latest"')
+    expect(wrapper.get('iframe').element.style.height).toBe('900px')
+    expect(wrapper.get('iframe').element.style.width).toBe('1600px')
+    expect(wrapper.get('[data-testid="pelican-animation-preview"]').classes()).toContain('aspect-[4/3]')
+    expect(wrapper.get('iframe').classes()).toContain('bg-white')
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('body{background:#193344}')
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('<animate')
+    expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
     expect(wrapper.text()).toContain('火烈鸟')
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(2)
@@ -171,9 +179,47 @@ describe('PelicanTestView', () => {
     expect(timeColumn?.className).toContain('flex-col')
     await buttons[1].trigger('click')
     expect(wrapper.find('iframe').attributes('srcdoc')).toContain('id="older"')
+    expect(wrapper.get('iframe').element.style.height).toBe('800px')
+    expect(wrapper.get('iframe').element.style.width).toBe('600px')
+    expect(wrapper.get('[data-testid="pelican-animation-preview"]').classes()).toContain('aspect-[4/3]')
     expect(wrapper.text()).toContain('鹈鹕')
     expect(wrapper.text()).not.toContain('开始测试')
     expect(wrapper.text()).not.toContain('重新测试')
     wrapper.unmount()
+  })
+})
+
+describe('pelican preview geometry', () => {
+  it.each([
+    ['<svg viewBox="-10 -20 1600 900"></svg>', '1600 / 900'],
+    ['<html><body><div><svg viewBox="0,0,600,800"></svg></div></body></html>', '600 / 800'],
+    ['<svg width="960px" height="540px"></svg>', '960 / 540'],
+    ['<svg width="800" height="600" viewBox="0 0 1600 900"></svg>', '800 / 600'],
+    ['<svg width="100%" height="100%" viewBox="0 0 1200 800"></svg>', '1200 / 800'],
+    ['<svg viewBox="0 0 1.6e3 9e2"><svg viewBox="0 0 20 20"/></svg>', '1600 / 900'],
+    ['<svg viewBox="0 0 100 100"></svg><svg viewBox="0 0 200 100"></svg>', '4 / 3'],
+    ['<div hidden><svg viewBox="0 0 100 100"></svg></div>', '4 / 3'],
+    ['<svg viewBox="0 0 0 900"></svg>', '4 / 3'],
+    ['<svg viewBox="0 0 -1600 900"></svg>', '4 / 3'],
+    ['<svg viewBox="0 0 Infinity 900"></svg>', '4 / 3'],
+    ['<svg viewBox="0 0 1e309 900"></svg>', '4 / 3'],
+    ['<svg viewBox="0,,0,1600,900"></svg>', '4 / 3'],
+    ['<svg viewBox="0 0 1600 900 1"></svg>', '4 / 3'],
+    ['<svg viewBox="0 0 1600 1"></svg>', '4 / 3'],
+    ['<svg width="100%" height="100%"></svg>', '4 / 3'],
+    ['<svg width="800" height="-600"></svg>', '4 / 3'],
+    ['<svg width="800" height="600px;position:fixed"></svg>', '4 / 3'],
+    ['<p>no SVG</p>', '4 / 3'],
+    ['', '4 / 3']
+  ])('reads only a reliable root SVG viewport: %s', (html, expected) => {
+    const { width, height } = pelicanPreviewViewport(html)
+    expect(`${width} / ${height}`).toBe(expected === '4 / 3' ? '800 / 600' : expected)
+  })
+
+  it('does not attach model output or execute its script while reading geometry', () => {
+    const html = '<html><style>body{background:navy}</style><body><svg id="untrusted-pelican-geometry" viewBox="0 0 800 600" onload="throw new Error()"><script>throw new Error("must not execute")</script><animate attributeName="x" values="0;20"/></svg></body></html>'
+    expect(pelicanPreviewViewport(html)).toEqual({ width: 800, height: 600 })
+    expect(document.getElementById('untrusted-pelican-geometry')).toBeNull()
+    expect(pelicanPreviewViewport(' '.repeat(2_000_001))).toEqual({ width: 800, height: 600 })
   })
 })

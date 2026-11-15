@@ -85,6 +85,22 @@ const {
 }));
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
+const { settingsRoute, replaceSettingsRoute } = vi.hoisted(() => ({
+  settingsRoute: { query: {} as Record<string, string>, hash: "" },
+  replaceSettingsRoute: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("vue-router", async () => ({
+  ...await vi.importActual<typeof import("vue-router")>("vue-router"),
+  useRoute: () => settingsRoute,
+  useRouter: () => ({ replace: replaceSettingsRoute }),
+}));
+
+beforeEach(() => {
+  settingsRoute.query = {};
+  settingsRoute.hash = "";
+  replaceSettingsRoute.mockClear();
+});
 
 vi.mock("@/api", () => ({
   adminAPI: {
@@ -564,6 +580,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        GuideEditor: { template: '<div data-test="guide-editor-stub"><input data-test="guide-draft-stub" /></div>' },
       },
     },
   });
@@ -725,6 +742,58 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("opens the guide under general settings only when requested and preserves edits when collapsed", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.attributes('id'))).toEqual([
+      'settings-tab-general', 'settings-tab-agreement', 'settings-tab-features',
+      'settings-tab-security', 'settings-tab-users', 'settings-tab-gateway',
+      'settings-tab-payment', 'settings-tab-email', 'settings-tab-backup',
+    ]);
+    expect(wrapper.find('[data-test="guide-editor-stub"]').exists()).toBe(false);
+    const toggle = wrapper.get('[data-testid="settings-guide-toggle"]');
+    expect(toggle.attributes('type')).toBe('button');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+
+    await toggle.trigger('click');
+    const draft = wrapper.get<HTMLInputElement>('[data-test="guide-draft-stub"]');
+    await draft.setValue('unsaved guide draft');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+    await toggle.trigger('click');
+    expect(wrapper.get('#settings-guide-editor').isVisible()).toBe(false);
+    await toggle.trigger('click');
+    await wrapper.get('#settings-tab-security').trigger('click');
+    await wrapper.get('#settings-tab-general').trigger('click');
+    expect(wrapper.get('[data-test="guide-draft-stub"]').element).toBe(draft.element);
+    expect(draft.element.value).toBe('unsaved guide draft');
+    expect(updateSettings).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each([
+    { query: { tab: 'guide', source: 'bookmark' }, hash: '', legacy: true },
+    { query: { tab: 'general', source: 'bookmark' }, hash: '#settings-guide', legacy: false },
+  ])("opens a bookmarked guide editor from $query.tab", async ({ query, hash, legacy }) => {
+    settingsRoute.query = query;
+    settingsRoute.hash = hash;
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('#settings-tab-general').attributes('aria-selected')).toBe('true');
+    expect(wrapper.find('#settings-tab-guide').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="settings-guide-toggle"]').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get('[data-test="guide-editor-stub"]').isVisible()).toBe(true);
+    if (legacy) {
+      expect(replaceSettingsRoute).toHaveBeenCalledWith({
+        query: { tab: 'general', source: 'bookmark' }, hash: '#settings-guide',
+      });
+    } else {
+      expect(replaceSettingsRoute).not.toHaveBeenCalled();
+    }
+    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {

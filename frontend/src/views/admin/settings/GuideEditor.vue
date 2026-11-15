@@ -31,13 +31,17 @@
           <span class="font-medium text-gray-800 dark:text-gray-200">
             {{ t('admin.settings.guideEditor.currentVersion', { version }) }}
           </span>
-          <span :class="hasCustomContent ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'">
-            {{ hasCustomContent ? t('admin.settings.guideEditor.databaseContent') : t('admin.settings.guideEditor.bundledContent') }}
+          <span data-test="guide-display-mode" :class="displayMode === 'custom' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'">
+            {{ displayMode === 'custom' ? t('admin.settings.guideEditor.databaseContent') : t('admin.settings.guideEditor.bundledContent') }}
           </span>
           <span v-if="updatedAt" class="text-gray-500 dark:text-gray-400">
             {{ t('admin.settings.guideEditor.updatedAt', { date: formatDate(updatedAt) }) }}
           </span>
         </div>
+
+        <p class="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-200" data-test="guide-mode-hint">
+          {{ t(displayMode === 'bundled' ? 'admin.settings.guideEditor.bundledModeHint' : 'admin.settings.guideEditor.customModeHint') }}
+        </p>
 
         <div class="grid min-w-0 gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
           <section class="min-w-0" aria-labelledby="guide-chapter-list-label">
@@ -280,7 +284,7 @@
           <button
             type="button"
             class="btn btn-secondary"
-            :disabled="saving || !hasCustomContent"
+            :disabled="saving || displayMode === 'bundled'"
             @click="confirmReset = true"
           >
             <Icon name="refresh" size="sm" />
@@ -293,7 +297,7 @@
             <button
               type="button"
               class="btn btn-primary"
-              :disabled="saving || !dirty || !chapters.length || chapterTooLarge || contentTooLarge"
+              :disabled="saving || (!dirty && displayMode === 'custom') || !chapters.length || chapterTooLarge || contentTooLarge"
               data-test="guide-save"
               @click="saveGuide"
             >
@@ -423,7 +427,7 @@ const draggingIndex = ref<number | null>(null)
 const pendingDeleteSlug = ref('')
 const version = ref(0)
 const updatedAt = ref('')
-const hasCustomContent = ref(false)
+const displayMode = ref<'bundled' | 'custom'>('bundled')
 const revisions = ref<GuideRevision[]>([])
 const confirmReset = ref(false)
 const pendingRevision = ref<GuideRevision | null>(null)
@@ -611,7 +615,7 @@ function resolveEditableChapters(settings: GuideSettings): GuideChapterPayload[]
 function applyGuideSettings(settings: GuideSettings) {
   version.value = settings.version
   updatedAt.value = settings.updated_at
-  hasCustomContent.value = settings.has_custom_content
+  displayMode.value = settings.display_mode === 'custom' ? 'custom' : 'bundled'
   revisions.value = settings.revisions ?? []
   chapters.value = resolveEditableChapters(settings)
   savedChaptersJson.value = JSON.stringify(chapters.value)
@@ -627,6 +631,7 @@ function applyGuideSettings(settings: GuideSettings) {
  * published content; a revision with neither recorded the bundled guide.
  */
 function revisionHasContent(revision: GuideRevision): boolean {
+  if (revision.display_mode === 'bundled') return false
   return Boolean(revision.chapters?.length) || Boolean(revision.content?.trim())
 }
 

@@ -70,6 +70,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySiteName:                                  "Sub2API",
 		SettingKeySiteLogo:                                  "",
 		SettingKeyAPIBaseURLFollowHost:                      "false",
+		SettingKeyGuideDisplayMode:                          GuideDisplayModeBundled,
 		SettingKeyGuideContent:                              "",
 		SettingKeyGuideChapters:                             "[]",
 		SettingKeyGuideAssets:                               "[]",

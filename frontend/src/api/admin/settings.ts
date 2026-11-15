@@ -41,6 +41,7 @@ export interface GuideChapterPayload {
 
 export interface GuideRevision {
   version: number;
+  display_mode?: "bundled" | "custom";
   /** Absent on revisions published by the chapter editor. */
   content?: string;
   chapters?: GuideChapterPayload[];
@@ -48,6 +49,7 @@ export interface GuideRevision {
 }
 
 export interface GuideSettings {
+  display_mode?: "bundled" | "custom";
   /** Whole-document form, kept for guides published before chapters existed. */
   content?: string;
   chapters?: GuideChapterPayload[];

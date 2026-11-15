@@ -129,6 +129,22 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
+		// Only the bundled, public tutorial is embedded by the same-origin guide
+		// route. Keep API, admin, uploaded assets and every other page unframeable.
+		if c.Request != nil && c.Request.URL != nil &&
+			(c.Request.URL.Path == "/guide-content/" || c.Request.URL.Path == "/guide-content/index.html") &&
+			(c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			c.Header("X-Frame-Options", "SAMEORIGIN")
+			parts := strings.Split(finalPolicy, ";")
+			kept := make([]string, 0, len(parts)+1)
+			for _, part := range parts {
+				fields := strings.Fields(part)
+				if len(fields) > 0 && !strings.EqualFold(fields[0], "frame-ancestors") {
+					kept = append(kept, strings.TrimSpace(part))
+				}
+			}
+			finalPolicy = strings.Join(append(kept, "frame-ancestors 'self'"), "; ")
+		}
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		if isAPIRoutePath(c) {
 			c.Next()

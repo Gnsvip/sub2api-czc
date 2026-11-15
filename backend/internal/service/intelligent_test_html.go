@@ -10,6 +10,14 @@ import (
 
 const intelligentPelicanHTMLLimit = 256 << 10
 
+// Keep the document transparent so the white preview surface is only a fallback:
+// setting html/body backgrounds here would mask the author's own canvas color.
+// Zero-specificity rules in the first cascade layer precede the original styles,
+// which remain authoritative even when the author uses cascade layers too.
+// Keep root and nested SVG viewports intact; the frontend scales the original
+// document viewport as a whole rather than changing the artwork's geometry.
+const intelligentTestHTMLPreviewStyle = `<style data-sub2api-preview-defaults>@layer sub2api-preview-defaults{:where(html){color-scheme:light}:where(html,body){margin:0}:where(svg:not(svg svg)){display:block}}</style>`
+
 var (
 	intelligentBannedHTMLBlocks = []*regexp.Regexp{
 		regexp.MustCompile(`(?is)<script\b[^>]*>.*?</\s*script\s*>`),
@@ -132,7 +140,41 @@ tokens:
 }
 
 func wrapIntelligentTestHTML(inner string) string {
-	return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#0b1220;display:flex;align-items:center;justify-content:center;}svg{max-width:100%;max-height:100%;}</style></head><body>` + inner + `</body></html>`
+	return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>` + inner + `</body></html>`
+}
+
+func addIntelligentTestHTMLPreviewDefaults(doc string) string {
+	// Insert into the original bytes without reserializing or repairing the artwork.
+	// Headless documents receive a head before the author's body/style content.
+	z := html.NewTokenizer(strings.NewReader(doc))
+	offset, htmlOpenEnd := 0, -1
+	for {
+		typeID := z.Next()
+		offset += len(z.Raw())
+		if typeID == html.ErrorToken {
+			break
+		}
+		if typeID != html.StartTagToken {
+			continue
+		}
+		name, _ := z.TagName()
+		switch string(name) {
+		case "html":
+			if htmlOpenEnd < 0 {
+				htmlOpenEnd = offset
+			}
+		case "head":
+			return doc[:offset] + intelligentTestHTMLPreviewStyle + doc[offset:]
+		case "body":
+			if htmlOpenEnd >= 0 {
+				return doc[:htmlOpenEnd] + "<head>" + intelligentTestHTMLPreviewStyle + "</head>" + doc[htmlOpenEnd:]
+			}
+		}
+	}
+	if htmlOpenEnd >= 0 {
+		return doc[:htmlOpenEnd] + "<head>" + intelligentTestHTMLPreviewStyle + "</head>" + doc[htmlOpenEnd:]
+	}
+	return doc
 }
 
 func SanitizeIntelligentTestHTML(output string) (string, error) {
@@ -161,6 +203,7 @@ func sanitizeIntelligentTestHTML(output string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	doc = addIntelligentTestHTMLPreviewDefaults(doc)
 	if len(doc) > intelligentPelicanHTMLLimit {
 		return "", false, errors.New("HTML 超过 256 KiB 上限")
 	}

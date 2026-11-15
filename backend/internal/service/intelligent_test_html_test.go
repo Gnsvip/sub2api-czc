@@ -14,6 +14,9 @@ func TestSanitizeIntelligentTestHTMLWrapsSVGAndStripsScript(t *testing.T) {
 	require.Contains(t, html, "<html")
 	require.Contains(t, html, "<svg")
 	require.Contains(t, html, "<animate")
+	require.Contains(t, html, intelligentTestHTMLPreviewStyle)
+	require.NotContains(t, html, "#0b1220")
+	require.NotContains(t, html, "display:flex")
 	require.NotContains(t, html, "<script")
 	require.NotContains(t, html, "alert(1)")
 }
@@ -60,6 +63,8 @@ func TestPreviewIntelligentTestHTMLPreservesFragmentLayout(t *testing.T) {
 	doc, issue := PreviewIntelligentTestHTML("Here is the animation:\n```html\n" + fragment + "\n```\nEnd of example.")
 	require.Empty(t, issue)
 	require.Contains(t, doc, fragment)
+	require.Contains(t, doc, intelligentTestHTMLPreviewStyle)
+	require.Less(t, strings.Index(doc, intelligentTestHTMLPreviewStyle), strings.Index(doc, fragment))
 	require.True(t, strings.HasPrefix(doc, "<!DOCTYPE html>"))
 	require.NotContains(t, doc, "```")
 	require.NotContains(t, doc, "Here is the animation")
@@ -85,18 +90,32 @@ func TestPreviewIntelligentTestHTMLPreservesFragmentText(t *testing.T) {
 func TestPreviewIntelligentTestHTMLPreservesCompleteDocuments(t *testing.T) {
 	t.Parallel()
 	for name, output := range map[string]string{
-		"doctype retained":        `<!doctype HTML><HTML><body><SVG><SVG /></SVG></body></HTML>`,
-		"public doctype retained": `<!doctype html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html><body><svg></svg></body></html>`,
-		"doctype added":           `<html><head><style>svg{width:800px}</style></head><body><svg></svg></body></html>`,
+		"doctype retained":             `<!doctype HTML><HTML><body><SVG><SVG /></SVG></body></HTML>`,
+		"public doctype retained":      `<!doctype html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html><body><svg></svg></body></html>`,
+		"doctype added":                `<html><head><style>svg{width:800px}</style></head><body><svg></svg></body></html>`,
+		"author background and layout": `<html style="background:#123456"><head><style>body{margin:24px;display:grid;background:#112233}svg{width:800px;height:500px}</style></head><body><svg viewBox="0 0 800 500"><svg x="10" y="20" width="30" height="40"><animate attributeName="x" values="10;20;10" dur="2s" repeatCount="indefinite"/></svg></svg></body></html>`,
+		"inline body background":       `<html><body style="background:black;margin:12px"><svg width="900" height="500"></svg></body></html>`,
+		"head-like comment and attr":   `<html><!-- <head> --><body data-label="<head>"><svg viewBox="0 0 9 5"></svg></body></html>`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			doc, issue := PreviewIntelligentTestHTML(output)
 			require.Empty(t, issue)
+			require.Equal(t, 1, strings.Count(doc, intelligentTestHTMLPreviewStyle))
+			// The only addition is the shared default stylesheet (and a head if
+			// absent). Original styles, geometry, animation and text stay intact.
+			withoutDefaults := strings.Replace(doc, "<head>"+intelligentTestHTMLPreviewStyle+"</head>", "", 1)
+			withoutDefaults = strings.Replace(withoutDefaults, intelligentTestHTMLPreviewStyle, "", 1)
 			if strings.HasPrefix(output, "<!doctype") {
-				require.Equal(t, output, doc)
+				require.Equal(t, output, withoutDefaults)
 			} else {
-				require.Equal(t, "<!DOCTYPE html>"+output, doc)
+				require.Equal(t, "<!DOCTYPE html>"+output, withoutDefaults)
 			}
+			require.NotContains(t, intelligentTestHTMLPreviewStyle, "background")
+			require.NotContains(t, intelligentTestHTMLPreviewStyle, "!important")
+			require.Contains(t, intelligentTestHTMLPreviewStyle, ":where(html,body){margin:0}")
+			require.Contains(t, intelligentTestHTMLPreviewStyle, ":where(svg:not(svg svg))")
+			require.NotContains(t, intelligentTestHTMLPreviewStyle, "height:")
+			require.NotContains(t, intelligentTestHTMLPreviewStyle, "width:")
 		})
 	}
 }

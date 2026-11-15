@@ -8,7 +8,8 @@
       <button class="text-xs text-primary-600 hover:underline dark:text-primary-300" @click="emit('history', account.account_id, summary.test_type)">历史 {{ summary.history_count }}</button>
     </div>
     <p class="px-4 pt-3 text-xs font-medium text-gray-600 dark:text-gray-300">{{ testName(summary.test_type) }}</p>
-    <button class="m-4 mb-3 flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl bg-gray-50 text-left dark:bg-dark-900"
+    <button class="m-4 mb-3 flex items-center justify-center overflow-hidden rounded-xl bg-gray-50 text-left dark:bg-dark-900"
+      :class="resultRecord && summary.test_type === 'pelican' && !isPending(resultRecord.status) ? '' : 'aspect-[4/3]'"
       :disabled="!resultRecord" :aria-label="`查看账号 ${account.account_id} 的${testName(summary.test_type)}结果`" @click="resultRecord && emit('detail', resultRecord.id)">
       <TestGeneratedImage v-if="resultRecord && summary.test_type === 'pelican' && !isPending(resultRecord.status)" :source="resultRecord.result_image" :record-id="resultRecord.id" animated />
       <div v-else-if="resultRecord?.result" class="max-h-full overflow-hidden p-5">

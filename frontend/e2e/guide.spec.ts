@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const publicSettings = {
   registration_enabled: true,
@@ -82,78 +84,131 @@ async function preparePublicGuide(page: Page) {
       version: 0,
       updated_at: '',
       has_custom_content: false,
+      display_mode: 'bundled',
     },
   }))
 }
 
-test('public guide workflow', async ({ context, page }, testInfo) => {
+// Exercise the built entry using the server's production script policy, with
+// the exact same-origin embedding exception used for this document only.
+const configSource = readFileSync(resolve(process.cwd(), '../backend/internal/config/config.go'), 'utf8')
+const defaultPolicy = configSource.match(/const DefaultCSPPolicy = "([^"]+)"/)?.[1]
+if (!defaultPolicy) throw new Error('DefaultCSPPolicy was not found')
+const guidePolicy = defaultPolicy.replace('__CSP_NONCE__', "'nonce-guide-browser-check'")
+  .replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+
+async function applyGuideCsp(page: Page) {
+  await page.route(/\/guide-content\/(?:index\.html)?(?:\?.*)?$/, async (route) => {
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      headers: {
+        ...response.headers(),
+        'content-security-policy': guidePolicy,
+        'x-frame-options': 'SAMEORIGIN',
+      },
+    })
+  })
+}
+
+test('public guide workflow under production CSP', async ({ context, page }, testInfo) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /content security policy|violates.*directive/i.test(message.text())) errors.push(message.text())
+  })
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await preparePublicGuide(page)
+  await applyGuideCsp(page)
   await page.goto('/guide')
 
-  await expect(page).toHaveURL(/\/guide$/)
-  await expect(page.locator('[data-test="guide-view"]')).toBeVisible()
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('从充值到第一次使用')
-  await expect(page.locator('#recharge')).toHaveText('充值：先买兑换码，再兑换余额')
-  await expect(page.locator('#goal-workflow')).toHaveText('使用 goal-workflow 小助手')
-  await expect(page.locator('#svip')).toHaveText('SVIP 能得到什么、需要注意什么')
+  const frame = page.frameLocator('[data-test="aifxo-guide-frame"]')
+  await expect(frame.locator('#overview.active')).toBeVisible()
+  await expect(frame.locator('.page')).toHaveCount(15)
+  await expect(frame.locator('script:not([src])')).toHaveCount(0)
+  await expect(frame.locator('body')).not.toContainText('本地预览')
+  await expect(frame.locator('body')).not.toContainText('HTML 预览版')
+  await expect(frame.locator('a[href*="127.0.0.1"], a[href*="localhost"]')).toHaveCount(0)
 
-  const sameHostPaths = ['/purchase', '/redeem', '/keys']
-  for (const path of sameHostPaths) {
-    const link = page.locator(`a[href="${path}"]`).first()
-    await expect(link).toBeAttached()
-    const resolved = new URL(await link.getAttribute('href') || '', page.url())
-    expect(resolved.host).toBe(new URL(page.url()).host)
-  }
+  // Search works within the isolated page and updates the shareable /guide hash.
+  await frame.locator('#search').fill('流式输出')
+  await frame.locator('#search').press('Enter')
+  await expect(frame.locator('#streaming.active')).toBeVisible()
+  await expect(page).toHaveURL(/#streaming$/)
+  await expect(frame.locator('#streaming')).toContainText('response.completed')
+  await expect(frame.locator('#streaming')).toContainText('[DONE]')
 
-  await expect(page.locator('#domains')).toHaveText('本站网址与 API 地址')
-  await expect(page.getByRole('row').filter({ hasText: '网站、登录和控制台入口' }))
-    .toContainText('https://www.aifxo.com/')
-  await expect(page.getByRole('row').filter({ hasText: 'API 根地址（客户端要求根地址时）' }))
-    .toContainText('https://api.aifxo.com')
-  await expect(page.locator('a[href="/redeem-store"]')).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'AIFXO', exact: true }))
-    .toHaveAttribute('href', 'https://www.aifxo.com/')
-  await expect(page.locator('a[href="https://api.aifxo.com"]')).toHaveCount(0)
-  await expect(page.locator('#speed-script')).toHaveText('检查与 AIFXO 的连接')
-  await expect(page.locator('[data-test="guide-content"]')).toContainText('https://api.aifxo.com/v1')
-  await expect(page.locator('[data-test="guide-download"]')).toHaveCount(0)
-  await expect(page.locator('[data-test="guide-content"]')).not.toContainText('key66.cc.cd')
-
-  const copyButton = page.locator('[data-test="copy-goal-example"]')
-  await copyButton.click()
-  await expect(page.locator('[data-test="guide-view"] p[aria-live="polite"]'))
-    .toContainText('使用 goal-workflow 已复制')
+  // Deep links from the parent page reveal hidden panels and preserve file guidance.
+  await page.evaluate(() => { window.location.hash = '#codex-auth-file' })
+  await expect(frame.locator('#codex.active')).toBeVisible()
+  await expect(frame.locator('#legacy-mode')).toBeVisible()
+  await expect(frame.locator('#desktop-install')).toBeVisible()
+  const auth = frame.locator('[data-code="codex-auth"]')
+  await expect(auth).toContainText('"OPENAI_API_KEY": "YOUR-API-KEY"')
+  await expect(auth).not.toContainText('auth_mode')
+  await auth.getByRole('button', { name: '复制代码' }).click()
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe('$goal-workflow 清理内存')
-  const closeToastButton = page.getByRole('button', { name: 'Close notification' })
-  await closeToastButton.click()
-  await expect(closeToastButton).toHaveCount(0)
+    .toBe('{\n  "OPENAI_API_KEY": "YOUR-API-KEY"\n}')
+
+  // The gallery loads one selected image only after expansion.
+  const gallery = frame.locator('#desktop-install .gallery').first()
+  await expect(gallery.locator('img')).not.toHaveAttribute('src')
+  await gallery.locator('summary').click()
+  await expect.poll(() => gallery.locator('img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const firstImage = await gallery.locator('img').getAttribute('src')
+  await gallery.getByRole('button', { name: '下一张截图' }).click()
+  await expect(gallery.locator('img')).not.toHaveAttribute('src', firstImage || '')
+  await gallery.getByRole('button', { name: '放大当前截图' }).click()
+  await expect(frame.locator('dialog')).toBeVisible()
+  await frame.getByRole('button', { name: '关闭预览' }).click()
+  await expect(frame.locator('dialog')).not.toBeVisible()
+
+  await page.evaluate(() => { window.location.hash = '#tools' })
+  await expect(frame.locator('#tools.active')).toBeVisible()
+  await expect(frame.locator('.download-row a')).toHaveAttribute('href',
+    'https://github.com/Gnsvip/sub2api-czc/releases/download/czc-v2026.11.15.4/AIFXO-Config-1.2.0-Windows-x64.zip')
+  await frame.getByRole('tab', { name: 'CC Switch', exact: true }).click()
+  await expect(frame.locator('#tools-switch-panel')).toBeVisible()
+  await expect(frame.locator('#tools-aifxo-panel')).not.toBeVisible()
 
   if (testInfo.project.name === 'mobile-390x844') {
-    const tocToggle = page.locator('[data-test="mobile-toc-toggle"]')
-    await expect(tocToggle).toBeVisible()
-    await tocToggle.click()
-    await expect(tocToggle).toHaveAttribute('aria-expanded', 'true')
-    await page.locator('#mobile-guide-toc a[href="#recharge"]').click()
-    await expect(tocToggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(page).toHaveURL(/#recharge$/)
+    await frame.getByRole('button', { name: '展开目录' }).click()
+    await expect(frame.locator('.menu')).toHaveAttribute('aria-expanded', 'true')
+    await frame.locator('.sidebar a[href="#usage"]').click()
+    await expect(frame.locator('.menu')).toHaveAttribute('aria-expanded', 'false')
+    await expect(page).toHaveURL(/#usage$/)
   } else {
-    await expect(page.locator('aside[aria-label="教程目录"]')).toBeVisible()
+    await expect(frame.locator('.sidebar')).toBeVisible()
   }
 
-  const layout = await page.evaluate(() => ({
-    documentWidth: document.documentElement.scrollWidth,
-    viewportWidth: document.documentElement.clientWidth,
-  }))
-  expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth + 1)
+  // Every page fits a narrow viewport, and only one article is active.
+  const ids = await frame.locator('.page').evaluateAll((pages) => pages.map((item) => item.id))
+  for (const id of ids) {
+    await page.evaluate((hash) => { window.location.hash = hash }, `#${id}`)
+    await expect(frame.locator(`#${id}.active`)).toBeVisible()
+    await expect(frame.locator('.page.active')).toHaveCount(1)
+    const layout = await frame.locator('html').evaluate((html) => ({
+      documentWidth: html.scrollWidth, viewportWidth: html.clientWidth,
+    }))
+    expect(layout.documentWidth, id).toBeLessThanOrEqual(layout.viewportWidth + 1)
+  }
+  const links = await frame.locator('a[href^="https://"]').evaluateAll((anchors) => anchors.map((anchor) => ({
+    target: anchor.getAttribute('target'), rel: anchor.getAttribute('rel'),
+  })))
+  for (const link of links) {
+    expect(link.target).toBe('_blank')
+    expect(link.rel).toContain('noopener')
+  }
+  expect(errors).toEqual([])
+  await page.evaluate(() => { window.location.hash = '#overview' })
+  await expect(frame.locator('#overview.active')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath(`guide-${testInfo.project.name}-viewport.png`) })
+})
 
-  await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({
-    path: testInfo.outputPath(`guide-${testInfo.project.name}-viewport.png`),
-  })
-  await page.screenshot({
-    path: testInfo.outputPath(`guide-${testInfo.project.name}.png`),
-    fullPage: true,
-  })
+test('legacy chapter links still open the corresponding modern section', async ({ page }) => {
+  await preparePublicGuide(page)
+  await applyGuideCsp(page)
+  await page.goto('/guide#recharge')
+  const frame = page.frameLocator('[data-test="aifxo-guide-frame"]')
+  await expect(frame.locator('#start.active')).toBeVisible()
 })

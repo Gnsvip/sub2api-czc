@@ -155,3 +155,47 @@ func TestSettingHandler_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *
 	require.True(t, resp.Data.WeChatOAuthOpenEnabled)
 	require.True(t, resp.Data.WeChatOAuthMPEnabled)
 }
+
+func TestSettingHandler_GetPublicGuideHonorsDisplayMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []string{"", "invalid", service.GuideDisplayModeBundled, service.GuideDisplayModeCustom} {
+		t.Run("mode_"+mode, func(t *testing.T) {
+			repo := &settingHandlerPublicRepoStub{values: map[string]string{
+				service.SettingKeyGuideDisplayMode: mode,
+				service.SettingKeyGuideContent:     "## Retained custom content",
+				service.SettingKeyGuideVersion:     "5",
+				service.SettingKeyGuideRevisions:   `[{"version":4,"content":"admin-only history"}]`,
+			}}
+			h := NewSettingHandler(service.NewSettingService(repo, &config.Config{}), "test-version")
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/settings/guide", nil)
+			h.GetPublicGuide(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var resp struct {
+				Data struct {
+					Content          string                 `json:"content"`
+					Chapters         []service.GuideChapter `json:"chapters"`
+					DisplayMode      string                 `json:"display_mode"`
+					HasCustomContent bool                   `json:"has_custom_content"`
+					Version          int                    `json:"version"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+			require.Equal(t, 5, resp.Data.Version)
+			require.NotContains(t, recorder.Body.String(), "admin-only history")
+			if mode == service.GuideDisplayModeCustom {
+				require.Equal(t, service.GuideDisplayModeCustom, resp.Data.DisplayMode)
+				require.True(t, resp.Data.HasCustomContent)
+				require.Equal(t, "## Retained custom content", resp.Data.Content)
+				require.Len(t, resp.Data.Chapters, 1)
+			} else {
+				require.Equal(t, service.GuideDisplayModeBundled, resp.Data.DisplayMode)
+				require.False(t, resp.Data.HasCustomContent)
+				require.Empty(t, resp.Data.Content)
+				require.Empty(t, resp.Data.Chapters)
+			}
+			require.Equal(t, "## Retained custom content", repo.values[service.SettingKeyGuideContent])
+		})
+	}
+}

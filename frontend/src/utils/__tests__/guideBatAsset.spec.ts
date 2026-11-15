@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 const dir = dirname(fileURLToPath(import.meta.url))
 const batPath = resolve(dir, '../../../public/downloads/select-fastest-codex-base-url.bat')
 const guideDir = resolve(dir, '../../../../docs/guide')
-const guideViewPath = resolve(dir, '../../views/public/GuideView.vue')
+const guideViewPath = resolve(dir, '../../views/public/CustomGuideView.vue')
 const vipPath = resolve(dir, '../../../../backend/internal/service/vip.go')
 
 // The guide is one file per chapter; join them in filename order so the
@@ -19,8 +19,30 @@ const guide = guideChapterFiles
   .join('\n\n')
 const guideViewSource = readFileSync(guideViewPath, 'utf8')
 const vipSource = readFileSync(vipPath, 'utf8')
+const modernGuideDir = resolve(dir, '../../../guide-content')
+const modernGuide = readFileSync(resolve(modernGuideDir, 'index.html'), 'utf8')
+const modernSnippets = readFileSync(resolve(modernGuideDir, 'snippets.js'), 'utf8')
 
 describe('bundled AIFXO guide', () => {
+  it('ships the approved fifteen-page tutorial with external scripts and production downloads', () => {
+    const pages = [...modernGuide.matchAll(/<article class="page(?: active)?" id="([^"]+)"/g)].map((match) => match[1])
+    expect(pages).toEqual([
+      'overview', 'start', 'codex', 'tools', 'openclaw', 'kilo', 'claude',
+      'api-responses', 'api-chat', 'api-messages', 'streaming', 'tool-calls', 'usage', 'faq', 'support',
+    ])
+    expect(modernGuide).toContain('<script type="module" src="./main.js"></script>')
+    expect(modernGuide).not.toMatch(/<script(?![^>]*\bsrc=)/)
+    expect(modernGuide).not.toMatch(/127\.0\.0\.1|localhost|本地预览|HTML 预览版/)
+    expect(modernGuide).toContain('https://github.com/Gnsvip/sub2api-czc/releases/download/czc-v2026.11.15.4/AIFXO-Config-1.2.0-Windows-x64.zip')
+    expect(modernGuide).toContain('id="codex-auth-file"')
+    expect(modernGuide).toContain('特别注意：不要添加')
+    expect(modernGuide).toContain('Microsoft Store')
+    expect(modernGuide).toContain('response.completed')
+    expect(modernSnippets).toContain('https://api.aifxo.com/v1/responses')
+    expect(modernGuide).toContain('https://api.aifxo.com/v1/messages')
+    expect(modernSnippets).toContain('https://api.aifxo.com/v1/usage')
+  })
+
   it('uses the AIFXO endpoint and does not ship the retired domain-switching tool', () => {
     expect(guide).toContain('https://api.aifxo.com/v1/models')
     expect(guide).toContain('base_url = "https://api.aifxo.com/v1"')

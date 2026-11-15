@@ -74,6 +74,7 @@ describe('GuideEditor', () => {
         { slug: 'beta', title: '第二章', content: '## 第二章\n\n第二章内容' },
       ],
       version: 3,
+      display_mode: 'custom',
       updated_at: '2026-08-30T10:00:00Z',
       has_custom_content: true,
       revisions: [{
@@ -89,6 +90,7 @@ describe('GuideEditor', () => {
         { slug: 'beta', title: '第二章', content: '## 第二章\n\n第二章内容' },
       ],
       version: 4,
+      display_mode: 'custom',
       updated_at: '2026-08-30T11:00:00Z',
       has_custom_content: true,
       revisions: [],
@@ -295,5 +297,35 @@ describe('GuideEditor', () => {
 
     await wrapper.get('[data-test="guide-markdown"]').setValue('## 第一章\n\n改过了')
     expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps saved chapters editable in bundled mode and switches only on explicit publish', async () => {
+    const saved = await getGuideSettings()
+    getGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled' })
+    const wrapper = mountEditor()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="guide-display-mode"]').text()).toContain('bundledContent')
+    expect(wrapper.get('[data-test="guide-mode-hint"]').text()).toContain('bundledModeHint')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toBe('## 第一章\n\n旧内容')
+    expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeUndefined()
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+
+    // No text change is required to republish retained content as the custom guide.
+    await wrapper.get('[data-test="guide-save"]').trigger('click')
+    await flushPromises()
+    expect(updateGuideSettings).toHaveBeenCalledWith({ chapters: saved.chapters, expected_version: 3 })
+    expect(wrapper.get('[data-test="guide-display-mode"]').text()).toContain('databaseContent')
+  })
+
+  it('defaults an absent display mode to bundled without publishing edits', async () => {
+    const saved = await getGuideSettings()
+    getGuideSettings.mockResolvedValue({ ...saved, display_mode: undefined })
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 草稿\n\n尚未发布')
+    expect(wrapper.get('[data-test="guide-display-mode"]').text()).toContain('bundledContent')
+    expect(updateGuideSettings).not.toHaveBeenCalled()
   })
 })

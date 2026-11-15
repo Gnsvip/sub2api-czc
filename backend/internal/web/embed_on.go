@@ -98,6 +98,11 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
+		// embed.FS does not accept directory names with a trailing slash.
+		// Check the guide's exact index file while FileServer retains the URL.
+		if cleanPath == "guide-content/" {
+			cleanPath = "guide-content/index.html"
+		}
 
 		// For index.html or SPA routes, serve with injected settings
 		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
@@ -321,6 +326,9 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
+		if cleanPath == "guide-content/" {
+			cleanPath = "guide-content/index.html"
+		}
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
 			// Try local override first

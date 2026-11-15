@@ -2,10 +2,11 @@ import { defineConfig, devices } from '@playwright/test'
 
 const port = Number(process.env.PLAYWRIGHT_PORT || 43179)
 const baseURL = `http://127.0.0.1:${port}`
+const viteCommand = process.env.PLAYWRIGHT_PREVIEW_BUILD === '1' ? 'vite preview' : 'vite'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['risk-control.spec.ts', 'guide.spec.ts', 'guide-admin.spec.ts', 'performance-optimization.spec.ts'],
+  testMatch: ['risk-control.spec.ts', 'guide.spec.ts', 'guide-admin.spec.ts', 'performance-optimization.spec.ts', 'pelican-preview.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -32,7 +33,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `corepack pnpm@9.15.9 --ignore-workspace exec vite --host 127.0.0.1 --strictPort --port ${port}`,
+    command: `corepack pnpm@9.15.9 --ignore-workspace exec ${viteCommand} --host 127.0.0.1 --strictPort --port ${port}`,
     url: baseURL,
     // Tests mock all APIs. Never let Vite's HTML settings fetch reach production.
     env: { VITE_DEV_PROXY_TARGET: 'http://127.0.0.1:9', VITE_API_BASE_URL: '/api/v1' },

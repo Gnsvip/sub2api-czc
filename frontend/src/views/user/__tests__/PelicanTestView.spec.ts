@@ -1,11 +1,43 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePelicanStore } from '@/stores/pelican'
 import PelicanTestView from '../PelicanTestView.vue'
+import PelicanAnimationPreview from '@/components/common/PelicanAnimationPreview.vue'
 import { pelicanTestsAPI } from '@/api/pelicanTests'
-import { pelicanPreviewViewport } from '@/utils/pelicanPreview'
+import { pelicanPreviewBackground, pelicanPreviewViewport } from '@/utils/pelicanPreview'
+
+let nextPaintId = 0
+const paintCallbacks = new Map<number, FrameRequestCallback>()
+beforeEach(() => {
+  nextPaintId = 0
+  paintCallbacks.clear()
+  vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+    const id = ++nextPaintId
+    paintCallbacks.set(id, callback)
+    return id
+  }))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => { paintCallbacks.delete(id) }))
+})
+afterEach(() => {
+  paintCallbacks.clear()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+function paintNextFrame() {
+  const callbacks = [...paintCallbacks.values()]
+  paintCallbacks.clear()
+  callbacks.forEach(callback => callback(0))
+}
+
+async function loadPreview(wrapper: VueWrapper) {
+  await wrapper.get('iframe[data-preview-state="pending"]').trigger('load')
+  paintNextFrame()
+  paintNextFrame()
+  await flushPromises()
+}
 
 vi.mock('@/api/pelicanTests', () => ({
   pelicanTestsAPI: { list: vi.fn(), visibility: vi.fn() }
@@ -34,12 +66,15 @@ const messages = {
       incompletePreview: '本次输出未完成，请选择其他时间的结果。',
       scriptsRemoved: '原答复包含脚本，当前预览不执行脚本，部分画面或动画可能无法显示。',
       prompt: '原始提示词',
+      previewLoading: '正在加载画面…',
+      previewLoadTimeout: '画面加载超时',
+      previewRetry: '重试',
       loadFailed: '加载失败'
     }
   }
 }
 
-function mountView() {
+function createTestI18n() {
   // Production and tests use the CSP-safe runtime build, which accepts
   // precompiled message functions rather than compiling strings at runtime.
   const compiled = {
@@ -48,7 +83,18 @@ function mountView() {
       pelicanTest: Object.fromEntries(Object.entries(messages.zh.pelicanTest).map(([key, value]) => [key, () => value]))
     }
   }
-  const i18n = createI18n({ legacy: false, locale: 'zh', messages: compiled })
+  return createI18n({ legacy: false, locale: 'zh', messages: compiled })
+}
+
+function mountPreview(html: string) {
+  return mount(PelicanAnimationPreview, {
+    props: { html, title: 'preview' },
+    global: { plugins: [createTestI18n()] },
+  })
+}
+
+function mountView() {
+  const i18n = createTestI18n()
   const pinia = createPinia()
   setActivePinia(pinia)
   usePelicanStore().setVisible(true)
@@ -86,6 +132,7 @@ describe('PelicanTestView', () => {
     })
     const wrapper = mountView()
     await flushPromises()
+    await loadPreview(wrapper)
     expect(wrapper.get('iframe').attributes('srcdoc')).toContain('id="complete"')
     const buttons = wrapper.findAll('button')
     expect(buttons[0].text()).toContain('输出未完成')
@@ -109,6 +156,7 @@ describe('PelicanTestView', () => {
     })
     const wrapper = mountView()
     await flushPromises()
+    await loadPreview(wrapper)
     expect(wrapper.get('article > p[role="status"]').text()).toContain('当前预览不执行脚本')
     expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
     usePelicanStore().setVisible(false)
@@ -152,6 +200,7 @@ describe('PelicanTestView', () => {
     })
     const wrapper = mountView()
     await flushPromises()
+    await loadPreview(wrapper)
     expect(pelicanTestsAPI.list).toHaveBeenCalledWith(1, 33)
     expect(wrapper.findAll('h1')).toHaveLength(1)
     expect(wrapper.get('h1').classes()).toContain('lg:hidden')
@@ -162,7 +211,10 @@ describe('PelicanTestView', () => {
     expect(wrapper.get('iframe').element.style.height).toBe('900px')
     expect(wrapper.get('iframe').element.style.width).toBe('1600px')
     expect(wrapper.get('[data-testid="pelican-animation-preview"]').classes()).toContain('aspect-[4/3]')
-    expect(wrapper.get('iframe').classes()).toContain('bg-white')
+    expect(wrapper.get('iframe').classes()).not.toContain('bg-white')
+    expect(wrapper.get('iframe').element.style.backgroundColor).toBe('transparent')
+    expect(wrapper.get<HTMLElement>('[data-testid="pelican-animation-preview"]').element.style.backgroundColor)
+      .toBe('rgb(25, 51, 68)')
     expect(wrapper.get('iframe').attributes('srcdoc')).toContain('body{background:#193344}')
     expect(wrapper.get('iframe').attributes('srcdoc')).toContain('<animate')
     expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
@@ -178,6 +230,12 @@ describe('PelicanTestView', () => {
     expect(timeColumn?.parentElement).toBe(wrapper.find('article').element.parentElement)
     expect(timeColumn?.className).toContain('flex-col')
     await buttons[1].trigger('click')
+    expect(wrapper.findAll('iframe')).toHaveLength(2)
+    expect(wrapper.get('iframe[data-preview-state="active"]').attributes('srcdoc')).toContain('id="latest"')
+    expect(wrapper.get<HTMLIFrameElement>('iframe[data-preview-state="active"]').element.style.height).toBe('900px')
+    expect(wrapper.get('[data-testid="pelican-animation-preview"]').attributes('aria-busy')).toBe('true')
+    await loadPreview(wrapper)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
     expect(wrapper.find('iframe').attributes('srcdoc')).toContain('id="older"')
     expect(wrapper.get('iframe').element.style.height).toBe('800px')
     expect(wrapper.get('iframe').element.style.width).toBe('600px')
@@ -186,6 +244,119 @@ describe('PelicanTestView', () => {
     expect(wrapper.text()).not.toContain('开始测试')
     expect(wrapper.text()).not.toContain('重新测试')
     wrapper.unmount()
+  })
+})
+
+describe('pelican preview frame replacement', () => {
+  const first = '<svg viewBox="0 0 900 600" style="background:#e9efe4;border-radius:24px"><animate attributeName="opacity" values="0;1" dur="2s"/></svg>'
+  const second = '<svg viewBox="0 0 600 800" style="background:#fff7e7"></svg>'
+  const third = '<svg viewBox="0 0 1200 600" style="background:#123456"></svg>'
+
+  it('keeps the visible frame and its color until the new document has loaded and painted', async () => {
+    const wrapper = mountPreview(first)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').attributes('data-preview-state')).toBe('pending')
+    expect(wrapper.get('iframe').element.style.opacity).toBe('0')
+    await loadPreview(wrapper)
+    const oldFrame = wrapper.get('iframe').element
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+    expect(wrapper.get<HTMLElement>('[data-testid="pelican-animation-preview"]').element.style.backgroundColor).toBe('rgb(233, 239, 228)')
+
+    await wrapper.setProps({ html: second })
+    const active = wrapper.get<HTMLIFrameElement>('iframe[data-preview-state="active"]')
+    expect(active.element).toBe(oldFrame)
+    expect(active.element.style.width).toBe('900px')
+    expect(active.element.style.height).toBe('600px')
+    expect(active.element.style.opacity).toBe('1')
+    expect(wrapper.get<HTMLElement>('[data-testid="pelican-animation-preview"]').element.style.backgroundColor).toBe('rgb(233, 239, 228)')
+    expect(wrapper.get('iframe[data-preview-state="pending"]').attributes('sandbox')).toBe('')
+    expect(wrapper.get('iframe[data-preview-state="pending"]').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get<HTMLIFrameElement>('iframe[data-preview-state="pending"]').element.style.pointerEvents).toBe('none')
+
+    await wrapper.get('iframe[data-preview-state="pending"]').trigger('load')
+    paintNextFrame()
+    await flushPromises()
+    expect(wrapper.findAll('iframe')).toHaveLength(2)
+    expect(wrapper.get('iframe[data-preview-state="active"]').element).toBe(oldFrame)
+    paintNextFrame()
+    await flushPromises()
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').element).not.toBe(oldFrame)
+    expect(wrapper.get('iframe').attributes('srcdoc')).toBe(second)
+    expect(wrapper.get<HTMLElement>('[data-testid="pelican-animation-preview"]').element.style.backgroundColor).toBe('rgb(255, 247, 231)')
+    expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
+    expect(wrapper.get('iframe').attributes('referrerpolicy')).toBe('no-referrer')
+    expect(wrapper.get('iframe').element.style.backgroundColor).toBe('transparent')
+    wrapper.unmount()
+  })
+
+  it('discards stale loads during rapid switching and never retains more than two frames', async () => {
+    const wrapper = mountPreview(first)
+    await loadPreview(wrapper)
+    const original = wrapper.get('iframe').element
+    await wrapper.setProps({ html: second })
+    await wrapper.get('iframe[data-preview-state="pending"]').trigger('load')
+    paintNextFrame()
+    const stalePaint = [...paintCallbacks.values()]
+    await wrapper.setProps({ html: third })
+    stalePaint.forEach(callback => callback(0))
+    await flushPromises()
+    expect(wrapper.findAll('iframe')).toHaveLength(2)
+    expect(wrapper.get('iframe[data-preview-state="active"]').element).toBe(original)
+    expect(wrapper.get('iframe[data-preview-state="pending"]').attributes('srcdoc')).toBe(third)
+    await loadPreview(wrapper)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').attributes('srcdoc')).toBe(third)
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('cancels pending work when reselecting the current animation or unmounting', async () => {
+    const wrapper = mountPreview(first)
+    await loadPreview(wrapper)
+    const original = wrapper.get('iframe').element
+    await wrapper.setProps({ html: second })
+    await wrapper.get('iframe[data-preview-state="pending"]').trigger('load')
+    await wrapper.setProps({ html: first })
+    expect(paintCallbacks.size).toBe(0)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').element).toBe(original)
+    await wrapper.setProps({ html: third })
+    await wrapper.get('iframe[data-preview-state="pending"]').trigger('load')
+    expect(paintCallbacks.size).toBe(1)
+    wrapper.unmount()
+    expect(paintCallbacks.size).toBe(0)
+  })
+
+  it('shows delayed loading, times out without replacing the old frame, and retries the selected HTML', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountPreview(first)
+    await loadPreview(wrapper)
+    const original = wrapper.get('iframe').element
+    await wrapper.setProps({ html: second })
+    await vi.advanceTimersByTimeAsync(249)
+    expect(wrapper.find('[data-testid="pelican-preview-status"]').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(wrapper.get('[data-testid="pelican-preview-status"]').text()).toContain('正在加载画面')
+    await vi.advanceTimersByTimeAsync(9750)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').element).toBe(original)
+    expect(wrapper.attributes('aria-busy')).toBe('false')
+    expect(wrapper.get('[data-testid="pelican-preview-status"]').text()).toContain('画面加载超时')
+    expect(vi.getTimerCount()).toBe(0)
+    await wrapper.get('[data-testid="pelican-preview-retry"]').trigger('click')
+    expect(wrapper.findAll('iframe')).toHaveLength(2)
+    expect(wrapper.get('iframe[data-preview-state="pending"]').attributes('srcdoc')).toBe(second)
+    expect(wrapper.attributes('aria-busy')).toBe('true')
+    await loadPreview(wrapper)
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.get('iframe').attributes('srcdoc')).toBe(second)
+    expect(wrapper.find('[data-testid="pelican-preview-status"]').exists()).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    await wrapper.setProps({ html: third })
+    expect(vi.getTimerCount()).toBe(2)
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 
@@ -221,5 +392,42 @@ describe('pelican preview geometry', () => {
     expect(pelicanPreviewViewport(html)).toEqual({ width: 800, height: 600 })
     expect(document.getElementById('untrusted-pelican-geometry')).toBeNull()
     expect(pelicanPreviewViewport(' '.repeat(2_000_001))).toEqual({ width: 800, height: 600 })
+  })
+})
+
+describe('pelican preview background', () => {
+  it.each([
+    ['<style>svg{width:100%;max-width:1100px;height:auto;margin:auto;background:#e9efe4;border-radius:24px}</style><svg viewBox="0 0 900 600"></svg>', '#e9efe4'],
+    ['<svg viewBox="0 0 1000 680"><style>svg{position:fixed;inset:0;background:#fff7e7}</style></svg>', '#fff7e7'],
+    ['<html style="background:#112233"><body style="background:#334455"><svg style="background:#556677"></svg></body></html>', '#334455'],
+    ['<html style="background:navy"><body style="background:transparent"><svg></svg></body></html>', 'navy'],
+    ['<style>html, body {background:#111111}body{background:#222222}</style><svg></svg>', '#222222'],
+    ['<style>body{background:#111111!important}</style><body style="background:#222222"><svg></svg></body>', '#111111'],
+    ['<style>body{background:#111111!important}</style><body style="background:#222222!important"><svg></svg></body>', '#222222'],
+    ['<style>svg{background:#111111;background-color:#222222}</style><svg></svg>', '#222222'],
+    ['<style>:root{background:#112233}html{background:#445566}</style><svg></svg>', '#112233'],
+    ['<style>@media print{body{background:red}}@layer author{svg{background:blue}}svg{background:#123456}</style><svg></svg>', '#123456'],
+    ['<style media="print">body{background:red}</style><svg></svg>', undefined],
+    ['<style>body{background:#123456;background:var(--unavailable)}</style><svg></svg>', undefined],
+    ['<style>svg{background:#123456;background-image:linear-gradient(red,blue)}</style><svg></svg>', undefined],
+    ['<!-- <body style="background:red"> --><script>const text = \'<body style="background:blue">\'</script><body style="background:#123456"><svg></svg></body>', '#123456'],
+    ['<svg style="background:red"></svg><svg style="background:blue"></svg>', undefined],
+  ])('uses only an unambiguous fixed canvas color: %s', (html, expected) => {
+    expect(pelicanPreviewBackground(html)).toBe(expected)
+  })
+
+  it.each([
+    'transparent', 'currentColor', 'var(--color)', 'inherit', 'Canvas',
+    'url(https://example.invalid/background.png)', 'linear-gradient(red, blue)',
+    'rgba(1, 2, 3, .5)', '#1234', '#11223344',
+  ])('does not turn relative, transparent or resource backgrounds into player styles: %s', background => {
+    expect(pelicanPreviewBackground(`<svg style="background:${background}"></svg>`)).toBeUndefined()
+  })
+
+  it('keeps inspected output inert and rejects oversized documents', () => {
+    const html = '<body style="background:#123456"><img id="pelican-inert-image" src="https://example.invalid/test.png"><iframe src="https://example.invalid/frame"></iframe><svg onload="throw new Error()"></svg><script>throw new Error()</script></body>'
+    expect(pelicanPreviewBackground(html)).toBe('#123456')
+    expect(document.querySelector('#pelican-inert-image')).toBeNull()
+    expect(pelicanPreviewBackground(' '.repeat(2_000_001))).toBeUndefined()
   })
 })

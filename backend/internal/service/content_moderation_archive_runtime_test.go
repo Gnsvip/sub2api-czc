@@ -358,7 +358,7 @@ func TestLocalContentModerationDispositionFailureRetriesAcrossRestartOnce(t *tes
 	repo := &moderationDispositionRetryTestRepo{failDisposition: true, userActive: true}
 	first, err := newContentModerationArchiveRuntime(repo, options)
 	require.NoError(t, err)
-	svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil)
+	svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"ban_threshold":1}`}}, repo, nil, nil, nil, nil, nil, nil)
 	svc.archiveRuntime = first
 	first.SetDispositionProcessor(svc.retryCyberPolicyDisposition)
 	cfg := defaultContentModerationConfig()

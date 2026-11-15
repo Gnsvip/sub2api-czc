@@ -58,6 +58,7 @@ type contentModerationConfigRequest struct {
 	// cyber_policy 命中是否排除出自动封号计数；前端 RiskControlView 已发送该字段，
 	// service.UpdateContentModerationConfigInput 已支持，此前 handler 层缺透传导致开关静默失效。
 	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyBanMode             *string                               `json:"cyber_policy_ban_mode"`
 	HitRetentionDays               *int                                  `json:"hit_retention_days"`
 	NonHitRetentionDays            *int                                  `json:"non_hit_retention_days"`
 	PreHashCheckEnabled            *bool                                 `json:"pre_hash_check_enabled"`
@@ -124,6 +125,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		BanThreshold:                   req.BanThreshold,
 		ViolationWindowHours:           req.ViolationWindowHours,
 		CyberPolicyExcludeFromBanCount: req.CyberPolicyExcludeFromBanCount,
+		CyberPolicyBanMode:             req.CyberPolicyBanMode,
 		HitRetentionDays:               req.HitRetentionDays,
 		NonHitRetentionDays:            req.NonHitRetentionDays,
 		PreHashCheckEnabled:            req.PreHashCheckEnabled,

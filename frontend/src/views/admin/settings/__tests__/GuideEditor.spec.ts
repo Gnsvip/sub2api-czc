@@ -5,6 +5,8 @@ import GuideEditor from '@/views/admin/settings/GuideEditor.vue'
 const {
   getGuideSettings,
   updateGuideSettings,
+  resetGuideSettings,
+  restoreGuideSettings,
   listGuideAssets,
   uploadGuideAsset,
   deleteGuideAsset,
@@ -15,6 +17,8 @@ const {
 } = vi.hoisted(() => ({
   getGuideSettings: vi.fn(),
   updateGuideSettings: vi.fn(),
+  resetGuideSettings: vi.fn(),
+  restoreGuideSettings: vi.fn(),
   listGuideAssets: vi.fn(),
   uploadGuideAsset: vi.fn(),
   deleteGuideAsset: vi.fn(),
@@ -29,8 +33,8 @@ vi.mock('@/api', () => ({
     settings: {
       getGuideSettings,
       updateGuideSettings,
-      restoreGuideSettings: vi.fn(),
-      resetGuideSettings: vi.fn(),
+      restoreGuideSettings,
+      resetGuideSettings,
       listGuideAssets,
       uploadGuideAsset,
       deleteGuideAsset,
@@ -103,6 +107,21 @@ describe('GuideEditor', () => {
     })
   }
 
+  it('does not offer editing or publishing while the settings are still loading', async () => {
+    const saved = await getGuideSettings()
+    let finishLoading!: (settings: typeof saved) => void
+    getGuideSettings.mockReturnValueOnce(new Promise((resolve) => { finishLoading = resolve }))
+    const wrapper = mountEditor()
+    expect(wrapper.find('[data-test="guide-edit-custom"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="guide-markdown"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+    await (wrapper.vm as unknown as { saveGuide: () => Promise<void> }).saveGuide()
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+    finishLoading({ ...saved, display_mode: 'bundled' })
+    await flushPromises()
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+  })
+
   it('edits one chapter at a time and publishes every chapter with optimistic versioning', async () => {
     const wrapper = mountEditor()
     await flushPromises()
@@ -165,6 +184,7 @@ describe('GuideEditor', () => {
     getGuideSettings.mockResolvedValue({
       chapters: [{ slug: 'alpha', title: '第一章', content: '## 第一章\n\n内容' }],
       version: 5,
+      display_mode: 'custom',
       updated_at: '2026-08-30T10:00:00Z',
       has_custom_content: true,
       revisions: [
@@ -299,7 +319,7 @@ describe('GuideEditor', () => {
     expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('keeps saved chapters editable in bundled mode and switches only on explicit publish', async () => {
+  it('previews the real bundled guide before explicitly editing retained custom chapters', async () => {
     const saved = await getGuideSettings()
     getGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled' })
     const wrapper = mountEditor()
@@ -307,8 +327,17 @@ describe('GuideEditor', () => {
 
     expect(wrapper.get('[data-test="guide-display-mode"]').text()).toContain('bundledContent')
     expect(wrapper.get('[data-test="guide-mode-hint"]').text()).toContain('bundledModeHint')
+    expect(wrapper.get('[data-test="guide-bundled-preview"]').attributes('src')).toBe('/guide-content/')
+    expect(wrapper.find('[data-test="guide-markdown"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="guide-chapter-import-bundled"]').exists()).toBe(false)
+    await (wrapper.vm as unknown as { saveGuide: () => Promise<void> }).saveGuide()
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
     expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
       .toBe('## 第一章\n\n旧内容')
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeUndefined()
     expect(updateGuideSettings).not.toHaveBeenCalled()
 
@@ -324,8 +353,144 @@ describe('GuideEditor', () => {
     getGuideSettings.mockResolvedValue({ ...saved, display_mode: undefined })
     const wrapper = mountEditor()
     await flushPromises()
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
     await wrapper.get('[data-test="guide-markdown"]').setValue('## 草稿\n\n尚未发布')
     expect(wrapper.get('[data-test="guide-display-mode"]').text()).toContain('bundledContent')
     expect(updateGuideSettings).not.toHaveBeenCalled()
+  })
+
+  it('starts an empty custom draft without importing legacy chapters or allowing an empty publish', async () => {
+    getGuideSettings.mockResolvedValue({
+      content: '', chapters: [], version: 0, display_mode: 'bundled',
+      updated_at: '', has_custom_content: false, revisions: [],
+    })
+    const wrapper = mountEditor()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="guide-bundled-preview"]').attributes('src')).toBe('/guide-content/')
+    expect(wrapper.find('[data-test="guide-chapter-list"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get('[data-test="guide-chapter-list"]').findAll('li')).toHaveLength(1)
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value).toBe('')
+    expect(wrapper.find('[data-test="guide-chapter-import-bundled"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeDefined()
+    await (wrapper.vm as unknown as { saveGuide: () => Promise<void> }).saveGuide()
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="guide-markdown"]').setValue('   \n')
+    expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 我的教程\n\n新内容')
+    expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-test="guide-cancel-custom"]').trigger('click')
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+    expect(resetGuideSettings).not.toHaveBeenCalled()
+    expect(restoreGuideSettings).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value).toBe('')
+    expect(wrapper.get('[data-test="guide-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 我的教程\n\n要发布的内容')
+    await wrapper.get('[data-test="guide-save"]').trigger('click')
+    await flushPromises()
+    expect(updateGuideSettings).toHaveBeenCalledWith({
+      chapters: [{ slug: 'custom', title: '我的教程', content: '## 我的教程\n\n要发布的内容' }],
+      expected_version: 0,
+    })
+  })
+
+  it('cancels a custom draft back to the saved content without writing settings', async () => {
+    const saved = await getGuideSettings()
+    getGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled' })
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 未发布\n\n临时修改')
+    await wrapper.get('[data-test="guide-cancel-custom"]').trigger('click')
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toBe('## 第一章\n\n旧内容')
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+    expect(resetGuideSettings).not.toHaveBeenCalled()
+  })
+
+  it('preserves legacy saved custom documents without substituting bundled chapters', async () => {
+    const saved = await getGuideSettings()
+    getGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled', chapters: undefined })
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get('[data-test="guide-chapter-list"]').findAll('li')).toHaveLength(2)
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toContain('旧内容')
+    expect(wrapper.get('[data-test="guide-preview"]').text()).toContain('第二章内容')
+    expect(updateGuideSettings).not.toHaveBeenCalled()
+  })
+
+  it('returns to the bundled preview on reset and keeps the real saved custom chapters', async () => {
+    const saved = await getGuideSettings()
+    resetGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled', version: 4 })
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 未发布\n\n临时修改')
+    await wrapper.get('[data-test="guide-reset"]').trigger('click')
+    await (wrapper.vm as unknown as { resetGuide: () => Promise<void> }).resetGuide()
+    await flushPromises()
+    expect(resetGuideSettings).toHaveBeenCalledWith({ expected_version: 3 })
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toBe('## 第一章\n\n旧内容')
+    expect(wrapper.text()).toContain('当前版本：第 4 版')
+  })
+
+  it.each(['custom', 'bundled'] as const)('restores a %s revision with its matching editor mode', async (mode) => {
+    const saved = await getGuideSettings()
+    getGuideSettings.mockResolvedValue({
+      ...saved, display_mode: 'bundled', revisions: [{
+        version: 2, display_mode: mode,
+        chapters: mode === 'custom' ? saved.chapters : undefined,
+        updated_at: '2026-08-30T09:00:00Z',
+      }],
+    })
+    restoreGuideSettings.mockResolvedValue({ ...saved, display_mode: mode, version: 4 })
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-test="guide-revision-row"] button').trigger('click')
+    await (wrapper.vm as unknown as { restoreRevision: () => Promise<void> }).restoreRevision()
+    await flushPromises()
+    expect(restoreGuideSettings).toHaveBeenCalledWith({ revision_version: 2, expected_version: 3 })
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(mode === 'bundled')
+    expect(wrapper.find('[data-test="guide-markdown"]').exists()).toBe(mode === 'custom')
+    if (mode === 'bundled') await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toBe('## 第一章\n\n旧内容')
+    expect(wrapper.text()).toContain('当前版本：第 4 版')
+  })
+
+  it('reloads the latest display mode after a version conflict without retrying the publish', async () => {
+    const saved = await getGuideSettings()
+    const wrapper = mountEditor()
+    await flushPromises()
+    getGuideSettings.mockResolvedValue({ ...saved, display_mode: 'bundled', version: 5 })
+    updateGuideSettings.mockRejectedValueOnce({ code: 'GUIDE_VERSION_CONFLICT' })
+    await wrapper.get('[data-test="guide-markdown"]').setValue('## 冲突草稿\n\n未发布')
+    await wrapper.get('[data-test="guide-save"]').trigger('click')
+    await flushPromises()
+    expect(updateGuideSettings).toHaveBeenCalledTimes(1)
+    expect(showWarning).toHaveBeenCalledWith('admin.settings.guideEditor.conflict')
+    expect(wrapper.find('[data-test="guide-bundled-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="guide-save"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('当前版本：第 5 版')
+    await wrapper.get('[data-test="guide-edit-custom"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('[data-test="guide-markdown"]').element.value)
+      .toBe('## 第一章\n\n旧内容')
   })
 })

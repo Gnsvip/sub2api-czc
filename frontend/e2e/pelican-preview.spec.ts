@@ -42,6 +42,14 @@ const hostileHTML = previewDocument(`<svg xmlns="http://www.w3.org/2000/svg" id=
   <script>document.documentElement.dataset.scriptRan='yes';window.parent.document.documentElement.dataset.artworkEscaped='yes'</script>
 </svg>`)
 
+// The reported 13:30 picture uses a 3:2 SVG inside the fixed 4:3 player,
+// with its background declared on the SVG itself rather than the document.
+const borderedHTML = previewDocument(`<style>
+svg { display:block; width:100%; max-width:1100px; height:auto; margin:auto; background:#e9efe4; border-radius:24px }
+</style><svg xmlns="http://www.w3.org/2000/svg" id="bordered" viewBox="0 0 900 600">
+  <rect id="bottom-right" x="870" y="570" width="20" height="20" fill="tomato"/>
+</svg><img src="/pelican-preview-slow.svg" alt="" style="display:none">`)
+
 const user = {
   id: 71, username: 'preview-test', email: 'preview@example.test', role: 'user',
   balance: 0, concurrency: 1, status: 'active', allowed_groups: null,
@@ -49,10 +57,10 @@ const user = {
   created_at: '2026-11-15T00:00:00Z', updated_at: '2026-11-15T00:00:00Z',
 }
 
-const items = [wideHTML, portraitHTML, differingDimensionsHTML, nativeCoordinatesHTML, hostileHTML].map((html, index) => ({
-  id: 5 - index, html, status: 'completed', prompt: 'Draw an animal riding a bicycle.',
+const items = [wideHTML, portraitHTML, differingDimensionsHTML, nativeCoordinatesHTML, hostileHTML, borderedHTML].map((html, index) => ({
+  id: 6 - index, html, status: 'completed', prompt: 'Draw an animal riding a bicycle.',
   model: 'fixture-model', group_name: 'Preview fixture', reasoning_effort: 'low', duration_ms: 1000,
-  created_at: `2026-11-15T${['08:00', '07:30', '07:00', '06:30', '06:00'][index]}:00Z`,
+  created_at: `2026-11-15T${['08:00', '07:30', '07:00', '06:30', '06:00', '05:30'][index]}:00Z`,
 }))
 
 function json(route: Route, body: unknown) {
@@ -123,7 +131,7 @@ async function expectContainedViewport(page: Page) {
         animation.effect?.getComputedTiming().iterations !== Infinity)) return false
     }
     const outer = preview.getBoundingClientRect()
-    const inner = preview.querySelector('iframe')?.getBoundingClientRect()
+    const inner = preview.querySelector('iframe[data-preview-state="active"]')?.getBoundingClientRect()
     if (!inner || outer.width <= 0 || outer.height <= 0 || inner.width <= 0 || inner.height <= 0) return false
     return Math.abs(outer.width / outer.height - 4 / 3) < 0.01 &&
       inner.left >= outer.left - 1 && inner.top >= outer.top - 1 &&
@@ -136,14 +144,12 @@ async function expectContainedViewport(page: Page) {
 test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async ({ page }, testInfo) => {
   await mockAPIs(page)
   await page.goto('/pelican-test')
-  const iframe = page.locator('iframe')
-  const frame = page.frameLocator('iframe')
+  const iframe = page.locator('iframe[data-preview-state="active"]')
+  const frame = page.frameLocator('iframe[data-preview-state="active"]')
   await expect(iframe).toHaveCount(1)
   await expect(iframe).toHaveAttribute('sandbox', '')
   await expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer')
   await expect(iframe).toHaveAttribute('srcdoc', wideHTML)
-  await expect(iframe).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-  await expect(page.getByTestId('pelican-animation-preview')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expectUncropped(page, frame, 'wide', 1600 / 900)
   await expectContainedViewport(page)
   await expect(frame.locator('body')).toHaveCSS('margin', '0px')
@@ -165,6 +171,7 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   expect(portraitFrame!.width).toBeCloseTo(fixedFrame!.width, 2)
   expect(portraitFrame!.height).toBeCloseTo(fixedFrame!.height, 2)
   await expect(iframe).toHaveCount(1)
+  await expect(page.locator('iframe')).toHaveCount(1)
   await expect(frame.locator('#wide')).toHaveCount(0)
   await expect(frame.locator('body')).toHaveCSS('background-color', 'rgb(230, 244, 234)')
   const nested = await frame.locator('#nested').evaluate(node => {
@@ -180,6 +187,7 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   await expectUncropped(page, frame, 'differing-dimensions', 800 / 600)
   await expectContainedViewport(page)
   await expect(iframe).toHaveCount(1)
+  await expect(page.locator('iframe')).toHaveCount(1)
 
   await page.getByRole('button', { name: /11-15 14:30/ }).click()
   await expectUncropped(page, frame, 'native-coordinates', 1200 / 800)
@@ -192,8 +200,65 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   await page.getByRole('button', { name: /11-15 14:00/ }).click()
   await expect(frame.locator('#hostile')).toBeVisible()
   await expect(iframe).toHaveCount(1)
+  await expect(page.locator('iframe')).toHaveCount(1)
   await expect(iframe).toHaveAttribute('sandbox', '')
   await expect(frame.locator('html')).not.toHaveAttribute('data-script-ran')
   await expect(frame.locator('html')).not.toHaveAttribute('data-handler-ran')
   await expect(page.locator('html')).not.toHaveAttribute('data-artwork-escaped')
+})
+
+test('切换时间保持旧画面直到加载完成，并用作品背景填充留边', async ({ page }, testInfo) => {
+  await mockAPIs(page)
+  let releaseImage!: () => void
+  let imageRequested!: () => void
+  const requested = new Promise<void>(resolve => { imageRequested = resolve })
+  const ready = new Promise<void>(resolve => { releaseImage = resolve })
+  await page.route('**/pelican-preview-slow.svg', async route => {
+    imageRequested()
+    await ready
+    await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+  })
+  await page.goto('/pelican-test')
+  const preview = page.getByTestId('pelican-animation-preview')
+  const active = page.locator('iframe[data-preview-state="active"]')
+  const frame = page.frameLocator('iframe[data-preview-state="active"]')
+  await expectUncropped(page, frame, 'wide', 1600 / 900)
+  const originalBox = await preview.boundingBox()
+  const originalStyle = await active.getAttribute('style')
+
+  await page.getByRole('button', { name: /11-15 13:30/ }).click()
+  await requested
+  await expect(preview).toHaveAttribute('aria-busy', 'true')
+  await expect(page.locator('iframe')).toHaveCount(2)
+  await expect(active).toHaveAttribute('srcdoc', wideHTML)
+  await expect(active).toHaveAttribute('style', originalStyle!)
+  await expect(active).toBeVisible()
+  const pending = page.locator('iframe[data-preview-state="pending"]')
+  await expect(pending).toHaveCSS('opacity', '0')
+  await expect(pending).toHaveCSS('pointer-events', 'none')
+  await expect(pending).toHaveAttribute('aria-hidden', 'true')
+  const loadingBox = await preview.boundingBox()
+  expect(loadingBox!.width).toBeCloseTo(originalBox!.width, 2)
+  expect(loadingBox!.height).toBeCloseTo(originalBox!.height, 2)
+  await page.screenshot({ path: testInfo.outputPath('pelican-switch-loading.png') })
+
+  releaseImage()
+  await expectUncropped(page, frame, 'bordered', 900 / 600)
+  await expect(preview).toHaveAttribute('aria-busy', 'false')
+  await expect(page.locator('iframe')).toHaveCount(1)
+  await expect(active).toHaveAttribute('sandbox', '')
+  await expect(preview).toHaveCSS('background-color', 'rgb(233, 239, 228)')
+  await expect(active).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  const loadedBox = await preview.boundingBox()
+  expect(loadedBox!.width).toBeCloseTo(originalBox!.width, 2)
+  expect(loadedBox!.height).toBeCloseTo(originalBox!.height, 2)
+  await page.screenshot({ path: testInfo.outputPath('pelican-matched-background.png'), fullPage: true })
+
+  // Rapid selection must settle on the final choice without keeping hidden
+  // animations alive. Stale load callbacks also have a controlled unit check.
+  await page.getByRole('button', { name: /11-15 15:30/ }).click()
+  await page.getByRole('button', { name: /11-15 14:30/ }).click()
+  await expectUncropped(page, frame, 'native-coordinates', 1200 / 800)
+  await expect(page.locator('iframe')).toHaveCount(1)
+  await expect(preview).toHaveAttribute('aria-busy', 'false')
 })

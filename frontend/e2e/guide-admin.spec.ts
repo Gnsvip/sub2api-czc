@@ -24,6 +24,7 @@ const originalChapters = [
 ]
 
 const originalGuide = {
+  display_mode: 'custom',
   content: originalChapters.map((chapter) => chapter.content).join('\n\n'),
   chapters: originalChapters,
   version: 3,

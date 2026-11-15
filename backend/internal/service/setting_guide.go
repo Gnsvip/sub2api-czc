@@ -18,6 +18,8 @@ const (
 	GuideMaxChapterContentBytes = 64 * 1024
 	GuideMaxChapters            = 64
 	GuideRevisionLimit          = 20
+	GuideDisplayModeBundled     = "bundled"
+	GuideDisplayModeCustom      = "custom"
 )
 
 var guideChapterSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -55,20 +57,22 @@ type GuideChapter struct {
 }
 
 // GuideRevision is a restorable snapshot of the public usage guide.
-// An empty chapter list means that the bundled guide was active.
+// Legacy revisions without chapters/content represent the bundled guide.
 type GuideRevision struct {
-	Version  int            `json:"version"`
-	Chapters []GuideChapter `json:"chapters"`
+	Version     int            `json:"version"`
+	Chapters    []GuideChapter `json:"chapters"`
+	DisplayMode string         `json:"display_mode,omitempty"`
 	// Content carries snapshots taken before the guide was split into chapters.
 	Content   string `json:"content,omitempty"`
 	UpdatedAt string `json:"updated_at"`
 }
 
-// GuideSettings contains the current guide and its bounded revision history.
+// GuideSettings contains the display mode, retained custom guide and bounded history.
 type GuideSettings struct {
 	// Content is the whole-document form retained for guides published before
 	// chapters existed; Chapters is authoritative for everything published now.
 	Content          string          `json:"content"`
+	DisplayMode      string          `json:"display_mode"`
 	Chapters         []GuideChapter  `json:"chapters"`
 	Version          int             `json:"version"`
 	UpdatedAt        string          `json:"updated_at"`
@@ -94,7 +98,19 @@ func (s *SettingService) SaveGuideSettings(ctx context.Context, chapters []Guide
 // ResetGuideSettings switches the public page back to the guide bundled with
 // the application while preserving the action as a restorable revision.
 func (s *SettingService) ResetGuideSettings(ctx context.Context, expectedVersion int) (*GuideSettings, error) {
-	return s.saveGuideSettings(ctx, nil, expectedVersion, true)
+	s.guideMu.Lock()
+	defer s.guideMu.Unlock()
+	current, err := s.loadGuideSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateGuideExpectedVersion(current.Version, expectedVersion); err != nil {
+		return nil, err
+	}
+	if current.DisplayMode == GuideDisplayModeBundled {
+		return current, nil
+	}
+	return s.persistGuideSettings(ctx, current, nil, GuideDisplayModeBundled)
 }
 
 // RestoreGuideSettings republishes a stored snapshot as a new version.
@@ -131,7 +147,11 @@ func (s *SettingService) RestoreGuideSettings(ctx context.Context, revisionVersi
 		return nil, err
 	}
 
-	return s.persistGuideSettings(ctx, current, chapters)
+	mode := GuideDisplayModeCustom
+	if target.DisplayMode == GuideDisplayModeBundled || len(chapters) == 0 {
+		mode = GuideDisplayModeBundled
+	}
+	return s.persistGuideSettings(ctx, current, chapters, mode)
 }
 
 func (s *SettingService) saveGuideSettings(ctx context.Context, chapters []GuideChapter, expectedVersion int, allowEmpty bool) (*GuideSettings, error) {
@@ -149,15 +169,16 @@ func (s *SettingService) saveGuideSettings(ctx context.Context, chapters []Guide
 	if err := validateGuideExpectedVersion(current.Version, expectedVersion); err != nil {
 		return nil, err
 	}
-	if guideChaptersEqual(current.Chapters, chapters) {
+	if current.DisplayMode == GuideDisplayModeCustom && guideChaptersEqual(current.Chapters, chapters) {
 		return current, nil
 	}
 
-	return s.persistGuideSettings(ctx, current, chapters)
+	return s.persistGuideSettings(ctx, current, chapters, GuideDisplayModeCustom)
 }
 
 func (s *SettingService) loadGuideSettings(ctx context.Context) (*GuideSettings, error) {
 	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyGuideDisplayMode,
 		SettingKeyGuideContent,
 		SettingKeyGuideChapters,
 		SettingKeyGuideVersion,
@@ -206,9 +227,14 @@ func (s *SettingService) loadGuideSettings(ctx context.Context) (*GuideSettings,
 	if content == "" && len(chapters) > 0 {
 		content = JoinGuideChapters(chapters)
 	}
+	mode := GuideDisplayModeBundled
+	if values[SettingKeyGuideDisplayMode] == GuideDisplayModeCustom && len(chapters) > 0 {
+		mode = GuideDisplayModeCustom
+	}
 
 	return &GuideSettings{
 		Content:          content,
+		DisplayMode:      mode,
 		Chapters:         chapters,
 		Version:          version,
 		UpdatedAt:        strings.TrimSpace(values[SettingKeyGuideUpdatedAt]),
@@ -217,15 +243,23 @@ func (s *SettingService) loadGuideSettings(ctx context.Context) (*GuideSettings,
 	}, nil
 }
 
-func (s *SettingService) persistGuideSettings(ctx context.Context, current *GuideSettings, chapters []GuideChapter) (*GuideSettings, error) {
+func (s *SettingService) persistGuideSettings(ctx context.Context, current *GuideSettings, chapters []GuideChapter, mode string) (*GuideSettings, error) {
 	version := current.Version + 1
 	updatedAt := time.Now().UTC().Format(time.RFC3339)
 	normalized := normalizeGuideChapters(chapters)
 	content := JoinGuideChapters(normalized)
+	revisionChapters := normalized
+	if mode == GuideDisplayModeBundled {
+		// Switching display modes must not destroy the saved custom content.
+		// An empty revision continues to represent the bundled guide for older clients.
+		normalized, content = current.Chapters, current.Content
+		revisionChapters = []GuideChapter{}
+	}
 	revisions := append(append([]GuideRevision(nil), current.Revisions...), GuideRevision{
-		Version:   version,
-		Chapters:  normalized,
-		UpdatedAt: updatedAt,
+		Version:     version,
+		Chapters:    revisionChapters,
+		DisplayMode: mode,
+		UpdatedAt:   updatedAt,
 	})
 	if len(revisions) > GuideRevisionLimit {
 		revisions = revisions[len(revisions)-GuideRevisionLimit:]
@@ -239,13 +273,17 @@ func (s *SettingService) persistGuideSettings(ctx context.Context, current *Guid
 	if err != nil {
 		return nil, fmt.Errorf("marshal guide chapters: %w", err)
 	}
-	if err := s.settingRepo.SetMultiple(ctx, map[string]string{
-		SettingKeyGuideContent:   content,
-		SettingKeyGuideChapters:  string(chaptersJSON),
-		SettingKeyGuideVersion:   strconv.Itoa(version),
-		SettingKeyGuideUpdatedAt: updatedAt,
-		SettingKeyGuideRevisions: string(revisionsJSON),
-	}); err != nil {
+	values := map[string]string{
+		SettingKeyGuideDisplayMode: mode,
+		SettingKeyGuideVersion:     strconv.Itoa(version),
+		SettingKeyGuideUpdatedAt:   updatedAt,
+		SettingKeyGuideRevisions:   string(revisionsJSON),
+	}
+	if mode == GuideDisplayModeCustom {
+		values[SettingKeyGuideContent] = content
+		values[SettingKeyGuideChapters] = string(chaptersJSON)
+	}
+	if err := s.settingRepo.SetMultiple(ctx, values); err != nil {
 		return nil, fmt.Errorf("save guide settings: %w", err)
 	}
 	if s.onUpdate != nil {
@@ -254,6 +292,7 @@ func (s *SettingService) persistGuideSettings(ctx context.Context, current *Guid
 
 	return &GuideSettings{
 		Content:          content,
+		DisplayMode:      mode,
 		Chapters:         normalized,
 		Version:          version,
 		UpdatedAt:        updatedAt,

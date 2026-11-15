@@ -63,6 +63,25 @@ describe('auto-pelican visual scores', () => {
 })
 
 describe('model-generated image isolation', () => {
+  it('uses the animation viewport without changing author markup or the sandbox', async () => {
+    const html = '<html><style>body{background:#ffeedd}</style><body><svg viewBox="0 0 900 1600"><animate attributeName="x" values="0;1"/></svg></body></html>'
+    vi.mocked(intelligentTestsAPI.animation).mockResolvedValueOnce({ html }).mockResolvedValueOnce({ html: '<svg></svg>' })
+    const wrapper = mount(TestGeneratedImage, { props: { recordId: 1, animated: true } })
+    await flushPromises()
+    expect(wrapper.get('iframe').attributes('srcdoc')).toBe(html)
+    expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
+    expect(wrapper.get('iframe').attributes('referrerpolicy')).toBe('no-referrer')
+    expect(wrapper.get('iframe').classes()).toContain('bg-white')
+    expect(wrapper.get('iframe').element.style.width).toBe('900px')
+    expect(wrapper.get('iframe').element.style.height).toBe('1600px')
+    expect(wrapper.get('[data-testid="pelican-animation-preview"]').classes()).toContain('aspect-[4/3]')
+    expect(wrapper.get('[data-testid="generated-test-image"]').classes()).not.toContain('h-full')
+    await wrapper.setProps({ recordId: 2 }); await flushPromises()
+    expect(wrapper.get('iframe').element.style.width).toBe('800px')
+    expect(wrapper.get('iframe').element.style.height).toBe('600px')
+    wrapper.unmount()
+  })
+
   it('loads a historical image with authorization, ignores stale results and revokes object URLs', async () => {
     let oldImage!: (value: Blob) => void
     const svg = '<svg viewBox="0 0 600 420"><circle r="10"/></svg>'
@@ -212,6 +231,7 @@ describe('independent settings and persisted status', () => {
     const wrapper = mount(TestResultCard, { props: { account, summary: { test_type: 'pelican', latest: { ...record, id: 8, status: 'queued' }, latest_completed: completed, history_count: 2, consecutive_anomalies: 0, risk: '' }, now: Date.now() }, global })
     await flushPromises()
     expect(wrapper.find('iframe').attributes('srcdoc')).toContain('<animate')
+    expect(wrapper.get('iframe').element.closest('button')?.className).not.toContain('aspect-[4/3]')
     expect(intelligentTestsAPI.animation).toHaveBeenCalledWith(7, expect.any(AbortSignal))
     expect(wrapper.text()).toContain('最近完成的结果 · #7')
     expect(wrapper.text()).not.toContain('内容未自动评估')

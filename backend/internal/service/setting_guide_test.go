@@ -94,12 +94,14 @@ func TestGuideSettingsSaveRestoreAndReset(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, initial.Version)
 	require.False(t, initial.HasCustomContent)
+	require.Equal(t, GuideDisplayModeBundled, initial.DisplayMode)
 	require.Empty(t, initial.Revisions)
 
 	first, err := service.SaveGuideSettings(ctx, guideChaptersOf("## First guide"), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, first.Version)
 	require.True(t, first.HasCustomContent)
+	require.Equal(t, GuideDisplayModeCustom, first.DisplayMode)
 	require.Len(t, first.Revisions, 1)
 	require.Len(t, first.Chapters, 1)
 
@@ -116,13 +118,31 @@ func TestGuideSettingsSaveRestoreAndReset(t *testing.T) {
 	reset, err := service.ResetGuideSettings(ctx, 3)
 	require.NoError(t, err)
 	require.Equal(t, 4, reset.Version)
-	require.False(t, reset.HasCustomContent)
-	require.Empty(t, reset.Content)
+	require.Equal(t, GuideDisplayModeBundled, reset.DisplayMode)
+	require.True(t, reset.HasCustomContent)
+	require.Equal(t, restored.Content, reset.Content)
+	require.Equal(t, restored.Chapters, reset.Chapters)
+	require.Equal(t, restored.Revisions, reset.Revisions[:len(restored.Revisions)])
+	require.Empty(t, reset.Revisions[len(reset.Revisions)-1].Chapters)
 
 	bundled, err := service.RestoreGuideSettings(ctx, 4, 4)
 	require.NoError(t, err)
 	require.Equal(t, 5, bundled.Version)
-	require.False(t, bundled.HasCustomContent)
+	require.Equal(t, GuideDisplayModeBundled, bundled.DisplayMode)
+	require.True(t, bundled.HasCustomContent)
+	require.Equal(t, restored.Content, bundled.Content)
+
+	// Publishing the retained content switches modes even when no text changed.
+	republished, err := service.SaveGuideSettings(ctx, bundled.Chapters, bundled.Version)
+	require.NoError(t, err)
+	require.Equal(t, 6, republished.Version)
+	require.Equal(t, GuideDisplayModeCustom, republished.DisplayMode)
+	unchanged, err := service.SaveGuideSettings(ctx, republished.Chapters, republished.Version)
+	require.NoError(t, err)
+	require.Equal(t, 6, unchanged.Version)
+
+	_, err = service.ResetGuideSettings(ctx, 5)
+	require.Equal(t, "GUIDE_VERSION_CONFLICT", infraerrors.Reason(err))
 }
 
 func TestGuideSettingsRejectsStaleAndInvalidUpdates(t *testing.T) {
@@ -222,6 +242,8 @@ func TestGuideSettingsMigratesLegacyDocumentOnRead(t *testing.T) {
 	settings, err := service.GetGuideSettings(ctx)
 	require.NoError(t, err)
 	require.True(t, settings.HasCustomContent)
+	require.Equal(t, GuideDisplayModeBundled, settings.DisplayMode, "legacy content must not shadow the new bundled guide")
+	require.NotContains(t, repo.values, SettingKeyGuideDisplayMode, "reads must not rewrite retained content or mode")
 	require.Len(t, settings.Chapters, 2)
 	require.Equal(t, "recharge", settings.Chapters[0].Slug)
 	require.Equal(t, "faq", settings.Chapters[1].Slug)
@@ -233,8 +255,45 @@ func TestGuideSettingsMigratesLegacyDocumentOnRead(t *testing.T) {
 	updated, err := service.SaveGuideSettings(ctx, edited, 5)
 	require.NoError(t, err)
 	require.Equal(t, 6, updated.Version)
+	require.Equal(t, GuideDisplayModeCustom, updated.DisplayMode)
 	require.Contains(t, updated.Chapters[0].Content, "旧的整篇内容。")
 	require.Contains(t, updated.Chapters[1].Content, "新的 FAQ。")
+}
+
+func TestGuideSettingsResetPreservesStoredCustomContent(t *testing.T) {
+	ctx := context.Background()
+	repo := &guideSettingRepo{values: map[string]string{
+		SettingKeyGuideDisplayMode: GuideDisplayModeCustom,
+		SettingKeyGuideContent:     "## Saved guide\n\nPreserve formatting.\n",
+		SettingKeyGuideChapters:    `[{"slug":"saved","title":"Saved","content":"## Saved guide\n\nPreserve formatting.\n"}]`,
+		SettingKeyGuideVersion:     "7",
+		SettingKeyGuideRevisions:   `[{"version":7,"content":"## Prior version","updated_at":"2026-08-30T12:00:00Z"}]`,
+	}}
+	content, chapters := repo.values[SettingKeyGuideContent], repo.values[SettingKeyGuideChapters]
+	service := NewSettingService(repo, &config.Config{})
+	reset, err := service.ResetGuideSettings(ctx, 7)
+	require.NoError(t, err)
+	require.Equal(t, GuideDisplayModeBundled, reset.DisplayMode)
+	require.Equal(t, content, repo.values[SettingKeyGuideContent])
+	require.Equal(t, chapters, repo.values[SettingKeyGuideChapters])
+	require.Equal(t, "## Prior version", reset.Revisions[0].Content)
+	loaded, err := service.GetGuideSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, reset, loaded)
+
+	restored, err := service.RestoreGuideSettings(ctx, 7, 8)
+	require.NoError(t, err)
+	require.Equal(t, GuideDisplayModeCustom, restored.DisplayMode)
+	require.Equal(t, "## Prior version", restored.Content)
+
+	// Empty and invalid modes safely fall back without deleting retained content.
+	for _, mode := range []string{"", "invalid"} {
+		repo.values[SettingKeyGuideDisplayMode] = mode
+		loaded, err = service.GetGuideSettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, GuideDisplayModeBundled, loaded.DisplayMode)
+		require.True(t, loaded.HasCustomContent)
+	}
 }
 
 func TestGuideSettingsKeepsBoundedHistory(t *testing.T) {

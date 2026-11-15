@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -21,6 +22,42 @@ import (
 
 func init() {
 	gin.SetMode(gin.TestMode)
+}
+
+func TestBundledGuideEmbeddedRoute(t *testing.T) {
+	provider := &mockSettingsProvider{settings: map[string]string{"site_name": "AIFXO"}}
+	server, err := NewFrontendServer(provider)
+	require.NoError(t, err)
+	server.overrideDir = ""
+	for name, handler := range map[string]gin.HandlerFunc{
+		"settings-aware": server.Middleware(),
+		"legacy":         ServeEmbeddedFrontend(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			router := gin.New()
+			router.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true}, nil), handler)
+			for _, path := range []string{"/guide-content/", "/guide-content/?v=check"} {
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+				require.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Body.String(), `id="overview"`)
+				assert.Contains(t, w.Body.String(), `id="tools-cc-import"`)
+				assert.NotContains(t, w.Body.String(), `id="app"`)
+				assert.NotContains(t, w.Body.String(), "window.__APP_CONFIG__")
+				assert.Equal(t, "SAMEORIGIN", w.Header().Get("X-Frame-Options"))
+				assert.Contains(t, w.Header().Get("Content-Security-Policy"), "frame-ancestors 'self'")
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/guide-content/index.html", nil))
+			assert.Equal(t, http.StatusMovedPermanently, w.Code)
+			assert.Equal(t, "./", w.Header().Get("Location"))
+			w = httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/guide", nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+			assert.Contains(t, w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
+		})
+	}
 }
 
 func TestInjectSiteTitle(t *testing.T) {

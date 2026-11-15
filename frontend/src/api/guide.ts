@@ -8,6 +8,8 @@ export interface PublicGuideChapter {
 }
 
 export interface PublicGuide {
+  /** Missing on older servers; the current guide defaults to bundled. */
+  display_mode?: 'bundled' | 'custom'
   /**
    * The whole guide as one document. Retained so a guide published before
    * chapters existed still renders; new publishes populate `chapters`.

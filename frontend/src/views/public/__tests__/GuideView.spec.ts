@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GuideView from '@/views/public/GuideView.vue'
+import CustomGuideView from '@/views/public/CustomGuideView.vue'
 import {
   buildGuideDocument,
   buildGuideDocumentFromChapters,
@@ -60,6 +61,7 @@ describe('GuideView', () => {
       version: 7,
       updated_at: '2026-08-30T12:00:00Z',
       has_custom_content: true,
+      display_mode: 'custom',
     })
 
     const wrapper = mount(GuideView, {
@@ -86,6 +88,7 @@ describe('GuideView', () => {
       version: 4,
       updated_at: '2026-08-30T12:00:00Z',
       has_custom_content: true,
+      display_mode: 'custom',
     })
 
     const wrapper = mount(GuideView, {
@@ -103,6 +106,45 @@ describe('GuideView', () => {
     expect(wrapper.get('#recharge').text()).toBe('充值：先买兑换码，再兑换余额')
     expect(wrapper.get('#faq').text()).toBe('遇到问题先看这里')
     expect(wrapper.get('[data-test="guide-content"]').text()).toContain('旧的整篇内容。')
+  })
+
+  it('defaults to the modern bundled tutorial without replacing old stored chapters', async () => {
+    getPublicGuide.mockResolvedValue({
+      content: '## Stored draft\n\nOld content',
+      version: 7,
+      updated_at: '',
+      has_custom_content: true,
+    })
+    window.history.replaceState({}, '', '/guide#streaming')
+    const wrapper = mount(GuideView)
+    await flushPromises()
+    expect(wrapper.get('[data-test="aifxo-guide-frame"]').attributes('src')).toBe('/guide-content/#streaming')
+    expect(wrapper.find('[data-test="guide-content"]').exists()).toBe(false)
+    expect(getPublicGuide).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('keeps the bundled tutorial available when settings fail', async () => {
+    getPublicGuide.mockRejectedValue(new Error('offline'))
+    const wrapper = mount(GuideView)
+    await flushPromises()
+    expect(wrapper.get('[data-test="aifxo-guide-frame"]').attributes('src')).toBe('/guide-content/')
+    wrapper.unmount()
+  })
+
+  it('accepts navigation only from its own same-origin tutorial frame', async () => {
+    const wrapper = mount(GuideView, { attachTo: document.body })
+    await flushPromises()
+    const frame = wrapper.get('iframe').element as HTMLIFrameElement
+    const data = { type: 'aifxo-guide-route', hash: '#streaming', title: '流式输出 · AIFXO' }
+    window.dispatchEvent(new MessageEvent('message', { data, origin: 'https://untrusted.example', source: frame.contentWindow }))
+    expect(window.location.hash).toBe('')
+    window.dispatchEvent(new MessageEvent('message', { data, origin: window.location.origin, source: window }))
+    expect(window.location.hash).toBe('')
+    window.dispatchEvent(new MessageEvent('message', { data, origin: window.location.origin, source: frame.contentWindow }))
+    expect(window.location.hash).toBe('#streaming')
+    expect(document.title).toBe('流式输出 · AIFXO')
+    wrapper.unmount()
   })
 
   it('ships one file per chapter with stable slugs and ordering', () => {
@@ -205,8 +247,8 @@ describe('GuideView', () => {
     expect(deriveChapterSlug('另一章节')).not.toBe(chineseOnly)
   })
 
-  it('renders the AIFXO guide, stable table of contents and commands', async () => {
-    const wrapper = mount(GuideView, {
+  it('retains the editable legacy guide and its commands', async () => {
+    const wrapper = mount(CustomGuideView, {
       global: {
         stubs: {
           RouterLink: {

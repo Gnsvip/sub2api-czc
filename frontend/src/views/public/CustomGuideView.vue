@@ -1,5 +1,5 @@
 <template>
-  <div data-test="guide-view" class="min-h-screen bg-white text-gray-900 dark:bg-dark-950 dark:text-white">
+  <div v-if="guideChapters.length" data-test="guide-view" class="min-h-screen bg-white text-gray-900 dark:bg-dark-950 dark:text-white">
     <header class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur dark:border-dark-800 dark:bg-dark-950/95">
       <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
         <RouterLink to="/home" class="flex min-w-0 items-center gap-3" aria-label="返回首页">
@@ -52,15 +52,13 @@
 
       <main class="min-w-0">
         <div class="border-b border-gray-200 pb-7 dark:border-dark-800">
-          <p class="text-sm font-semibold text-primary-700 dark:text-primary-300">新手使用教程</p>
-          <h1 class="mt-2 text-3xl font-bold text-gray-950 dark:text-white sm:text-4xl">从充值到第一次使用，照着做就可以</h1>
+          <h1 class="mt-2 text-3xl font-bold text-gray-950 dark:text-white sm:text-4xl">使用教程</h1>
           <p class="mt-4 max-w-3xl text-base leading-7 text-gray-600 dark:text-dark-300">
-            不熟悉 API Key 或 Codex 也没关系。本教程会告诉你点哪里、填什么，以及出错后怎么办。
+            以下内容由站点管理员发布。
           </p>
           <div class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500 dark:text-dark-400">
             <span>教程版本 {{ guideVersion }}</span>
-            <span>更新日期 {{ updatedAt }}</span>
-            <span>适合第一次使用本站的用户</span>
+            <span v-if="updatedAt">更新日期 {{ updatedAt }}</span>
           </div>
         </div>
 
@@ -127,8 +125,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getPublicGuide, type PublicGuide } from '@/api/guide'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { PublicGuide } from '@/api/guide'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore } from '@/stores/app'
@@ -143,12 +141,9 @@ import {
   type GuideChapter,
   type GuideCommand,
 } from '@/utils/guideMarkdown'
-import { getBundledGuideChapters } from '@/utils/guideSections'
 
 const props = defineProps<{ published?: PublicGuide }>()
 
-const bundledGuideVersion = '1.11'
-const bundledGuideUpdatedAt = '2026-11-09'
 const commandLabels: Record<string, string> = {
   'skill-install': '安装 goal-workflow',
   'skill-update': '更新 goal-workflow',
@@ -158,9 +153,11 @@ const commandLabels: Record<string, string> = {
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const { copyToClipboard } = useClipboard()
-const guideChapters = ref<GuideChapter[]>(getBundledGuideChapters())
-const guideVersion = ref(bundledGuideVersion)
-const updatedAt = ref(bundledGuideUpdatedAt)
+// The parent owns loading and bundled-mode fallback. Never seed this renderer
+// with repository content or fetch a second, potentially newer guide snapshot.
+const guideChapters = computed(() => resolvePublishedChapters(props.published))
+const guideVersion = computed(() => `在线第 ${props.published?.version ?? 0} 版`)
+const updatedAt = computed(() => props.published?.updated_at.slice(0, 10) || '')
 const guideSource = computed(() => joinGuideChapters(guideChapters.value))
 const guideDocument = computed(() => buildGuideDocumentFromChapters(guideChapters.value))
 const isDark = ref(document.documentElement.classList.contains('dark'))
@@ -227,11 +224,11 @@ function restoreHashPosition() {
 
 /**
  * Accepts either the chapter list published by the current admin editor or the
- * single `content` document published before chapters existed. An empty result
- * means nothing was published and the bundled guide stays visible.
+ * single `content` document published before chapters existed. Only an explicit
+ * custom publication is renderable; retained drafts in bundled mode stay hidden.
  */
-function resolvePublishedChapters(published: PublicGuide): GuideChapter[] {
-  if (!published.has_custom_content) return []
+function resolvePublishedChapters(published?: PublicGuide): GuideChapter[] {
+  if (published?.display_mode !== 'custom' || !published.has_custom_content) return []
 
   if (published.chapters?.length) {
     return published.chapters
@@ -246,23 +243,12 @@ function resolvePublishedChapters(published: PublicGuide): GuideChapter[] {
   return published.content?.trim() ? splitGuideIntoChapters(published.content) : []
 }
 
-async function loadPublishedGuide() {
-  try {
-    const published = props.published || await getPublicGuide()
-    const publishedChapters = resolvePublishedChapters(published)
-    if (!publishedChapters.length) return
-
-    guideChapters.value = publishedChapters
-    guideVersion.value = `在线第 ${published.version} 版`
-    updatedAt.value = published.updated_at.slice(0, 10) || bundledGuideUpdatedAt
-    activeSection.value = guideDocument.value.sections[0]?.id || ''
-    await nextTick()
-    observeGuideSections()
-    restoreHashPosition()
-  } catch {
-    // The bundled guide remains available when the database API is unavailable.
-  }
-}
+watch(guideChapters, async () => {
+  activeSection.value = guideDocument.value.sections[0]?.id || ''
+  await nextTick()
+  observeGuideSections()
+  restoreHashPosition()
+})
 
 async function copyCommand(command: GuideCommand) {
   const success = await copyToClipboard(command.content, '命令已复制')
@@ -284,7 +270,6 @@ onMounted(async () => {
   await nextTick()
   observeGuideSections()
   restoreHashPosition()
-  void loadPublishedGuide()
 })
 
 onBeforeUnmount(() => {

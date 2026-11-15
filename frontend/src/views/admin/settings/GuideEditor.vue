@@ -43,6 +43,26 @@
           {{ t(displayMode === 'bundled' ? 'admin.settings.guideEditor.bundledModeHint' : 'admin.settings.guideEditor.customModeHint') }}
         </p>
 
+        <section v-if="!editingCustom" class="space-y-4" data-test="guide-bundled-view">
+          <iframe
+            src="/guide-content/"
+            :title="t('admin.settings.guideEditor.bundledPreviewTitle')"
+            allow="clipboard-write"
+            class="h-[70vh] min-h-[30rem] w-full rounded-lg border border-gray-200 bg-white dark:border-dark-700"
+            data-test="guide-bundled-preview"
+          ></iframe>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="saving"
+            data-test="guide-edit-custom"
+            @click="editCustomGuide"
+          >
+            {{ t('admin.settings.guideEditor.editCustom') }}
+          </button>
+        </section>
+
+        <template v-else>
         <div class="grid min-w-0 gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
           <section class="min-w-0" aria-labelledby="guide-chapter-list-label">
             <div class="mb-2 flex items-center justify-between gap-2">
@@ -123,16 +143,6 @@
                   {{ t('admin.settings.guideEditor.addChapter') }}
                 </button>
               </div>
-              <button
-                v-if="missingBundledChapters.length"
-                type="button"
-                class="btn btn-secondary btn-sm w-full"
-                data-test="guide-chapter-import-bundled"
-                @click="importMissingBundledChapters"
-              >
-                <Icon name="download" size="sm" />
-                {{ t('admin.settings.guideEditor.importBundled', { count: missingBundledChapters.length }) }}
-              </button>
             </div>
           </section>
 
@@ -282,9 +292,21 @@
 
         <div class="flex flex-col-reverse gap-3 border-t border-gray-200 pt-5 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
           <button
+            v-if="displayMode === 'bundled'"
             type="button"
             class="btn btn-secondary"
-            :disabled="saving || displayMode === 'bundled'"
+            :disabled="saving || uploading"
+            data-test="guide-cancel-custom"
+            @click="cancelCustomGuide"
+          >
+            {{ t('admin.settings.guideEditor.cancelCustom') }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="btn btn-secondary"
+            :disabled="saving || uploading"
+            data-test="guide-reset"
             @click="confirmReset = true"
           >
             <Icon name="refresh" size="sm" />
@@ -297,7 +319,7 @@
             <button
               type="button"
               class="btn btn-primary"
-              :disabled="saving || (!dirty && displayMode === 'custom') || !chapters.length || chapterTooLarge || contentTooLarge"
+              :disabled="!canPublish"
               data-test="guide-save"
               @click="saveGuide"
             >
@@ -307,6 +329,7 @@
             </button>
           </div>
         </div>
+        </template>
       </div>
     </div>
 
@@ -410,7 +433,6 @@ import {
   readChapterTitle,
   splitGuideIntoChapters,
 } from '@/utils/guideMarkdown'
-import { getBundledGuideChapters } from '@/utils/guideSections'
 
 const maxContentBytes = 256 * 1024
 const maxChapterBytes = 64 * 1024
@@ -419,7 +441,9 @@ const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 const loading = ref(true)
 const saving = ref(false)
+const editingCustom = ref(false)
 const chapters = ref<GuideChapterPayload[]>([])
+const savedChapters = ref<GuideChapterPayload[]>([])
 const savedChaptersJson = ref('')
 const activeSlug = ref('')
 const newChapterTitle = ref('')
@@ -459,12 +483,12 @@ const chapterTooLarge = computed(() => chapterBytes.value > maxChapterBytes)
 const contentTooLarge = computed(() => totalBytes.value > maxContentBytes)
 const formattedSize = computed(() => `${(chapterBytes.value / 1024).toFixed(1)} / 64 KiB`)
 const dirty = computed(() => JSON.stringify(chapters.value) !== savedChaptersJson.value)
+const canPublish = computed(() => editingCustom.value && !saving.value && !uploading.value
+  && (dirty.value || displayMode.value === 'bundled')
+  && chapters.value.length > 0 && chapters.value.every((chapter) => chapter.content.trim())
+  && !chapterTooLarge.value && !contentTooLarge.value)
 const previewHtml = computed(() => buildGuideDocumentFromChapters(chapters.value).html)
 const sortedRevisions = computed(() => [...revisions.value].sort((a, b) => b.version - a.version))
-const missingBundledChapters = computed(() => {
-  const present = new Set(chapters.value.map((chapter) => chapter.slug))
-  return getBundledGuideChapters().filter((chapter) => !present.has(chapter.slug))
-})
 const assetUsedBytes = computed(() => assets.value.reduce((sum, asset) => sum + asset.size, 0))
 const formattedAssetUsage = computed(() => `${formatBytes(assetUsedBytes.value)} / 2 GiB`)
 
@@ -596,10 +620,7 @@ async function deletePendingAsset() {
   }
 }
 
-/**
- * Resolves the chapter list to edit: the published chapters when present, a
- * published single document split into chapters, otherwise the bundled guide.
- */
+/** Only saved custom content belongs in the Markdown editor. */
 function resolveEditableChapters(settings: GuideSettings): GuideChapterPayload[] {
   if (settings.has_custom_content) {
     if (settings.chapters?.length) {
@@ -609,7 +630,20 @@ function resolveEditableChapters(settings: GuideSettings): GuideChapterPayload[]
       return splitGuideIntoChapters(settings.content)
     }
   }
-  return getBundledGuideChapters()
+  return []
+}
+
+function resetCustomDraft() {
+  chapters.value = savedChapters.value.length
+    ? savedChapters.value.map((chapter) => ({ ...chapter }))
+    : [{ slug: 'custom', title: t('admin.settings.guideEditor.customDraftTitle'), content: '' }]
+  savedChaptersJson.value = JSON.stringify(chapters.value)
+  newChapterTitle.value = ''
+  pendingDeleteSlug.value = ''
+  draggingIndex.value = null
+  if (!chapters.value.some((chapter) => chapter.slug === activeSlug.value)) {
+    activeSlug.value = chapters.value[0]?.slug || ''
+  }
 }
 
 function applyGuideSettings(settings: GuideSettings) {
@@ -617,12 +651,19 @@ function applyGuideSettings(settings: GuideSettings) {
   updatedAt.value = settings.updated_at
   displayMode.value = settings.display_mode === 'custom' ? 'custom' : 'bundled'
   revisions.value = settings.revisions ?? []
-  chapters.value = resolveEditableChapters(settings)
-  savedChaptersJson.value = JSON.stringify(chapters.value)
+  savedChapters.value = resolveEditableChapters(settings)
+  resetCustomDraft()
+  editingCustom.value = displayMode.value === 'custom'
+}
 
-  if (!chapters.value.some((chapter) => chapter.slug === activeSlug.value)) {
-    activeSlug.value = chapters.value[0]?.slug || ''
-  }
+function editCustomGuide() {
+  resetCustomDraft()
+  editingCustom.value = true
+}
+
+function cancelCustomGuide() {
+  resetCustomDraft()
+  editingCustom.value = false
 }
 
 /**
@@ -682,13 +723,6 @@ function deleteActiveChapter() {
   }
 }
 
-function importMissingBundledChapters() {
-  const missing = missingBundledChapters.value
-  if (!missing.length) return
-  chapters.value = [...chapters.value, ...missing.map((chapter) => ({ ...chapter }))]
-  activeSlug.value = missing[0].slug
-}
-
 function formatDate(value: string): string {
   if (!value) return ''
   const date = new Date(value)
@@ -728,6 +762,7 @@ async function handleMutation(operation: () => Promise<GuideSettings>, successMe
 }
 
 async function saveGuide() {
+  if (!canPublish.value) return
   await handleMutation(
     () => adminAPI.settings.updateGuideSettings({
       chapters: chapters.value.map((chapter) => ({ ...chapter })),

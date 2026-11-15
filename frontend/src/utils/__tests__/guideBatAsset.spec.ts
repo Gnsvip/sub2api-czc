@@ -5,114 +5,99 @@ import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const batPath = resolve(dir, '../../../public/downloads/select-fastest-codex-base-url.bat')
-const guideDir = resolve(dir, '../../../../docs/guide')
-const guideViewPath = resolve(dir, '../../views/public/CustomGuideView.vue')
-const vipPath = resolve(dir, '../../../../backend/internal/service/vip.go')
-
-// The guide is one file per chapter; join them in filename order so the
-// assertions below still inspect the whole published document.
-const guideChapterFiles = readdirSync(guideDir)
-  .filter((name) => /^\d{3}-[a-z0-9-]+\.md$/.test(name))
-  .sort()
-const guide = guideChapterFiles
-  .map((name) => readFileSync(resolve(guideDir, name), 'utf8').replace(/\s+$/, ''))
-  .join('\n\n')
-const guideViewSource = readFileSync(guideViewPath, 'utf8')
-const vipSource = readFileSync(vipPath, 'utf8')
+const legacyGuideDir = resolve(dir, '../../../../docs/guide')
 const modernGuideDir = resolve(dir, '../../../guide-content')
-const modernGuide = readFileSync(resolve(modernGuideDir, 'index.html'), 'utf8')
-const modernSnippets = readFileSync(resolve(modernGuideDir, 'snippets.js'), 'utf8')
+const guide = readFileSync(resolve(modernGuideDir, 'index.html'), 'utf8')
+const snippets = readFileSync(resolve(modernGuideDir, 'snippets.js'), 'utf8')
+const imageSource = readFileSync(resolve(modernGuideDir, 'images.js'), 'utf8')
+const document = new DOMParser().parseFromString(guide, 'text/html')
 
 describe('bundled AIFXO guide', () => {
   it('ships the approved fifteen-page tutorial with external scripts and production downloads', () => {
-    const pages = [...modernGuide.matchAll(/<article class="page(?: active)?" id="([^"]+)"/g)].map((match) => match[1])
-    expect(pages).toEqual([
+    expect([...document.querySelectorAll('article.page')].map((page) => page.id)).toEqual([
       'overview', 'start', 'codex', 'tools', 'openclaw', 'kilo', 'claude',
       'api-responses', 'api-chat', 'api-messages', 'streaming', 'tool-calls', 'usage', 'faq', 'support',
     ])
-    expect(modernGuide).toContain('<script type="module" src="./main.js"></script>')
-    expect(modernGuide).not.toMatch(/<script(?![^>]*\bsrc=)/)
-    expect(modernGuide).not.toMatch(/127\.0\.0\.1|localhost|本地预览|HTML 预览版/)
-    expect(modernGuide).toContain('https://github.com/Gnsvip/sub2api-czc/releases/download/czc-v2026.11.15.4/AIFXO-Config-1.2.0-Windows-x64.zip')
-    expect(modernGuide).toContain('id="codex-auth-file"')
-    expect(modernGuide).toContain('特别注意：不要添加')
-    expect(modernGuide).toContain('Microsoft Store')
-    expect(modernGuide).toContain('response.completed')
-    expect(modernSnippets).toContain('https://api.aifxo.com/v1/responses')
-    expect(modernGuide).toContain('https://api.aifxo.com/v1/messages')
-    expect(modernSnippets).toContain('https://api.aifxo.com/v1/usage')
+    expect(guide).toContain('<script type="module" src="./main.js"></script>')
+    expect(document.querySelectorAll('script:not([src])')).toHaveLength(0)
+    expect(guide).not.toMatch(/127\.0\.0\.1|localhost|本地预览|HTML 预览版/)
+    expect(guide).toContain('https://github.com/Gnsvip/sub2api-czc/releases/download/czc-v2026.11.15.4/AIFXO-Config-1.2.0-Windows-x64.zip')
+    expect(document.getElementById('codex-auth-file')).not.toBeNull()
+    expect(guide).toContain('特别注意：不要添加')
+    expect(guide).toContain('Microsoft Store')
+    expect(guide).toContain('response.completed')
+    expect(snippets).toContain('https://api.aifxo.com/v1/responses')
+    expect(guide).toContain('https://api.aifxo.com/v1/messages')
+    expect(snippets).toContain('https://api.aifxo.com/v1/usage')
   })
 
-  it('uses the AIFXO endpoint and does not ship the retired domain-switching tool', () => {
-    expect(guide).toContain('https://api.aifxo.com/v1/models')
-    expect(guide).toContain('base_url = "https://api.aifxo.com/v1"')
-    expect(guide).toContain('https://api.aifxo.com/health')
-    expect(guide).toContain('| 网站、登录和控制台入口 | `https://www.aifxo.com/` |')
-    expect(guide).toContain('| API 根地址（客户端要求根地址时） | `https://api.aifxo.com` |')
-    expect(guide).toContain('[AIFXO](https://www.aifxo.com/)')
-    expect(guide).not.toContain('](https://api.aifxo.com)')
-    expect(guide).not.toContain('输入登录信息或 API Key 前，确认地址属于 `api.aifxo.com`')
-    expect(guide).not.toContain('/redeem-store')
-    expect(guide).not.toContain('IGUZN6L4')
-    expect(guide).toContain('QQ：1038539305')
-    expect(guide).not.toMatch(/mofa\.love\.gd|mofayaoshipu\.cc\.cd|key66\.cc\.cd|key66\.vip|mofa\.duoduohuiying\.cn|15\.204\.82\.11/)
-    expect(guide).not.toContain('select-fastest-codex-base-url.bat')
+  it('separates website navigation from API examples and removes retired downloads and shops', () => {
+    expect(document.querySelector('.top-actions .btn')?.getAttribute('href')).toBe('https://www.aifxo.com/')
+    for (const address of ['https://www.aifxo.com/', 'https://api.aifxo.com', 'https://api.aifxo.com/v1']) {
+      expect(document.querySelector(`[data-copy="${address}"]`)).not.toBeNull()
+    }
+    expect(snippets).toContain('base_url = "https://api.aifxo.com/v1"')
+    for (const path of ['keys', 'usage', 'redeem', 'subscriptions']) {
+      expect(document.querySelector(`a[href="https://www.aifxo.com/${path}"]`)).not.toBeNull()
+    }
+    expect(document.querySelector('a[href="https://api.aifxo.com"]')).toBeNull()
+    expect(guide).toContain('1038539305')
+    for (const content of [guide, snippets]) {
+      expect(content).not.toMatch(/catfk\.com|mofa\.love\.gd|mofayaoshipu\.cc\.cd|key66\.cc\.cd|key66\.vip|mofa\.duoduohuiying\.cn|15\.204\.82\.11/)
+      expect(content).not.toContain('/redeem-store')
+      expect(content).not.toContain('IGUZN6L4')
+      expect(content).not.toContain('select-fastest-codex-base-url.bat')
+      expect(content).not.toContain('并发支付竞态')
+      expect(content).not.toContain('没有支付但是到账')
+    }
     expect(existsSync(batPath)).toBe(false)
     expect(existsSync(`${batPath}.sha256`)).toBe(false)
-    expect(guideViewSource).not.toContain('guide-download')
   })
 
-  it('keeps the bundled guide version in sync between the document and the view', () => {
-    const documentVersion = guide.match(/^- 教程版本：`([^`]+)`$/m)?.[1]
-    const viewVersion = guideViewSource.match(/^const bundledGuideVersion = '([^']+)'$/m)?.[1]
-
-    // Both patterns must actually match; an absent version is a failure, not a passing match.
-    expect(documentVersion).toBe('1.11')
-    expect(viewVersion).toBe('1.11')
-    expect(documentVersion).toBe(viewVersion)
-    const documentDate = guide.match(/^- 更新日期：`([^`]+)`$/m)?.[1]
-    const viewDate = guideViewSource.match(/^const bundledGuideUpdatedAt = '([^']+)'$/m)?.[1]
-    expect(documentDate).toBe('2026-11-09')
-    expect(viewDate).toBe(documentDate)
-  })
-
-  it('ships the guide as one file per chapter, each starting with its heading', () => {
-    expect(guideChapterFiles).toHaveLength(16)
-
-    for (const name of guideChapterFiles) {
-      const content = readFileSync(resolve(guideDir, name), 'utf8')
-      expect(content.startsWith('## '), `${name} must start with a ## heading`).toBe(true)
+  it('resolves every bundled module, screenshot and chapter link from the actual HTML guide', () => {
+    for (const path of ['./main.js', './style.css', './snippets.js', './images.js', './images/site-logo.ico']) {
+      expect(existsSync(resolve(modernGuideDir, path)), path).toBe(true)
     }
-
-    // The single-file guide must be gone so no build path can read a stale copy.
-    expect(existsSync(resolve(guideDir, '../guide.zh.md'))).toBe(false)
+    const images = new Map([...imageSource.matchAll(/"([^"]+)":\s*\{\s*src: new URL\("([^"]+)"/g)]
+      .map((match) => [match[1], match[2]] as const))
+    expect(images.size).toBeGreaterThan(0)
+    for (const [id, path] of images) {
+      expect(path.startsWith('./images/'), id).toBe(true)
+      expect(existsSync(resolve(modernGuideDir, path)), id).toBe(true)
+    }
+    for (const gallery of document.querySelectorAll<HTMLElement>('[data-gallery]')) {
+      const ids = gallery.dataset.gallery!.split(',')
+      expect(gallery.dataset.captions?.split('|')).toHaveLength(ids.length)
+      for (const id of ids) expect(images.has(id), `missing gallery image ${id}`).toBe(true)
+    }
+    for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
+      expect(document.getElementById(link.getAttribute('href')!.slice(1)), link.outerHTML).not.toBeNull()
+    }
+    for (const block of document.querySelectorAll<HTMLElement>('[data-code]')) {
+      const key = block.dataset.code!
+      expect(snippets.includes(`'${key}':`) || snippets.includes(`"${key}":`), `missing code snippet ${key}`).toBe(true)
+    }
   })
 
-  it('keeps the published SVIP rules synchronized with backend constants', () => {
-    const constants = {
-      threshold: vipSource.match(/VipBalanceThreshold\s*=\s*([\d.]+)/)?.[1],
-      model: vipSource.match(/VipExclusiveModelName\s*=\s*"([^"]+)"/)?.[1],
-      lunaMin: vipSource.match(/LunaMinRateMultiplier\s*=\s*([\d.]+)/)?.[1],
-    }
+  it('keeps published streaming and error guidance tied to the current tutorial', () => {
+    const streaming = document.getElementById('streaming')!.textContent!
+    expect(streaming).toContain('response.completed')
+    expect(streaming).toContain('message_stop')
+    expect(streaming).toContain('[DONE]')
+    expect(streaming).toContain('错误')
+    const faq = document.getElementById('faq')!.textContent!
+    for (const code of ['400', '401', '403', '404', '429', '502']) expect(faq).toContain(code)
+    expect(faq).toContain('请求 ID')
+    expect(faq).toContain('不要执行删除')
+    expect(faq).toContain('完整密钥')
+  })
 
-    expect(constants).toEqual({
-      threshold: '100.0',
-      model: 'gpt-5.6-luna',
-      lunaMin: '0.2',
-    })
-    expect(vipSource).not.toMatch(/VipFrozenReserve/)
-    expect(guide).toContain('总余额（含赠送）达到 **100**')
-    expect(guide).toContain('页面单位为美元')
-    expect(guide).toContain('不扣押金')
-    expect(guide).not.toContain('冻结 50 元')
-    expect(guide).toContain('普通用户与 SVIP 使用相同的计费倍率规则')
-    expect(guide).toContain('管理员单独配置的用户倍率仍然有效')
-    expect(guide).toContain('`gpt-5.6-luna`')
-    expect(guide).toContain('所有用户都可以使用')
-    expect(guide).toContain('低于 0.2')
-    expect(guide).toContain('按 0.2 计费')
-    expect(guide).toContain('普通用户与 SVIP 都先按 0.2 计费')
-    expect(guide).toContain('0.2 是 Luna 的基础倍率保底，也是叠加高峰因子后的 token 计费倍率下限')
-    expect(guide).not.toContain('专属模型')
+  it('removes the old sixteen Markdown chapters and their build-time loader', () => {
+    const legacyFiles = existsSync(legacyGuideDir) ? readdirSync(legacyGuideDir) : []
+    expect(legacyFiles.filter((name) => /^\d{3}-[a-z0-9-]+\.md$/.test(name))).toEqual([])
+    expect(existsSync(resolve(legacyGuideDir, '../guide.zh.md'))).toBe(false)
+    expect(existsSync(resolve(dir, '../guideSections.ts'))).toBe(false)
+    const customView = readFileSync(resolve(dir, '../../views/public/CustomGuideView.vue'), 'utf8')
+    expect(customView).not.toMatch(/getBundledGuideChapters|bundledGuideVersion|bundledGuideUpdatedAt/)
   })
 })

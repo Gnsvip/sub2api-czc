@@ -106,6 +106,7 @@ export interface ContentModerationConfig {
   block_message?: string
   email_on_hit?: boolean
   auto_ban_enabled?: boolean
+  cyber_policy_ban_mode?: 'log_only' | 'cumulative' | 'immediate'
   cyber_policy_exclude_from_ban_count?: boolean
   ban_threshold?: number
   violation_window_hours?: number
@@ -145,6 +146,7 @@ export interface UpdateContentModerationConfig {
   block_message?: string
   email_on_hit?: boolean
   auto_ban_enabled?: boolean
+  cyber_policy_ban_mode?: 'log_only' | 'cumulative' | 'immediate'
   cyber_policy_exclude_from_ban_count?: boolean
   ban_threshold?: number
   violation_window_hours?: number
@@ -283,6 +285,7 @@ export interface ContentModerationLog {
   input_excerpt?: string
   upstream_latency_ms?: number | null
   error?: string
+  current_violation_count?: number
   violation_count?: number
   auto_banned?: boolean
   email_sent?: boolean

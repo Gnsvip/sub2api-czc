@@ -112,6 +112,8 @@ type contentModerationLostSummaryRetryFile struct {
 }
 
 type contentModerationDispositionRetryFile struct {
+	RequestID               string    `json:"request_id,omitempty"`
+	PenaltyEventKey         string    `json:"penalty_event_key,omitempty"`
 	OperationKey            string    `json:"operation_key"`
 	Kind                    string    `json:"kind,omitempty"`
 	Attempts                int       `json:"attempts"`
@@ -289,6 +291,8 @@ func (r *contentModerationArchiveRuntime) queueDispositionRetry(entry contentMod
 	entry.OperationKey = "disposition:" + operationID
 	entry.NextAttempt = time.Now().Add(r.options.RetryInitial)
 	entry.LastError = boundedModerationArchiveError(errors.New(redactContentModerationSecrets(cause.Error())))
+	entry.RequestID = log.RequestID
+	entry.PenaltyEventKey = log.PenaltyEventKey
 	entry.LogID = log.ID
 	entry.ArchiveID = log.ArchiveID
 	entry.CreatedAt = log.CreatedAt

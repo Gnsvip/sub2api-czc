@@ -109,9 +109,10 @@ const (
 )
 
 type ContentModerationConfig struct {
-	Enabled         bool   `json:"enabled"`
-	Mode            string `json:"mode"`
-	DeepSeekEnabled bool   `json:"deepseek_enabled"`
+	CyberPolicyBanMode string `json:"cyber_policy_ban_mode"`
+	Enabled            bool   `json:"enabled"`
+	Mode               string `json:"mode"`
+	DeepSeekEnabled    bool   `json:"deepseek_enabled"`
 	// RemoteReviewersEnabled is the provider-neutral alias for the legacy
 	// DeepSeek toggle. The legacy field remains persisted for compatibility.
 	RemoteReviewersEnabled   bool                               `json:"remote_reviewers_enabled,omitempty"`
@@ -155,13 +156,12 @@ type ContentModerationConfig struct {
 	KeywordPolicyVersion     string                             `json:"keyword_policy_version"`
 	ContextPolicyVersion     string                             `json:"context_policy_version"`
 	EvidencePolicyVersion    string                             `json:"evidence_policy_version"`
-	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
-	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
-	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
+	// Deprecated read-only alias; the explicit Cyber mode controls new decisions.
 	CyberPolicyExcludeFromBanCount bool `json:"cyber_policy_exclude_from_ban_count"`
 }
 
 type ContentModerationConfigView struct {
+	CyberPolicyBanMode             string                                 `json:"cyber_policy_ban_mode"`
 	Enabled                        bool                                   `json:"enabled"`
 	Mode                           string                                 `json:"mode"`
 	DeepSeekEnabled                bool                                   `json:"deepseek_enabled"`
@@ -249,6 +249,7 @@ type ContentModerationEndpointView struct {
 }
 
 type UpdateContentModerationConfigInput struct {
+	CyberPolicyBanMode             *string                                  `json:"cyber_policy_ban_mode"`
 	Enabled                        *bool                                    `json:"enabled"`
 	Mode                           *string                                  `json:"mode"`
 	DeepSeekEnabled                *bool                                    `json:"deepseek_enabled"`
@@ -375,6 +376,8 @@ type ContentModerationDecision struct {
 }
 
 type ContentModerationLog struct {
+	PenaltyEventKey       string                            `json:"penalty_event_key,omitempty"`
+	CurrentViolationCount *int                              `json:"current_violation_count,omitempty"`
 	ID                    int64                             `json:"id"`
 	RequestID             string                            `json:"request_id"`
 	UserID                *int64                            `json:"user_id,omitempty"`
@@ -1184,8 +1187,11 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.RecordNonHits != nil {
 		cfg.RecordNonHits = *input.RecordNonHits
 	}
-	if input.CyberPolicyExcludeFromBanCount != nil {
-		cfg.CyberPolicyExcludeFromBanCount = *input.CyberPolicyExcludeFromBanCount
+	if input.CyberPolicyBanMode != nil {
+		cfg.CyberPolicyBanMode = *input.CyberPolicyBanMode
+	} else if input.CyberPolicyExcludeFromBanCount != nil && *input.CyberPolicyExcludeFromBanCount {
+		// Old clients can opt out, but cannot silently opt in to punishment.
+		cfg.CyberPolicyBanMode = CyberPolicyBanLogOnly
 	}
 	// YuFeng/local second-layer endpoints are retired. Apply the retirement
 	// after merging request fields so an old admin client cannot restore one.
@@ -1351,6 +1357,17 @@ func (s *ContentModerationService) GetLog(ctx context.Context, logID int64) (*Co
 	}
 	if len(items) == 0 {
 		return nil, infraerrors.NotFound("CONTENT_MODERATION_LOG_NOT_FOUND", "风控日志不存在")
+	}
+	if repo, ok := s.repo.(ContentModerationPenaltyRepository); ok && items[0].UserID != nil {
+		cfg, err := s.loadConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		count, err := repo.CurrentModerationPenaltyCount(ctx, *items[0].UserID, cfg)
+		if err != nil {
+			return nil, err
+		}
+		items[0].CurrentViolationCount = &count
 	}
 	return &items[0], nil
 }
@@ -1800,6 +1817,11 @@ func (s *ContentModerationService) runCleanupOnce() {
 	now := time.Now()
 	hitBefore := now.AddDate(0, 0, -cfg.HitRetentionDays)
 	nonHitBefore := now.AddDate(0, 0, -cfg.NonHitRetentionDays)
+	if cleaner, ok := s.repo.(interface{ CleanupModerationPenaltyEvents(context.Context) error }); ok {
+		if err := cleaner.CleanupModerationPenaltyEvents(ctx); err != nil {
+			slog.Warn("content_moderation.penalty_cleanup_failed", "error", err)
+		}
+	}
 	result, err := s.repo.CleanupExpiredLogs(ctx, hitBefore, nonHitBefore)
 	if err != nil {
 		slog.Warn("content_moderation.cleanup_failed", "error", err)
@@ -2158,6 +2180,11 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	if cfg == nil {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不能为空")
 	}
+	switch cfg.CyberPolicyBanMode {
+	case "", CyberPolicyBanLogOnly, CyberPolicyBanCumulative, CyberPolicyBanImmediate:
+	default:
+		return infraerrors.BadRequest("INVALID_CYBER_POLICY_BAN_MODE", "Cyber 处理方式无效")
+	}
 	cfg.normalize()
 	if cfg.DeepSeekTotalTimeoutMS < minContentModerationSecondLayerTimeoutMS || cfg.DeepSeekTotalTimeoutMS > 120000 {
 		return infraerrors.BadRequest("INVALID_DEEPSEEK_TOTAL_TIMEOUT", "DeepSeek 总审核超时必须在 100-120000 毫秒之间")
@@ -2265,6 +2292,9 @@ func (s *ContentModerationService) persistContentModerationLogWithInput(ctx cont
 	if s == nil || log == nil {
 		return false
 	}
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now()
+	}
 	log.InputHash = hashText
 	isReplay := log.CacheHit || log.Action == ContentModerationActionCacheBlock || log.DecisionSource == "cache_replay"
 	if isReplay {
@@ -2362,6 +2392,9 @@ func (s *ContentModerationService) applyFlaggedAccountSideEffectsWithRole(ctx co
 		log.DispositionStatus = "not_counted"
 		log.AutoBanned = false
 		return false, nil
+	}
+	if handled, transitioned, err := s.applyAtomicModerationPenalty(ctx, cfg, log); handled {
+		return transitioned, err
 	}
 	count := 1
 	if s.repo != nil && cfg.ViolationWindowHours > 0 {
@@ -2595,6 +2628,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 		BlockMessage:            defaultContentModerationBlockMessage,
 		EmailOnHit:              true,
 		AutoBanEnabled:          true,
+		CyberPolicyBanMode:      CyberPolicyBanLogOnly,
 		BanThreshold:            defaultContentModerationBanThreshold,
 		ViolationWindowHours:    defaultContentModerationViolationWindowHours,
 		HitRetentionDays:        defaultContentModerationHitRetentionDays,
@@ -2651,6 +2685,11 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 }
 
 func (cfg *ContentModerationConfig) normalize() {
+	if cfg.ViolationWindowHours > 8760 {
+		cfg.ViolationWindowHours = 8760
+	}
+	cfg.CyberPolicyBanMode = cfg.cyberBanMode()
+	cfg.CyberPolicyExcludeFromBanCount = cfg.CyberPolicyBanMode != CyberPolicyBanCumulative
 	if cfg.DeepSeekTotalTimeoutMS <= 0 {
 		cfg.DeepSeekTotalTimeoutMS = DefaultContentModerationDeepSeekTotalTimeoutMS
 	}
@@ -2895,6 +2934,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		CandidateSystemReady:           candidateSystemError == "",
 		CandidateSystemError:           candidateSystemError,
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
+		CyberPolicyBanMode:             cfg.cyberBanMode(),
 	}
 	if assetErr == nil {
 		view.CandidateLayer1Count = len(asset.Layer1)
@@ -3233,7 +3273,7 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 		log.Mode = ContentModerationModeCyberLogOnly
 		log.DispositionStatus = "not_counted"
 	} else {
-		transitioned, dispositionErr = s.applyCyberPolicyDisposition(ctx, in, log)
+		transitioned, dispositionErr = s.applyCyberPolicyDispositionWithConfig(ctx, cfg, in, log)
 	}
 	if dispositionErr != nil {
 		log.DispositionStatus = "retry_required"
@@ -3352,6 +3392,7 @@ func (s *ContentModerationService) retryCyberPolicyDisposition(ctx context.Conte
 	}
 	log := &ContentModerationLog{
 		ID: entry.LogID, ArchiveID: entry.ArchiveID, Action: ContentModerationActionCyberPolicy,
+		RequestID: entry.RequestID, PenaltyEventKey: entry.PenaltyEventKey, Flagged: true,
 		CreatedAt: entry.CreatedAt, DispositionTarget: entry.DispositionTarget,
 		DispositionStatus: entry.DispositionStatus, DispositionTransitioned: entry.DispositionTransitioned,
 		AutoBanned: entry.AutoBanned, ViolationCount: entry.ViolationCount, UserEmail: entry.UserEmail,
@@ -3368,19 +3409,14 @@ func (s *ContentModerationService) retryCyberPolicyDisposition(ctx context.Conte
 	if !entry.DispositionComplete {
 		var transitioned bool
 		var err error
+		cfg, loadErr := s.loadConfig(ctx)
+		if loadErr != nil {
+			return loadErr
+		}
 		if kind == contentModerationDispositionLocal {
-			if entry.BanThreshold <= 0 {
-				return errors.New("local content moderation disposition retry is missing a ban threshold")
-			}
-			cfg := &ContentModerationConfig{
-				AutoBanEnabled: true, BanThreshold: entry.BanThreshold,
-				ViolationWindowHours:           entry.ViolationWindowHours,
-				CyberPolicyExcludeFromBanCount: entry.ExcludeCyberPolicy,
-			}
-			log.Flagged = true
 			transitioned, err = s.applyFlaggedAccountSideEffectsWithRole(ctx, cfg, log, entry.UserRole)
 		} else {
-			transitioned, err = s.applyCyberPolicyDisposition(ctx, CyberPolicyRecordInput{
+			transitioned, err = s.applyCyberPolicyDispositionWithConfig(ctx, cfg, CyberPolicyRecordInput{
 				UserID: entry.UserID, APIKeyID: entry.APIKeyID, UserRole: entry.UserRole,
 			}, log)
 		}
@@ -3465,8 +3501,34 @@ func (s *ContentModerationService) updateRetriedContentModerationDisposition(ctx
 }
 
 func (s *ContentModerationService) applyCyberPolicyDisposition(ctx context.Context, in CyberPolicyRecordInput, log *ContentModerationLog) (bool, error) {
+	cfg, err := s.loadConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.applyCyberPolicyDispositionWithConfig(ctx, cfg, in, log)
+}
+
+func (s *ContentModerationService) applyCyberPolicyDispositionWithConfig(ctx context.Context, cfg *ContentModerationConfig, in CyberPolicyRecordInput, log *ContentModerationLog) (bool, error) {
 	if s == nil || log == nil || in.UserID <= 0 {
 		return false, errors.New("cyber policy disposition requires a user")
+	}
+	if handled, transitioned, err := s.applyAtomicModerationPenalty(ctx, cfg, log); handled {
+		return transitioned, err
+	}
+	if cfg.cyberBanMode() == CyberPolicyBanLogOnly {
+		log.DispositionStatus = "not_counted"
+		return false, nil
+	}
+	if cfg.cyberBanMode() == CyberPolicyBanCumulative {
+		count, err := s.repo.CountFlaggedByUserSince(ctx, in.UserID, time.Now().Add(-time.Duration(cfg.ViolationWindowHours)*time.Hour), false)
+		if err != nil {
+			return false, err
+		}
+		log.ViolationCount = count + 1
+		if log.ViolationCount < cfg.BanThreshold {
+			log.DispositionStatus = "not_required"
+			return false, nil
+		}
 	}
 	role := strings.TrimSpace(in.UserRole)
 	if s.userRepo != nil {
@@ -3511,8 +3573,10 @@ func (s *ContentModerationService) applyCyberPolicyDisposition(ctx context.Conte
 	}
 	// 账号已停用，立即终止全部在途对话，再吊销所有活跃 Key 并逐 Key
 	// 失效认证缓存。顺序不能反：先掐断流，再封新请求入口。
-	s.terminateCyberPolicyUserConversations(ctx, in.UserID)
-	s.revokeCyberPolicyUserAPIKeys(ctx, in.UserID)
+	if transitioned {
+		s.terminateCyberPolicyUserConversations(ctx, in.UserID)
+		s.revokeCyberPolicyUserAPIKeys(ctx, in.UserID)
+	}
 	if transitioned && s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, in.UserID)
 	}

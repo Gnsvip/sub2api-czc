@@ -64,7 +64,8 @@ func TestRecordCyberPolicyEvent_KillsConversationsAndRevokesAllKeys(t *testing.T
 
 	svc := NewContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
-			SettingKeyRiskControlEnabled: "true",
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`,
 		}},
 		repo, nil, nil, nil, nil, invalidator, nil,
 	)
@@ -109,7 +110,7 @@ func TestRecordCyberPolicyEvent_KillsConversationsAndRevokesAllKeys(t *testing.T
 func TestRevokeCyberPolicyUserAPIKeys_ListerUnavailableIsNoOp(t *testing.T) {
 	repo := &cyberKillDispositionRepo{}
 	svc := NewContentModerationService(
-		&contentModerationTestSettingRepo{values: map[string]string{}},
+		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 		repo, nil, nil, nil, nil, nil, nil,
 	)
 	// svc.apiKeyRepo 为 nil：类型断言失败必须静默跳过，不影响主处置。

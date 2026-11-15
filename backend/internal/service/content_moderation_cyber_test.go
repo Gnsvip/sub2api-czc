@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -151,7 +152,8 @@ func TestRecordCyberPolicyEvent_RiskControlOffStillForcesUserDisposition(t *test
 	invalidator := &contentModerationTestAuthCacheInvalidator{}
 	svc := NewContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
-			SettingKeyRiskControlEnabled: "false",
+			SettingKeyRiskControlEnabled:      "false",
+			SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`,
 		}},
 		repo,
 		nil,
@@ -187,7 +189,8 @@ func TestRecordCyberPolicyEvent_NonGPTGroupReceivesSideEffects(t *testing.T) {
 	repo := &cyberDispositionTestRepo{userActive: true}
 	svc := NewContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
-			SettingKeyRiskControlEnabled: "true",
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`,
 		}},
 		repo,
 		nil,
@@ -216,6 +219,7 @@ func TestRecordCyberPolicyEvent_NonGPTGroupReceivesSideEffects(t *testing.T) {
 
 func TestRecordCyberPolicyEvent_LegacyStoredEmailAllowlistNoLongerSkipsDisable(t *testing.T) {
 	cfg := defaultContentModerationConfig()
+	cfg.CyberPolicyBanMode = CyberPolicyBanImmediate
 	rawCfg, err := json.Marshal(cfg)
 	require.NoError(t, err)
 	var stored map[string]any
@@ -256,7 +260,7 @@ func TestRecordCyberPolicyEvent_WritesLogAndDisablesUserOnce(t *testing.T) {
 	repo := &cyberDispositionTestRepo{userActive: true}
 	invalidator := &contentModerationTestAuthCacheInvalidator{}
 	svc := NewContentModerationService(
-		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true"}},
+		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyRiskControlEnabled: "true", SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 		repo, nil, nil, nil, nil, invalidator, nil,
 	)
 	input := CyberPolicyRecordInput{
@@ -312,7 +316,7 @@ func TestRecordCyberPolicyEvent_AdminDisablesOnlyTriggeringAPIKey(t *testing.T) 
 	repo := &cyberDispositionTestRepo{userActive: true, keyActive: true, keyCredential: "sk-triggering"}
 	invalidator := &contentModerationTestAuthCacheInvalidator{}
 	svc := NewContentModerationService(
-		&contentModerationTestSettingRepo{values: map[string]string{}},
+		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 		repo, nil, nil, nil, nil, invalidator, nil,
 	)
 	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
@@ -396,7 +400,8 @@ func TestRecordCyberPolicyEvent_DisablesBeforeLogAndEmail(t *testing.T) {
 	repo := &cyberOrderingTestRepo{}
 	svc := NewContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
-			SettingKeyRiskControlEnabled: "true",
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`,
 		}},
 		repo,
 		nil,
@@ -432,7 +437,7 @@ func TestRecordCyberPolicyEvent_DisablesBeforeLogAndEmail(t *testing.T) {
 func TestRecordCyberPolicyEvent_DisablesBeforeArchive(t *testing.T) {
 	repo := &cyberOrderingTestRepo{}
 	svc := NewContentModerationService(
-		&contentModerationTestSettingRepo{values: map[string]string{}},
+		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 		repo, nil, nil, nil, nil, nil, nil,
 	)
 	root := t.TempDir()
@@ -482,7 +487,7 @@ func (r *banCountArgsTestRepo) snapshotCountCalls() []bool {
 func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 	repo := &banCountArgsTestRepo{}
 	svc := NewContentModerationService(
-		&contentModerationTestSettingRepo{values: map[string]string{}},
+		&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`}},
 		repo, nil, nil, nil, nil, nil, nil,
 	)
 	userID := int64(42)
@@ -498,7 +503,7 @@ func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 		"applyFlaggedAccountSideEffects 必须把 cfg.CyberPolicyExcludeFromBanCount 透传给 COUNT 查询")
 }
 
-func TestRecordCyberPolicyEvent_AutoBanAndCountConfigDoNotControlCyberDisposition(t *testing.T) {
+func TestRecordCyberPolicyEvent_DisabledMasterPreventsCyberDisposition(t *testing.T) {
 	repo := &cyberDispositionTestRepo{userActive: true}
 	svc := NewContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
@@ -523,6 +528,69 @@ func TestRecordCyberPolicyEvent_AutoBanAndCountConfigDoNotControlCyberDispositio
 	require.Len(t, logs, 1)
 	require.True(t, logs[0].Flagged)
 	require.Equal(t, "cyber_policy", logs[0].Action)
-	require.Equal(t, "disabled", logs[0].DispositionStatus)
-	require.True(t, logs[0].DispositionTransitioned)
+	require.Equal(t, "not_counted", logs[0].DispositionStatus)
+	require.False(t, logs[0].DispositionTransitioned)
+	require.Zero(t, repo.disableUserCalls)
+	require.Zero(t, repo.disableKeyCalls)
+}
+
+func TestRecordCyberPolicyEvent_PolicyMatrix(t *testing.T) {
+	for _, master := range []bool{false, true} {
+		for _, mode := range []string{"", CyberPolicyBanLogOnly, CyberPolicyBanCumulative, CyberPolicyBanImmediate} {
+			for _, role := range []string{RoleUser, RoleAdmin} {
+				t.Run(fmt.Sprintf("%v/%s/%s", master, mode, role), func(t *testing.T) {
+					repo := &cyberDispositionTestRepo{userActive: true, keyActive: true}
+					raw, err := json.Marshal(ContentModerationConfig{AutoBanEnabled: master, CyberPolicyBanMode: mode, BanThreshold: 20})
+					require.NoError(t, err)
+					svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: string(raw)}}, repo, nil, nil, nil, nil, nil, nil)
+					registry := NewGatewayKillSwitchRegistry()
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					registry.Register(1, "other-request", cancel)
+					svc.conversationTerminator = registry
+					svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{UserID: 1, APIKeyID: 2, UserRole: role})
+					logs := repo.snapshotLogs()
+					require.Len(t, logs, 1)
+					require.True(t, logs[0].Flagged)
+					punish := master && mode == CyberPolicyBanImmediate
+					require.Equal(t, punish, logs[0].DispositionTransitioned)
+					require.Equal(t, punish && role == RoleUser, ctx.Err() != nil)
+					if !punish {
+						require.Zero(t, repo.disableUserCalls)
+						require.Zero(t, repo.disableKeyCalls)
+						require.False(t, logs[0].AutoBanned)
+						require.False(t, logs[0].EmailSent)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRetryCyberPolicyRespectsCurrentMaster(t *testing.T) {
+	for _, kind := range []string{contentModerationDispositionCyber, contentModerationDispositionLocal} {
+		repo := &cyberDispositionTestRepo{userActive: true, keyActive: true}
+		svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyContentModerationConfig: `{"auto_ban_enabled":false,"cyber_policy_ban_mode":"immediate","ban_threshold":1}`,
+		}}, repo, nil, nil, nil, nil, nil, nil)
+		entry := &contentModerationDispositionRetryFile{Kind: kind, UserID: 1, APIKeyID: 2, BanThreshold: 1, CreatedAt: time.Now()}
+		require.NoError(t, svc.retryCyberPolicyDisposition(context.Background(), entry))
+		require.True(t, entry.DispositionComplete)
+		require.False(t, entry.AutoBanned)
+		require.Zero(t, repo.disableUserCalls)
+		require.Zero(t, repo.disableKeyCalls)
+	}
+}
+
+func TestCyberPolicyConfigLegacyAndValidation(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"cyber_policy_exclude_from_ban_count":false}`, `{"cyber_policy_exclude_from_ban_count":true}`} {
+		cfg, err := parseContentModerationConfig(raw)
+		require.NoError(t, err)
+		require.Equal(t, CyberPolicyBanLogOnly, cfg.CyberPolicyBanMode)
+		require.True(t, cfg.CyberPolicyExcludeFromBanCount)
+	}
+	cfg := defaultContentModerationConfig()
+	cfg.CyberPolicyBanMode = "unexpected"
+	svc := &ContentModerationService{}
+	require.ErrorContains(t, svc.validateConfig(context.Background(), cfg), "Cyber")
 }

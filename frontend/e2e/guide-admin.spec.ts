@@ -221,6 +221,9 @@ test('内置模式在后台预览真实新版教程，空白自定义稿不能�
   await expect(frame.locator('[data-code="codex-auth"]')).toContainText('"OPENAI_API_KEY": "YOUR-API-KEY"')
   const gallery = frame.locator('#desktop-install .gallery').first()
   await gallery.locator('summary').click()
+  // The embedded preview is shorter than the full-page guide. Scroll the lazy
+  // image into this iframe's viewport, as a reader would, before checking it.
+  await gallery.locator('img').scrollIntoViewIfNeeded()
   await expect.poll(() => gallery.locator('img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   const previewLayout = await frame.locator('html').evaluate((html) => ({
     width: html.scrollWidth, viewport: html.clientWidth,

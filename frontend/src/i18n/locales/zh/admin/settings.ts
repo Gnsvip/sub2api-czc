@@ -32,6 +32,8 @@ export default {
         payment: '支付设置',
       },
       guideEditor: {
+        sectionTitle: '使用教程',
+        sectionHint: '展开编辑自定义教程或恢复内置教程；修改后请在编辑器内单独发布。',
         title: '使用教程编辑器',
         description: '这里编辑自定义 Markdown 教程。编辑内容不会改变当前展示；点击发布后，/guide 切换为自定义教程，无需重新打包或重启。预览中的危险内容会自动清理。',
         bundledModeHint: '当前展示随版本更新的内置教程。下方保留旧的自定义内容，编辑不会替换内置页面；点击“发布教程”才切换为自定义教程。',

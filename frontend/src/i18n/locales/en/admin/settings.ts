@@ -32,6 +32,8 @@ export default {
         payment: 'Payment',
       },
       guideEditor: {
+        sectionTitle: 'Usage Guide',
+        sectionHint: 'Expand to edit a custom guide or restore the bundled guide. Publish changes separately in the editor.',
         title: 'Usage Guide Editor',
         description: 'Edit a custom Markdown guide here. Editing does not change the public page; publishing switches /guide to the custom guide without a rebuild or restart. Unsafe preview content is removed automatically.',
         bundledModeHint: 'The bundled guide updates with each release. Saved custom content remains below; editing does not replace the public page. Publish the guide to switch to custom mode.',

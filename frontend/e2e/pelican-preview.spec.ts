@@ -91,7 +91,11 @@ async function mockAPIs(page: Page) {
   })
 }
 
-async function expectUncropped(frame: FrameLocator, id: string, ratio: number) {
+async function expectUncropped(page: Page, frame: FrameLocator, id: string, ratio: number) {
+  // A desktop -> mobile breakpoint animates AppLayout's sidebar margin for
+  // 300ms. Its available width can briefly be zero even though the iframe's
+  // native SVG is visible. Wait for the actual parent/iframe layout first.
+  await expectContainedViewport(page)
   await expect(frame.locator(`#${id}`)).toBeVisible()
   await expect.poll(() => frame.locator(`#${id}`).evaluate(svg => {
     const bounds = svg.getBoundingClientRect()
@@ -104,22 +108,29 @@ async function expectUncropped(frame: FrameLocator, id: string, ratio: number) {
       edgeVisible: marker.left >= -1 && marker.top >= -1 && marker.right <= window.innerWidth + 1 && marker.bottom <= window.innerHeight + 1,
     }
   })).toMatchObject({ fullWidth: true, fullHeight: true, noOverflow: true, edgeVisible: true })
-  const bounds = await frame.locator(`#${id}`).boundingBox()
-  expect(bounds!.width / bounds!.height).toBeCloseTo(ratio, 2)
+  await expect.poll(async () => {
+    const bounds = await frame.locator(`#${id}`).boundingBox()
+    return bounds && bounds.width > 0 && bounds.height > 0 ? bounds.width / bounds.height : Number.NaN
+  }).toBeCloseTo(ratio, 2)
 }
 
 async function expectContainedViewport(page: Page) {
-  await expect.poll(async () => {
-    const outer = await page.getByTestId('pelican-animation-preview').boundingBox()
-    const inner = await page.locator('iframe').boundingBox()
-    if (!outer || !inner || inner.width <= 0 || inner.height <= 0) return false
+  await expect.poll(() => page.getByTestId('pelican-animation-preview').evaluate(preview => {
+    // Inspect finite CSS transitions on layout ancestors, not artwork SMIL.
+    // This observes the real transition rather than disabling it or sleeping.
+    for (let ancestor: Element | null = preview; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.getAnimations().some(animation => animation instanceof CSSTransition && animation.playState === 'running' &&
+        animation.effect?.getComputedTiming().iterations !== Infinity)) return false
+    }
+    const outer = preview.getBoundingClientRect()
+    const inner = preview.querySelector('iframe')?.getBoundingClientRect()
+    if (!inner || outer.width <= 0 || outer.height <= 0 || inner.width <= 0 || inner.height <= 0) return false
     return Math.abs(outer.width / outer.height - 4 / 3) < 0.01 &&
-      inner.x >= outer.x - 1 && inner.y >= outer.y - 1 &&
-      inner.x + inner.width <= outer.x + outer.width + 1 &&
-      inner.y + inner.height <= outer.y + outer.height + 1 &&
-      Math.abs(inner.x + inner.width / 2 - outer.x - outer.width / 2) < 1 &&
-      Math.abs(inner.y + inner.height / 2 - outer.y - outer.height / 2) < 1
-  }).toBe(true)
+      inner.left >= outer.left - 1 && inner.top >= outer.top - 1 &&
+      inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1 &&
+      Math.abs(inner.left + inner.width / 2 - outer.left - outer.width / 2) < 1 &&
+      Math.abs(inner.top + inner.height / 2 - outer.top - outer.height / 2) < 1
+  })).toBe(true)
 }
 
 test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async ({ page }, testInfo) => {
@@ -133,7 +144,7 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   await expect(iframe).toHaveAttribute('srcdoc', wideHTML)
   await expect(iframe).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expect(page.getByTestId('pelican-animation-preview')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-  await expectUncropped(frame, 'wide', 1600 / 900)
+  await expectUncropped(page, frame, 'wide', 1600 / 900)
   await expectContainedViewport(page)
   await expect(frame.locator('body')).toHaveCSS('margin', '0px')
   await expect(frame.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
@@ -144,11 +155,11 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   // The whole native iframe viewport scales, including SVGs without viewBox.
   // Every selection keeps the same outer dimensions on this narrow screen.
   await page.setViewportSize({ width: 360, height: 800 })
-  await expectUncropped(frame, 'wide', 1600 / 900)
+  await expectUncropped(page, frame, 'wide', 1600 / 900)
   await expectContainedViewport(page)
   const fixedFrame = await page.getByTestId('pelican-animation-preview').boundingBox()
   await page.getByRole('button', { name: /11-15 15:30/ }).click()
-  await expectUncropped(frame, 'portrait', 900 / 1600)
+  await expectUncropped(page, frame, 'portrait', 900 / 1600)
   await expectContainedViewport(page)
   const portraitFrame = await page.getByTestId('pelican-animation-preview').boundingBox()
   expect(portraitFrame!.width).toBeCloseTo(fixedFrame!.width, 2)
@@ -166,12 +177,12 @@ test('鹈鹕预览按画面比例缩放且只运行选中的安全动画', async
   await page.screenshot({ path: testInfo.outputPath('pelican-portrait-mobile.png'), fullPage: true })
 
   await page.getByRole('button', { name: /11-15 15:00/ }).click()
-  await expectUncropped(frame, 'differing-dimensions', 800 / 600)
+  await expectUncropped(page, frame, 'differing-dimensions', 800 / 600)
   await expectContainedViewport(page)
   await expect(iframe).toHaveCount(1)
 
   await page.getByRole('button', { name: /11-15 14:30/ }).click()
-  await expectUncropped(frame, 'native-coordinates', 1200 / 800)
+  await expectUncropped(page, frame, 'native-coordinates', 1200 / 800)
   await expectContainedViewport(page)
   const nativeFrame = await page.getByTestId('pelican-animation-preview').boundingBox()
   expect(nativeFrame!.width).toBeCloseTo(fixedFrame!.width, 2)

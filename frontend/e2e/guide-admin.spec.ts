@@ -160,7 +160,10 @@ test('管理员可以预览并发布使用教程', async ({ page }, testInfo) =>
     buttons.forEach((button) => (button as HTMLButtonElement).click())
   })
   await expect(closeNotifications).toHaveCount(0)
-  await page.locator('#settings-tab-guide').click()
+  await expect(page.locator('#settings-tab-guide')).toHaveCount(0)
+  await expect(page.locator('#settings-tab-general')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[data-test="guide-editor"]')).toHaveCount(0)
+  await page.getByTestId('settings-guide-toggle').click()
   await expect(page.locator('[data-test="guide-editor"]')).toBeVisible()
 
   // The chapter list drives the editor: the first chapter opens by default and
@@ -175,6 +178,10 @@ test('管理员可以预览并发布使用教程', async ({ page }, testInfo) =>
 
   const updatedContent = '## 当前教程\n\n照着下面的步骤操作即可。\n\n<script>alert(1)</script>'
   await page.locator('[data-test="guide-markdown"]').fill(updatedContent)
+  await page.getByTestId('settings-guide-toggle').click()
+  await expect(page.locator('[data-test="guide-editor"]')).not.toBeVisible()
+  await page.getByTestId('settings-guide-toggle').click()
+  await expect(page.locator('[data-test="guide-markdown"]')).toHaveValue(updatedContent)
   await expect(page.locator('[data-test="guide-preview"]')).toContainText('照着下面的步骤操作即可。')
   // The preview covers every chapter, not just the edited one.
   await expect(page.locator('[data-test="guide-preview"]')).toContainText('这一章不应被改动。')
@@ -202,6 +209,21 @@ test('管理员可以预览并发布使用教程', async ({ page }, testInfo) =>
     path: resolve(screenshotDir, `${testInfo.project.name}.png`),
     fullPage: true,
   })
+})
+
+test('旧教程设置链接打开通用设置里的编辑器', async ({ page }) => {
+  await prepareAdminGuide(page)
+  await page.goto('/admin/settings?tab=guide&source=bookmark')
+  await expect(page).toHaveURL(/\/admin\/settings\?tab=general&source=bookmark#settings-guide$/)
+  await expect(page.locator('#settings-tab-guide')).toHaveCount(0)
+  await expect(page.locator('#settings-tab-general')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('settings-guide-toggle')).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('settings-guide-toggle')).toBeInViewport()
+  await expect(page.locator('[data-test="guide-editor"]')).toBeVisible()
+  await expect(page.locator('[data-test="guide-markdown"]')).toHaveValue(/管理员之前发布的内容/)
+  await page.reload()
+  await expect(page.getByTestId('settings-guide-toggle')).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('[data-test="guide-editor"]')).toBeVisible()
 })
 
 // The existing desktop/mobile browser job also protects the lightweight result view.

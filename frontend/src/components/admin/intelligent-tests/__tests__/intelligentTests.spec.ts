@@ -1,6 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent } from 'vue'
+import { createI18n } from 'vue-i18n'
 import { testImageURL, sortTestSettings } from '../display'
 import QuickTestDialog from '../QuickTestDialog.vue'
 import TestSettingsPanel from '../TestSettingsPanel.vue'
@@ -21,7 +22,12 @@ vi.mock('@/stores/pelican', () => ({ usePelicanStore: () => ({ setVisible: vi.fn
 const BaseDialog = defineComponent({ props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' })
 const settings: TestSetting[] = [{ test_type: 'pelican', enabled: true, user_visible: false, config: { prompt: 'Draw a pelican', model: '', evaluator: 'svg_structure', timeout_seconds: 180 } }, { test_type: 'candy', enabled: false, user_visible: true, config: { prompt: '12 minus 5?', model: '', evaluator: 'exact_answer', expected_answer: '7', timeout_seconds: 120 } }]
 const record: TestRecord = { id: 1, account_id: 42, test_type: 'pelican', status: 'running', score: null, result: '', result_image: '', duration_ms: 0, model: 'test-model', anti_degradation: true, started_at: '2026-09-12T12:00:00Z', finished_at: null, created_at: '2026-09-12T12:00:00Z' }
-const global = { stubs: { BaseDialog, Pagination: true, TestStatusBadge: true } }
+const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: { pelicanTest: {
+  previewLoading: () => '正在加载画面…',
+  previewLoadTimeout: () => '画面加载超时',
+  previewRetry: () => '重试',
+} } } })
+const global = { plugins: [i18n], stubs: { BaseDialog, Pagination: true, TestStatusBadge: true } }
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(intelligentTestsAPI.settings).mockResolvedValue(structuredClone(settings))
@@ -66,12 +72,13 @@ describe('model-generated image isolation', () => {
   it('uses the animation viewport without changing author markup or the sandbox', async () => {
     const html = '<html><style>body{background:#ffeedd}</style><body><svg viewBox="0 0 900 1600"><animate attributeName="x" values="0;1"/></svg></body></html>'
     vi.mocked(intelligentTestsAPI.animation).mockResolvedValueOnce({ html }).mockResolvedValueOnce({ html: '<svg></svg>' })
-    const wrapper = mount(TestGeneratedImage, { props: { recordId: 1, animated: true } })
+    const wrapper = mount(TestGeneratedImage, { props: { recordId: 1, animated: true }, global })
     await flushPromises()
     expect(wrapper.get('iframe').attributes('srcdoc')).toBe(html)
     expect(wrapper.get('iframe').attributes('sandbox')).toBe('')
     expect(wrapper.get('iframe').attributes('referrerpolicy')).toBe('no-referrer')
-    expect(wrapper.get('iframe').classes()).toContain('bg-white')
+    expect(wrapper.get('iframe').element.style.backgroundColor).toBe('transparent')
+    expect(wrapper.get<HTMLElement>('[data-testid="pelican-animation-preview"]').element.style.backgroundColor).toBe('rgb(255, 238, 221)')
     expect(wrapper.get('iframe').element.style.width).toBe('900px')
     expect(wrapper.get('iframe').element.style.height).toBe('1600px')
     expect(wrapper.get('[data-testid="pelican-animation-preview"]').classes()).toContain('aspect-[4/3]')

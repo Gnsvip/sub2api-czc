@@ -20,6 +20,9 @@ func TestIntelligentTestAnimalsAreUniqueAndNumerous(t *testing.T) {
 
 func TestPickIntelligentTestAnimalAvoidsLastChoice(t *testing.T) {
 	t.Parallel()
+	for _, excluded := range []string{"企鹅", "帝企鹅", "熊猫", "小熊猫"} {
+		require.NotContains(t, intelligentRidingAnimals, excluded)
+	}
 	first := pickIntelligentTestAnimal("")
 	for i := 0; i < 256; i++ {
 		next := pickIntelligentTestAnimal(first)
@@ -132,7 +135,7 @@ func TestPelicanNextBoundaryAlignsToThirtyMinutes(t *testing.T) {
 }
 
 func TestVisualJudgeUsesRequestedAnimal(t *testing.T) {
-	for _, animal := range []string{"豆娘", "海豚", "鹈鹕", "大王酸浆鱿", "小熊猫", "哆啦A梦", "江户川柯南", "路飞"} {
+	for _, animal := range []string{"豆娘", "海豚", "鹈鹕", "大王酸浆鱿", "企鹅", "帝企鹅", "熊猫", "小熊猫", "哆啦A梦", "江户川柯南", "路飞"} {
 		prompt := intelligentAnimalHTMLPrompt(animal)
 		require.Contains(t, prompt, "创建一个HTML，内容是SVG绘制一个"+animal+"骑自行车")
 		require.Contains(t, prompt, "不使用 JavaScript")

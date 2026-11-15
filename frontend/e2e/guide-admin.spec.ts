@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, type Page, type Route } from '@playwright/test'
 
@@ -35,6 +35,37 @@ const originalGuide = {
     version: 3,
     updated_at: '2026-08-30T10:00:00Z',
   }],
+}
+
+const bundledGuide = {
+  display_mode: 'bundled',
+  content: '',
+  chapters: [],
+  version: 0,
+  updated_at: '',
+  has_custom_content: false,
+  revisions: [],
+}
+
+// Match the deployed document's CSP, including its same-origin embedding rule.
+const configSource = readFileSync(resolve(process.cwd(), '../backend/internal/config/config.go'), 'utf8')
+const defaultPolicy = configSource.match(/const DefaultCSPPolicy = "([^"]+)"/)?.[1]
+if (!defaultPolicy) throw new Error('DefaultCSPPolicy was not found')
+const guidePolicy = defaultPolicy.replace('__CSP_NONCE__', "'nonce-guide-admin-check'")
+  .replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+
+async function applyBundledGuideCsp(page: Page) {
+  await page.route(/\/guide-content\/(?:index\.html)?(?:\?.*)?$/, async (route) => {
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      headers: {
+        ...response.headers(),
+        'content-security-policy': guidePolicy,
+        'x-frame-options': 'SAMEORIGIN',
+      },
+    })
+  })
 }
 
 // The API client unwraps a {code, message, data} envelope, so mocks must send
@@ -106,6 +137,7 @@ async function prepareAdminGuide(page: Page) {
       return json(route, originalGuide)
     }
     if (path.endsWith('/admin/settings')) return json(route, {})
+    if (path.endsWith('/admin/settings/guide/assets')) return json(route, [])
     if (path.endsWith('/admin/settings/beta-policy')) return json(route, { rules: [] })
     if (path.endsWith('/admin/groups/all') || path.includes('/payment/providers')) {
       return json(route, [])
@@ -149,6 +181,92 @@ async function prepareAdminGuide(page: Page) {
     return json(route, {})
   })
 }
+
+test('内置模式在后台预览真实新版教程，空白自定义稿不能误发布', async ({ page }, testInfo) => {
+  await prepareAdminGuide(page)
+  const mutations: string[] = []
+  await page.route(url => url.pathname === '/api/v1/admin/settings/guide', (route) => {
+    if (route.request().method() !== 'GET') mutations.push(route.request().method())
+    return json(route, bundledGuide)
+  })
+  await applyBundledGuideCsp(page)
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /content security policy|violates.*directive/i.test(message.text())) errors.push(message.text())
+  })
+  await page.goto('/admin/settings?tab=guide')
+
+  const editor = page.locator('[data-test="guide-editor"]')
+  const frame = page.frameLocator('[data-test="guide-bundled-preview"]')
+  await expect(frame.locator('#overview.active')).toBeVisible()
+  await expect(frame.locator('.page')).toHaveCount(15)
+  await expect(editor.locator('[data-test="guide-chapter-list"]')).toHaveCount(0)
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveCount(0)
+  await expect(editor.locator('[data-test="guide-save"]')).toHaveCount(0)
+  await expect(editor.locator('[data-test="guide-chapter-import-bundled"]')).toHaveCount(0)
+
+  await frame.locator('#search').fill('流式输出')
+  await frame.locator('#search').press('Enter')
+  await expect(frame.locator('#streaming.active')).toBeVisible()
+  await expect(frame.locator('#streaming')).toContainText('response.completed')
+  // Preview navigation must not turn the settings page into a guide deep link.
+  await expect(page).toHaveURL(/\/admin\/settings\?tab=general#settings-guide$/)
+  await frame.locator('#search').fill('Codex 桌面版与插件')
+  await frame.locator('#search').press('Enter')
+  await expect(frame.locator('#codex.active')).toBeVisible()
+  await expect(frame.locator('#desktop-install')).toBeVisible()
+  await expect(frame.locator('#legacy-mode')).toBeVisible()
+  await expect(frame.locator('[data-code="codex-auth"]')).toBeVisible()
+  await expect(frame.locator('[data-code="codex-auth"]')).toContainText('"OPENAI_API_KEY": "YOUR-API-KEY"')
+  const gallery = frame.locator('#desktop-install .gallery').first()
+  await gallery.locator('summary').click()
+  // The embedded preview is shorter than the full-page guide. Scroll the lazy
+  // image into this iframe's viewport, as a reader would, before checking it.
+  await gallery.locator('img').scrollIntoViewIfNeeded()
+  await expect.poll(() => gallery.locator('img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const previewLayout = await frame.locator('html').evaluate((html) => ({
+    width: html.scrollWidth, viewport: html.clientWidth,
+  }))
+  expect(previewLayout.width).toBeLessThanOrEqual(previewLayout.viewport + 1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('admin-bundled-guide.png'), fullPage: true })
+
+  await editor.locator('[data-test="guide-edit-custom"]').click()
+  await expect(editor.locator('[data-test="guide-chapter-list"] li')).toHaveCount(1)
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveValue('')
+  await expect(editor.locator('[data-test="guide-save"]')).toBeDisabled()
+  await editor.locator('[data-test="guide-cancel-custom"]').click()
+  await expect(frame.locator('#overview.active')).toBeVisible()
+  await expect(editor.locator('[data-test="guide-save"]')).toHaveCount(0)
+  expect(mutations).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('内置模式保留历史自定义稿，仅在明确编辑时载入', async ({ page }) => {
+  await prepareAdminGuide(page)
+  const mutations: string[] = []
+  await page.route(url => url.pathname === '/api/v1/admin/settings/guide', (route) => {
+    if (route.request().method() !== 'GET') mutations.push(route.request().method())
+    return json(route, { ...originalGuide, display_mode: 'bundled' })
+  })
+  await page.goto('/admin/settings?tab=guide')
+  const editor = page.locator('[data-test="guide-editor"]')
+  await expect(page.frameLocator('[data-test="guide-bundled-preview"]').locator('.page')).toHaveCount(15)
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveCount(0)
+  await expect(editor.locator('[data-test="guide-save"]')).toHaveCount(0)
+
+  await editor.locator('[data-test="guide-edit-custom"]').click()
+  await expect(editor.locator('[data-test="guide-chapter-list"] li')).toHaveCount(2)
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveValue(originalChapters[0].content)
+  await editor.locator('[data-test="guide-cancel-custom"]').click()
+  await expect(editor.locator('[data-test="guide-bundled-preview"]')).toBeVisible()
+  await editor.locator('[data-test="guide-edit-custom"]').click()
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveValue(originalChapters[0].content)
+  await editor.locator('[data-test="guide-chapter-faq"]').click()
+  await expect(editor.locator('[data-test="guide-markdown"]')).toHaveValue(originalChapters[1].content)
+  expect(mutations).toEqual([])
+})
 
 test('管理员可以预览并发布使用教程', async ({ page }, testInfo) => {
   await prepareAdminGuide(page)
@@ -251,8 +369,8 @@ test('animal test shows one animation with collapsed scoring details', async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('animal-single-preview.png'), fullPage: true })
   await page.getByRole('button', { name: /11-09.*异常/ }).click()
+  await expect(page.locator('iframe[data-preview-state="active"]')).toHaveAttribute('srcdoc', /drawing-1/)
   await expect(page.locator('iframe')).toHaveCount(1)
-  await expect(page.locator('iframe')).toHaveAttribute('srcdoc', /drawing-1/)
   await page.getByText('评分与测试详情', { exact: true }).click()
   await expect(page.getByText('只在详情中出现的完整评分说明')).toBeVisible()
 })

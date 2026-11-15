@@ -35,11 +35,10 @@ RUN --mount=type=cache,id=sub2api-pnpm-store,target=/root/.local/share/pnpm/stor
     pnpm install --frozen-lockfile --prefer-offline
 
 # Copy frontend source and build.
-# LegalDocumentView.vue and the usage guide build-time import Markdown from
-# /app/docs. Copy only those files to keep the build dependency minimal.
+# LegalDocumentView.vue imports Markdown from /app/docs at build time.
+# The current usage tutorial is included under frontend/guide-content/.
 COPY frontend/ ./
 COPY docs/legal/ /app/docs/legal/
-COPY docs/guide/ /app/docs/guide/
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------

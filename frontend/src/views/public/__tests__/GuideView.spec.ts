@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GuideView from '@/views/public/GuideView.vue'
 import CustomGuideView from '@/views/public/CustomGuideView.vue'
+import type { PublicGuide } from '@/api/guide'
 import {
   buildGuideDocument,
   buildGuideDocumentFromChapters,
@@ -11,12 +12,19 @@ import {
   joinGuideChapters,
   splitGuideIntoChapters,
 } from '@/utils/guideMarkdown'
-import { getBundledGuideChapters } from '@/utils/guideSections'
-
-// The guide now ships as one file per chapter under docs/guide/; the joined
-// document is what the page renders and what these assertions inspect.
-const guideChapters = getBundledGuideChapters()
+const guideChapters = [
+  { slug: 'setup', title: '自定义接入步骤', content: '## 自定义接入步骤\n\n管理员保存的操作说明。' },
+  {
+    slug: 'commands', title: '自定义命令',
+    content: '## 自定义命令\n\n<!-- copy-command:skill-install -->\n```text\n管理员提供的示例命令\n```',
+  },
+  { slug: 'faq', title: '自定义常见问题', content: '## 自定义常见问题\n\n[帮助](https://example.test/help)' },
+]
 const guideMarkdown = joinGuideChapters(guideChapters)
+const customGuide: PublicGuide = {
+  display_mode: 'custom', content: guideMarkdown, chapters: guideChapters,
+  version: 7, updated_at: '2026-11-15T12:00:00Z', has_custom_content: true,
+}
 
 const copyToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 const getPublicGuide = vi.hoisted(() => vi.fn())
@@ -50,7 +58,7 @@ describe('GuideView', () => {
     } as typeof window.__APP_CONFIG__
   })
 
-  it('replaces the bundled guide with published database chapters', async () => {
+  it('renders only published database chapters after loading without a bundled-content flash', async () => {
     getPublicGuide.mockResolvedValue({
       content: '',
       chapters: [{
@@ -74,12 +82,15 @@ describe('GuideView', () => {
         },
       },
     })
+    expect(wrapper.find('[data-test="guide-content"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('旧的整篇内容')
     await flushPromises()
 
     expect(wrapper.get('[data-test="guide-content"]').text()).toContain('这是数据库中的内容。')
     expect(wrapper.text()).toContain('教程版本 在线第 7 版')
     // The published chapter slug becomes the anchor id.
     expect(wrapper.get('#admin-chapter').text()).toBe('管理员发布的教程')
+    expect(getPublicGuide).toHaveBeenCalledTimes(1)
   })
 
   it('splits a guide published before chapters existed and keeps its anchors', async () => {
@@ -147,35 +158,10 @@ describe('GuideView', () => {
     wrapper.unmount()
   })
 
-  it('ships one file per chapter with stable slugs and ordering', () => {
-    expect(guideChapters).toHaveLength(16)
-    expect(guideChapters.map((chapter) => chapter.slug)).toEqual([
-      'quick-start',
-      'account',
-      'recharge',
-      'api-key',
-      'first-request',
-      'domains',
-      'codex',
-      'speed-script',
-      'goal-workflow',
-      'svip',
-      'usage',
-      'error-codes',
-      'faq',
-      'security',
-      'support',
-      'version',
-    ])
-
-    // Every chapter must start with its own `##` heading and carry its title.
-    for (const chapter of guideChapters) {
-      expect(chapter.content.startsWith('## ')).toBe(true)
-      expect(chapter.title).not.toBe('')
-    }
-
+  it('preserves the order and permanent anchors of published custom chapters', () => {
     const { sections } = buildGuideDocumentFromChapters(guideChapters)
     expect(sections.map((section) => section.id)).toEqual(guideChapters.map((chapter) => chapter.slug))
+    expect(sections.map((section) => section.label)).toEqual(guideChapters.map((chapter) => chapter.title))
   })
 
   it('anchors every chapter to its own slug even when one has no heading', () => {
@@ -247,8 +233,9 @@ describe('GuideView', () => {
     expect(deriveChapterSlug('另一章节')).not.toBe(chineseOnly)
   })
 
-  it('retains the editable legacy guide and its commands', async () => {
+  it('renders custom chapters and copies only commands supplied in that publication', async () => {
     const wrapper = mount(CustomGuideView, {
+      props: { published: customGuide },
       global: {
         stubs: {
           RouterLink: {
@@ -259,28 +246,61 @@ describe('GuideView', () => {
       },
     })
 
-    expect(wrapper.get('[data-test="guide-view"]').text()).toContain('从充值到第一次使用，照着做就可以')
-    expect(wrapper.get('#recharge').text()).toBe('充值：先买兑换码，再兑换余额')
-    expect(wrapper.get('#goal-workflow').text()).toBe('使用 goal-workflow 小助手')
-    expect(wrapper.get('#svip').text()).toBe('SVIP 能得到什么、需要注意什么')
-    expect(wrapper.get('#domains').text()).toBe('本站网址与 API 地址')
-    expect(wrapper.get('#speed-script').text()).toBe('检查与 AIFXO 的连接')
-    expect(wrapper.get('[data-test="guide-content"]').text()).toContain('https://api.aifxo.com/v1')
+    expect(wrapper.get('#setup').text()).toBe('自定义接入步骤')
+    expect(wrapper.get('#commands').text()).toBe('自定义命令')
+    expect(wrapper.get('#faq').text()).toBe('自定义常见问题')
+    expect(wrapper.get('[data-test="guide-content"]').text()).toContain('管理员保存的操作说明。')
+    expect(wrapper.text()).toContain('在线第 7 版')
+    expect(wrapper.text()).toContain('2026-11-15')
     expect(wrapper.find('[data-test="guide-download"]').exists()).toBe(false)
 
     const commands = extractGuideCommands(guideMarkdown)
-    expect(commands.map((command) => command.id)).toEqual([
-      'skill-install',
-      'skill-update',
-      'goal-example',
-    ])
+    expect(commands.map((command) => command.id)).toEqual(['skill-install'])
 
     await wrapper.get('[data-test="copy-skill-install"]').trigger('click')
     expect(copyToClipboard).toHaveBeenCalledWith(
-      '安装 skill https://github.com/zuchengchen/goal-workflow/tree/master/skills/goal-workflow',
+      '管理员提供的示例命令',
       '命令已复制'
     )
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('安装 goal-workflow 已复制')
+    await wrapper.get('[data-test="mobile-toc-toggle"]').trigger('click')
+    expect(wrapper.get('#mobile-guide-toc').findAll('a')).toHaveLength(3)
+    await wrapper.get('#mobile-guide-toc a[href="#faq"]').trigger('click')
+    expect(wrapper.find('#mobile-guide-toc').exists()).toBe(false)
+    expect(getPublicGuide).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([undefined, { ...customGuide, display_mode: 'bundled' as const },
+    { ...customGuide, has_custom_content: false },
+    { ...customGuide, chapters: [], content: '' }])('does not render fallback content without an active custom publication (%j)', async (published) => {
+    const wrapper = mount(CustomGuideView, { props: { published } })
+    expect(wrapper.find('[data-test="guide-view"]').exists()).toBe(false)
+    await flushPromises()
+    expect(wrapper.html()).not.toContain('管理员保存的操作说明')
+    expect(wrapper.find('[data-test="guide-content"]').exists()).toBe(false)
+    expect(getPublicGuide).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('updates from its supplied publication and hides retained drafts when switched to bundled mode', async () => {
+    const wrapper = mount(CustomGuideView, {
+      props: { published: customGuide },
+      global: { stubs: { RouterLink: true } },
+    })
+    expect(wrapper.get('#setup').text()).toBe('自定义接入步骤')
+    await wrapper.setProps({ published: { ...customGuide, display_mode: 'bundled' } })
+    expect(wrapper.find('[data-test="guide-content"]').exists()).toBe(false)
+    await wrapper.setProps({ published: {
+      ...customGuide, chapters: [{ slug: 'new', title: '新稿', content: '## 新稿\n\n更新后的内容' }],
+      version: 8, updated_at: '',
+    } })
+    expect(wrapper.get('#new').text()).toBe('新稿')
+    expect(wrapper.find('#setup').exists()).toBe(false)
+    expect(wrapper.text()).toContain('在线第 8 版')
+    expect(wrapper.text()).not.toContain('更新日期')
+    expect(getPublicGuide).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('sanitizes Markdown HTML and secures external links', () => {
@@ -295,58 +315,8 @@ describe('GuideView', () => {
     expect(document.sections).toEqual([{ id: 'section-1', label: '标题' }])
   })
 
-  it('gives the error-code reference a stable anchor and covers all three code layers', () => {
-    const { sections } = buildGuideDocument(guideMarkdown)
-
-    expect(sections).toEqual(
-      expect.arrayContaining([{ id: 'error-codes', label: '错误码含义与处理方案' }])
-    )
-    expect(sections.map((section) => section.id)).not.toContain('section-13')
-
-    // HTTP status codes, business reason codes, and error.type names must all be explained.
-    for (const code of ['`400`', '`401`', '`403`', '`404`', '`409`', '`413`', '`429`', '`499`', '`502`', '`503`', '`504`']) {
-      expect(guideMarkdown).toContain(code)
-    }
-    for (const reason of [
-      'INSUFFICIENT_BALANCE',
-      'API_KEY_EXPIRED',
-      'API_KEY_RATE_5H_EXCEEDED',
-      'USER_RPM_EXCEEDED',
-      'GROUP_RPM_EXCEEDED',
-      'USER_PLATFORM_DAILY_QUOTA_EXHAUSTED',
-      'SUBSCRIPTION_INVALID',
-      'BILLING_SERVICE_ERROR',
-    ]) {
-      expect(guideMarkdown).toContain(reason)
-    }
-    for (const type of [
-      'authentication_error',
-      'permission_error',
-      'billing_error',
-      'invalid_request_error',
-      'rate_limit_exceeded',
-      'rate_limit_error',
-      'upstream_error',
-    ]) {
-      expect(guideMarkdown).toContain(type)
-    }
-    expect(guideMarkdown).toContain('Retry-After')
-
-    // The FAQ must defer to the reference instead of re-explaining status codes.
-    expect(guideMarkdown).toContain('[错误码含义与处理方案](#error-codes)')
-  })
-
-  it('contains the requested workflows without disclosing the payment race', () => {
-    expect(guideMarkdown).toContain('购买兑换码')
-    expect(guideMarkdown).toContain('[兑换余额](/redeem)')
-    expect(guideMarkdown).toContain('$goal-workflow 清理内存')
-    expect(guideMarkdown).toContain('总余额（含赠送）达到 **100**')
-    expect(guideMarkdown).toContain('https://api.aifxo.com/v1')
-    expect(guideMarkdown).toContain('可以把它理解为“软件专用密码”')
-    expect(guideMarkdown).toContain('无需 API Key，不修改 hosts 或客户端配置')
-    expect(guideMarkdown).toContain('开启邮箱验证，不要求邀请码')
-    expect(guideMarkdown).not.toMatch(/A.{0,20}B.{0,80}(?:支付|订单)/s)
-    expect(guideMarkdown).not.toContain('并发支付竞态')
-    expect(guideMarkdown).not.toContain('没有支付但是到账')
+  it('keeps historical custom-document anchors without retaining an obsolete bundled document', () => {
+    const { sections } = buildGuideDocument('## 错误码含义与处理方案\n\n管理员自己的错误说明。')
+    expect(sections).toEqual([{ id: 'error-codes', label: '错误码含义与处理方案' }])
   })
 })

@@ -185,7 +185,7 @@ async function prepareAdminGuide(page: Page) {
 test('内置模式在后台预览真实新版教程，空白自定义稿不能误发布', async ({ page }, testInfo) => {
   await prepareAdminGuide(page)
   const mutations: string[] = []
-  await page.route('**/api/v1/admin/settings/guide', (route) => {
+  await page.route(url => url.pathname === '/api/v1/admin/settings/guide', (route) => {
     if (route.request().method() !== 'GET') mutations.push(route.request().method())
     return json(route, bundledGuide)
   })
@@ -243,7 +243,7 @@ test('内置模式在后台预览真实新版教程，空白自定义稿不能�
 test('内置模式保留历史自定义稿，仅在明确编辑时载入', async ({ page }) => {
   await prepareAdminGuide(page)
   const mutations: string[] = []
-  await page.route('**/api/v1/admin/settings/guide', (route) => {
+  await page.route(url => url.pathname === '/api/v1/admin/settings/guide', (route) => {
     if (route.request().method() !== 'GET') mutations.push(route.request().method())
     return json(route, { ...originalGuide, display_mode: 'bundled' })
   })

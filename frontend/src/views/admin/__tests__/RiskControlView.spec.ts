@@ -119,7 +119,8 @@ const baseConfig = (): ContentModerationConfig => ({
   block_message: 'request blocked',
   email_on_hit: true,
   auto_ban_enabled: true,
-  cyber_policy_exclude_from_ban_count: false,
+  cyber_policy_ban_mode: 'log_only',
+    cyber_policy_exclude_from_ban_count: true,
   ban_threshold: 10,
   violation_window_hours: 720,
   hit_retention_days: 180,
@@ -333,11 +334,25 @@ describe('admin RiskControlView', () => {
     wrapper.unmount()
   })
 
+  it('disables Cyber penalties and saves log-only mode when auto-ban is off', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="cyber-policy-immediate"]').setValue()
+    await wrapper.get('[data-test="auto-ban-enabled"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="cyber-policy-modes"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-test="cyber-policy-log_only"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-test="save-risk-control"]').trigger('click')
+    await flushPromises()
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({auto_ban_enabled: false, cyber_policy_ban_mode: 'log_only'}))
+    wrapper.unmount()
+  })
+
   it('saves reviewer switches, ordered channels, masked-key replacement, and independent stages', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('[data-test="cyber-policy-exclude-ban"]').trigger('click')
+    await wrapper.get('[data-test="cyber-policy-cumulative"]').setValue()
     await wrapper.get('[data-test="layer1-stage-enforce"]').trigger('click')
     const moveDown = wrapper.get(
       '[data-test="deepseek-channel-0"] button[aria-label="admin.riskControl.moveChannelDown"]'
@@ -353,7 +368,7 @@ describe('admin RiskControlView', () => {
         remote_reviewers_enabled: true,
         remote_consensus_required: 1,
         remote_unavailable_policy: 'fail_closed',
-        cyber_policy_exclude_from_ban_count: true,
+        cyber_policy_ban_mode: 'cumulative',
         deepseek_threshold: 0.8,
         deepseek_total_timeout_ms: 10000,
         first_layer_stage: 'enforce',

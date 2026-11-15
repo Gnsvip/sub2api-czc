@@ -764,26 +764,23 @@
               </label>
               <label class="flex items-center justify-between gap-3">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.riskControl.autoBan') }}</span>
-                <Toggle v-model="configForm.auto_ban_enabled" />
+                <Toggle v-model="configForm.auto_ban_enabled" data-test="auto-ban-enabled" />
               </label>
-              <label class="flex items-center justify-between gap-3">
-                <span class="min-w-0">
-                  <span class="block text-sm text-gray-700 dark:text-gray-300">{{
-                    t('admin.riskControl.cyberPolicyExcludeBan')
-                  }}</span>
-                  <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{
-                    t('admin.riskControl.cyberPolicyExcludeBanHint')
-                  }}</span>
-                </span>
-                <Toggle
-                  v-model="configForm.cyber_policy_exclude_from_ban_count"
-                  class="flex-shrink-0"
-                  data-test="cyber-policy-exclude-ban"
-                />
-              </label>
+              <fieldset :disabled="!configForm.auto_ban_enabled" class="space-y-2" data-test="cyber-policy-modes">
+                <legend class="text-sm font-medium">{{ t('admin.riskControl.cyberPolicyMode') }}</legend>
+                <label v-for="mode in cyberPolicyModes" :key="mode" class="flex items-center gap-2 text-sm">
+                  <input v-model="configForm.cyber_policy_ban_mode" type="radio" name="cyber-ban-mode" :value="mode" :data-test="`cyber-policy-${mode}`" />
+                  {{ t(`admin.riskControl.cyberPolicyModes.${mode}`) }}
+                </label>
+              </fieldset>
+              <p class="text-xs text-gray-500 dark:text-gray-400" data-test="cyber-policy-summary">
+                {{ configForm.auto_ban_enabled
+                  ? t('admin.riskControl.cyberPolicyCountHint', { count: configForm.ban_threshold, hours: configForm.violation_window_hours })
+                  : t('admin.riskControl.cyberPolicyDisabledHint') }}
+              </p>
               <label>
                 <span class="input-label">{{ t('admin.riskControl.banThreshold') }}</span>
-                <input v-model.number="configForm.ban_threshold" class="input" type="number" min="1" max="1000" />
+                <input v-model.number="configForm.ban_threshold" :disabled="!configForm.auto_ban_enabled" class="input" type="number" min="1" max="1000" />
               </label>
             </div>
 
@@ -1254,7 +1251,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1390,7 +1387,7 @@ const configForm = reactive({
   block_message: defaultBlockMessage(),
   email_on_hit: true,
   auto_ban_enabled: true,
-  cyber_policy_exclude_from_ban_count: false,
+  cyber_policy_ban_mode: 'log_only' as 'log_only' | 'cumulative' | 'immediate',
   ban_threshold: 10,
   violation_window_hours: 720,
   hit_retention_days: 180,
@@ -1588,10 +1585,17 @@ const overviewItems = computed<OverviewItem[]>(() => [
   },
 ])
 
+const cyberPolicyModes = ['log_only', 'cumulative', 'immediate'] as const
+watch(() => configForm.auto_ban_enabled, (enabled) => {
+  if (!enabled) configForm.cyber_policy_ban_mode = 'log_only'
+})
+
 const selectedLogMeta = computed(() => {
   const row = selectedLog.value
   if (!row) return []
   return [
+    { label: t('admin.riskControl.currentViolationCount'), value: row.current_violation_count == null ? '-' : String(row.current_violation_count) },
+    { label: t('admin.riskControl.eventViolationCount'), value: String(row.violation_count ?? 0) },
     { label: t('admin.riskControl.auditRequestID'), value: row.request_id || '-' },
     { label: t('admin.riskControl.auditDecisionSource'), value: row.decision_source || '-' },
     {
@@ -1699,7 +1703,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.block_message = config.block_message || defaultBlockMessage()
   configForm.email_on_hit = config.email_on_hit ?? true
   configForm.auto_ban_enabled = config.auto_ban_enabled ?? true
-  configForm.cyber_policy_exclude_from_ban_count = config.cyber_policy_exclude_from_ban_count ?? false
+  configForm.cyber_policy_ban_mode = config.cyber_policy_ban_mode ?? 'log_only'
   configForm.ban_threshold = config.ban_threshold ?? 10
   configForm.violation_window_hours = config.violation_window_hours ?? 720
   configForm.hit_retention_days = config.hit_retention_days ?? 180
@@ -1845,7 +1849,7 @@ async function saveConfig() {
       block_message: configForm.block_message.trim() || defaultBlockMessage(),
       email_on_hit: configForm.email_on_hit,
       auto_ban_enabled: configForm.auto_ban_enabled,
-      cyber_policy_exclude_from_ban_count: configForm.cyber_policy_exclude_from_ban_count,
+      cyber_policy_ban_mode: configForm.auto_ban_enabled ? configForm.cyber_policy_ban_mode : 'log_only',
       ban_threshold: clampInteger(configForm.ban_threshold, 1, 1000, 10),
       violation_window_hours: clampInteger(configForm.violation_window_hours, 1, 8760, 720),
       hit_retention_days: clampInteger(configForm.hit_retention_days, 1, 3650, 180),
@@ -1994,11 +1998,17 @@ function changePageSize(pageSize: number) {
   void loadLogs()
 }
 
-function openLog(row: ContentModerationLog) {
+async function openLog(row: ContentModerationLog) {
   selectedLog.value = row
   originalLog.value = null
   sourceLogLoading.value = false
   sourceLogError.value = false
+  try {
+    const detail = await adminAPI.riskControl.getLog(row.id)
+    if (selectedLog.value?.id === row.id && detail.id === row.id) {
+      selectedLog.value.current_violation_count = detail.current_violation_count
+    }
+  } catch { /* Keep the audit snapshot if fresh counters are unavailable. */ }
 }
 
 function closeLogDetail() {

@@ -880,45 +880,35 @@ func TestContentModerationUnbanUser_ActiveUserOnlyInvalidatesAuthCache(t *testin
 	require.Equal(t, []int64{1001}, invalidator.userIDs)
 }
 
-func TestContentModerationUpdateConfig_CyberPolicyExcludeFromBanCount(t *testing.T) {
+func TestContentModerationUpdateConfig_CyberPolicyMode(t *testing.T) {
 	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
 	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
-
-	// 默认值必须是 false（计入，保持现状）
 	view, err := svc.GetConfig(context.Background())
 	require.NoError(t, err)
-	require.False(t, view.CyberPolicyExcludeFromBanCount, "默认必须计入封号计数")
-
-	// 指针式部分更新为 true
-	exclude := true
-	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
-		CyberPolicyExcludeFromBanCount: &exclude,
-	})
-	require.NoError(t, err)
 	require.True(t, view.CyberPolicyExcludeFromBanCount)
-
-	// 持久化 JSON 含字段
-	var saved ContentModerationConfig
-	require.NoError(t, json.Unmarshal([]byte(settingRepo.values[SettingKeyContentModerationConfig]), &saved))
-	require.True(t, saved.CyberPolicyExcludeFromBanCount)
-
-	// 二次读取（从持久化 JSON 反序列化）roundtrip
-	view, err = svc.GetConfig(context.Background())
+	require.Equal(t, CyberPolicyBanLogOnly, view.CyberPolicyBanMode)
+	legacyFalse := false
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{CyberPolicyExcludeFromBanCount: &legacyFalse})
 	require.NoError(t, err)
-	require.True(t, view.CyberPolicyExcludeFromBanCount)
-
-	// 不传该字段的更新不得改动它（指针 nil = 保留）
-	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{})
-	require.NoError(t, err)
-	require.True(t, view.CyberPolicyExcludeFromBanCount)
-
-	// 主动回拨 false 必须生效（防止未来误加 if val 保护逻辑）
-	revert := false
-	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
-		CyberPolicyExcludeFromBanCount: &revert,
-	})
+	require.Equal(t, CyberPolicyBanLogOnly, view.CyberPolicyBanMode, "old clients cannot silently enable punishment")
+	mode := CyberPolicyBanCumulative
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{CyberPolicyBanMode: &mode})
 	require.NoError(t, err)
 	require.False(t, view.CyberPolicyExcludeFromBanCount)
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(settingRepo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Equal(t, mode, saved.CyberPolicyBanMode)
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{})
+	require.NoError(t, err)
+	require.Equal(t, mode, view.CyberPolicyBanMode)
+	off := false
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{AutoBanEnabled: &off})
+	require.NoError(t, err)
+	require.Equal(t, CyberPolicyBanLogOnly, view.CyberPolicyBanMode)
+	on := true
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{AutoBanEnabled: &on})
+	require.NoError(t, err)
+	require.Equal(t, CyberPolicyBanLogOnly, view.CyberPolicyBanMode, "turning the master back on requires an explicit Cyber choice")
 }
 
 func (r *contentModerationTestUserRepo) SetVIP(ctx context.Context, id int64, vip bool) (bool, error) {

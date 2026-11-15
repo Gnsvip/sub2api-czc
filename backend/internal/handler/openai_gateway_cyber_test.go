@@ -95,7 +95,9 @@ func TestRecordCyberPolicyIfMarked_WaitsForDispositionAndAuditPersistence(t *tes
 		dispositionRelease: make(chan struct{}),
 	}
 	moderationSvc := service.NewContentModerationService(
-		&contentModerationHandlerSettingRepo{values: map[string]string{}},
+		&contentModerationHandlerSettingRepo{values: map[string]string{
+			service.SettingKeyContentModerationConfig: `{"auto_ban_enabled":true,"cyber_policy_ban_mode":"immediate"}`,
+		}},
 		repo, nil, nil, nil, nil, nil, nil,
 	)
 	h := &OpenAIGatewayHandler{contentModerationService: moderationSvc}

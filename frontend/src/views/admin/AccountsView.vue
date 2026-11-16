@@ -807,8 +807,8 @@ const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) =>
   setUsageBatchState(accountID, usage, null)
 }
 
-// Match the server's six-account worker limit. Publish each small batch as
-// soon as it finishes instead of holding every row for the slowest account.
+// Two batches of three preserve the server's six-account worker budget.
+// A slow batch cannot hold the other rows behind a whole-page response.
 let usageBatchFlushing = false
 let usageBatchDisposed = false
 const flushQueuedUsageBatch = async () => {
@@ -816,13 +816,16 @@ const flushQueuedUsageBatch = async () => {
   if (usageBatchFlushing || usageBatchDisposed) return
   usageBatchFlushing = true
   try {
-    while (pendingUsageBatchIds.size && !usageBatchDisposed) {
-      const accountIDs = Array.from(pendingUsageBatchIds).slice(0, 6)
-      const force = queuedUsageBatchForce
-      accountIDs.forEach(id => pendingUsageBatchIds.delete(id))
-      if (!pendingUsageBatchIds.size) queuedUsageBatchForce = false
-      await loadUsageBatch(accountIDs, force)
+    const worker = async () => {
+      while (pendingUsageBatchIds.size && !usageBatchDisposed) {
+        const accountIDs = Array.from(pendingUsageBatchIds).slice(0, 3)
+        const force = queuedUsageBatchForce
+        accountIDs.forEach(id => pendingUsageBatchIds.delete(id))
+        if (!pendingUsageBatchIds.size) queuedUsageBatchForce = false
+        await loadUsageBatch(accountIDs, force)
+      }
     }
+    await Promise.all([worker(), worker()])
   } finally {
     usageBatchFlushing = false
   }

@@ -351,6 +351,20 @@ func (s *IntelligentTestService) UserPelicanTests(ctx context.Context, user int6
 	return s.repo.UserPelicanTests(ctx, f)
 }
 
+func (s *IntelligentTestService) UserPelicanTest(ctx context.Context, user, id int64) (*UserPelicanTest, error) {
+	if id < 1 {
+		return nil, ErrIntelligentTestNotFound
+	}
+	page, err := s.UserPelicanTests(ctx, user, IntelligentTestFilter{PelicanID: id})
+	if err != nil {
+		return nil, err
+	}
+	if len(page.Items) != 1 {
+		return nil, ErrIntelligentTestNotFound
+	}
+	return &page.Items[0], nil
+}
+
 func (s *IntelligentTestService) pelicanSetting(ctx context.Context) (IntelligentTestSetting, error) {
 	settings, err := s.repo.Settings(ctx)
 	if err != nil {

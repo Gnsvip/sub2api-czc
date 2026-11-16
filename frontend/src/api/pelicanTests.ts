@@ -6,6 +6,7 @@ export interface PelicanTestItem {
   id: number
   status: string
   html: string
+  has_html?: boolean
   preview_issue?: 'incomplete' | 'unavailable' | 'scripts_removed'
   prompt: string
   model: string
@@ -27,7 +28,10 @@ export const pelicanTestsAPI = {
   async visibility() {
     return (await apiClient.get<{ visible: boolean }>('/pelican-tests/visibility')).data
   },
-  async list(page = 1, pageSize = 12) {
-    return (await apiClient.get<PelicanTestPage>('/pelican-tests', { params: { page, page_size: pageSize } })).data
+  async list(page = 1, pageSize = 12, summary = false, signal?: AbortSignal) {
+    return (await apiClient.get<PelicanTestPage>('/pelican-tests', { signal, params: { page, page_size: pageSize, summary } })).data
+  },
+  async detail(id: number, signal?: AbortSignal) {
+    return (await apiClient.get<PelicanTestItem>(`/pelican-tests/${id}`, { signal })).data
   }
 }

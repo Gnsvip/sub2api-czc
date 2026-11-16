@@ -744,6 +744,38 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("loads tab endpoints once and preserves unsaved values across visits", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(getProviders).not.toHaveBeenCalled();
+    expect(getGroups).not.toHaveBeenCalled();
+    expect(getPanelRateLimitSettings).not.toHaveBeenCalled();
+    expect(getWebSearchEmulationConfig).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="panel-rate-limit-user-rpm"]').exists()).toBe(false);
+    await openSecurityTab(wrapper);
+    const input = wrapper.get('[data-testid="panel-rate-limit-user-rpm"]');
+    await input.setValue(321);
+    await wrapper.get('#settings-tab-general').trigger('click');
+    await openSecurityTab(wrapper);
+    expect(getPanelRateLimitSettings).toHaveBeenCalledTimes(1);
+    expect((input.element as HTMLInputElement).value).toBe('321');
+    await openGatewayTab(wrapper);
+    expect(getWebSearchEmulationConfig).toHaveBeenCalledTimes(1);
+    await openPaymentTab(wrapper);
+    expect(getProviders).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("does not overwrite an unopened web search configuration on general save", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalled();
+    expect(updateWebSearchEmulationConfig).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("opens the guide under general settings only when requested and preserves edits when collapsed", async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -851,6 +883,7 @@ describe("admin SettingsView payment visible method controls", () => {
 
     const wrapper = mountView();
     await flushPromises();
+    await openSecurityTab(wrapper);
 
     expect(getPanelRateLimitSettings).toHaveBeenCalled();
     expect(wrapper.text()).toContain("admin.settings.panelRateLimit.title");
@@ -1434,6 +1467,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
+    await openGatewayTab(wrapper);
 
     expect(wrapper.text()).toContain("OpenAI 实验调度策略");
     expect(wrapper.text()).toContain(
@@ -1596,6 +1630,7 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     const wrapper = mountView();
     await flushPromises();
+    await openGatewayTab(wrapper);
     const input = wrapper.get('[data-testid="openai-oauth-scheduling-rate-multiplier"]');
     expect(input.attributes("required")).toBeUndefined();
     await input.setValue("");
@@ -1626,6 +1661,7 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     const wrapper = mountView();
     await flushPromises();
+    await openGatewayTab(wrapper);
     const input = wrapper.get<HTMLInputElement>('[data-testid="openai-oauth-scheduling-rate-multiplier"]');
     expect(input.element.value).toBe("");
     await wrapper.find("form").trigger("submit.prevent");
@@ -1639,6 +1675,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
+    await openGatewayTab(wrapper);
     expect(
       wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
     ).toBe(false);
@@ -1743,8 +1780,10 @@ describe("admin SettingsView payment visible method controls", () => {
         },
       },
       setup(props) {
-        receivedProviders = props.providers as Array<Record<string, unknown>>;
-        return () => h("div", { class: "provider-list-capture" });
+        return () => {
+          receivedProviders = props.providers as Array<Record<string, unknown>>;
+          return h("div", { class: "provider-list-capture" });
+        };
       },
     });
 

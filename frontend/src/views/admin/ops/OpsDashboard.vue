@@ -202,6 +202,7 @@ const workerRuntimeStatus = ref<OpsWorkerRuntimeStatus | null>(null)
 const loadingRuntimeHealth = ref(false)
 const loading = ref(true)
 const hasLoadedOnce = ref(false)
+let disposed = false
 const errorMessage = ref('')
 const lastUpdated = ref<Date | null>(new Date())
 
@@ -437,12 +438,14 @@ const { pause: pauseCountdown, resume: resumeCountdown } = useIntervalFn(
 async function loadDashboardAdvancedSettings() {
   try {
     const settings = await opsAPI.getAdvancedSettings()
+    if (disposed) return
     showAlertEvents.value = settings.display_alert_events
     showOpenAITokenStats.value = settings.display_openai_token_stats
     autoRefreshEnabled.value = settings.auto_refresh_enabled
     autoRefreshIntervalMs.value = settings.auto_refresh_interval_seconds * 1000
     autoRefreshCountdown.value = settings.auto_refresh_interval_seconds
   } catch (err) {
+    if (disposed) return
     console.error('[OpsDashboard] Failed to load dashboard advanced settings', err)
     showAlertEvents.value = true
     showOpenAITokenStats.value = false
@@ -739,8 +742,19 @@ function isOpsDisabledError(err: unknown): boolean {
   )
 }
 
+async function refreshRuntimeHealth(fetchSeq: number) {
+  loadingRuntimeHealth.value = true
+  const [billing, workers] = await Promise.allSettled([
+    opsAPI.getBillingOutboxHealth(), opsAPI.getWorkerRuntimeStatus()
+  ])
+  if (disposed || fetchSeq !== dashboardFetchSeq) return
+  billingOutboxHealth.value = billing.status === 'fulfilled' ? billing.value : null
+  workerRuntimeStatus.value = workers.status === 'fulfilled' ? workers.value : null
+  loadingRuntimeHealth.value = false
+}
+
 async function fetchData() {
-  if (!opsEnabled.value) return
+  if (disposed || !opsEnabled.value) return
 
   abortDashboardFetch()
   dashboardFetchSeq += 1
@@ -750,14 +764,13 @@ async function fetchData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    loadingRuntimeHealth.value = true
+    // Runtime health has its own spinner; a slow health endpoint must not
+    // hold the overview and charts behind the page skeleton.
+    void refreshRuntimeHealth(fetchSeq)
     await Promise.all([
       refreshCoreSnapshotWithCancel(fetchSeq, dashboardFetchController.signal),
       refreshSwitchTrendWithCancel(fetchSeq, dashboardFetchController.signal),
-      opsAPI.getBillingOutboxHealth().then((h) => { billingOutboxHealth.value = h }).catch(() => { billingOutboxHealth.value = null }),
-      opsAPI.getWorkerRuntimeStatus().then((s) => { workerRuntimeStatus.value = s }).catch(() => { workerRuntimeStatus.value = null }),
     ])
-    loadingRuntimeHealth.value = false
     if (fetchSeq !== dashboardFetchSeq) return
 
     lastUpdated.value = new Date()
@@ -824,6 +837,7 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
 
   await adminSettingsStore.fetch()
+  if (disposed) return
   if (!adminSettingsStore.opsMonitoringEnabled) {
     await router.replace('/admin/settings')
     return
@@ -832,15 +846,11 @@ onMounted(async () => {
   // Load thresholds configuration
   loadThresholds()
 
-  // Load auto refresh settings
-  await loadDashboardAdvancedSettings()
-
-  if (opsEnabled.value) {
-    await fetchData()
-  }
+  // Presentation preferences do not determine the overview query.
+  await Promise.all([loadDashboardAdvancedSettings(), fetchData()])
 
   // Start auto refresh if enabled
-  if (autoRefreshEnabled.value) {
+  if (!disposed && autoRefreshEnabled.value) {
     resumeCountdown()
   }
 })
@@ -856,6 +866,8 @@ async function loadThresholds() {
 }
 
 onUnmounted(() => {
+  disposed = true
+  dashboardFetchSeq += 1
   window.removeEventListener('keydown', handleKeydown)
   abortDashboardFetch()
   pauseCountdown()

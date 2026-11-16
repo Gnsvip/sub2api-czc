@@ -93,7 +93,9 @@ async function mockAPIs(page: Page) {
     if (path.endsWith('/auth/me')) return json(route, { ...user, run_mode: 'standard' })
     if (path.endsWith('/setup/status')) return json(route, { needs_setup: false })
     if (path.endsWith('/pelican-tests/visibility')) return json(route, { visible: true })
-    if (path.endsWith('/pelican-tests')) return json(route, { items, total: items.length, page: 1, page_size: 33 })
+    if (path.endsWith('/pelican-tests')) return json(route, { items: items.map(item => ({ ...item, html: '', has_html: true })), total: items.length, page: 1, page_size: 33 })
+    const detailID = path.match(/\/pelican-tests\/(\d+)$/)?.[1]
+    if (detailID) return json(route, items.find(item => item.id === Number(detailID)))
     if (path.endsWith('/announcements') || path.endsWith('/subscriptions/active')) return json(route, [])
     return json(route, {})
   })

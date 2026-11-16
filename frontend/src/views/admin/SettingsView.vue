@@ -5878,7 +5878,7 @@
             </div>
             <div v-if="!webSearchLoaded" class="p-6" role="status">
               <span v-if="webSearchLoading">{{ t("common.loading") }}</span>
-              <button v-else type="button" class="btn btn-secondary" @click="loadWebSearchConfig">{{ t("common.retry") }}</button>
+              <button v-else type="button" class="btn btn-secondary" @click="loadWebSearchConfig">{{ t("common.refresh") }}</button>
             </div>
             <div v-else class="space-y-5 p-6">
               <!-- Global Toggle -->

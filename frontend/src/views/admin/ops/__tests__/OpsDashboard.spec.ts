@@ -14,8 +14,8 @@ const { api, settings, replace, pause, resume } = vi.hoisted(() => ({
 }))
 vi.mock('@/api/admin/ops', () => ({ opsAPI: api }))
 vi.mock('@/stores', () => ({ useAdminSettingsStore: () => settings, useAppStore: () => ({ showError: vi.fn() }) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-router', async () => ({ ...await vi.importActual('vue-router'), useRoute: () => ({ query: {} }), useRouter: () => ({ replace }) }))
+vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@vueuse/core', async () => ({
   ...await vi.importActual('@vueuse/core'), useIntervalFn: () => ({ pause, resume })
 }))

@@ -33,7 +33,7 @@
           <span class="pointer-events-none absolute -right-9 top-6 z-10 w-36 rotate-45 py-1.5 text-center text-xs font-semibold text-white shadow-sm" :class="ribbonTone(selected)" data-testid="pelican-ribbon">{{ resultLabel(selected) }}</span>
           <p v-if="previewMessage(selected)" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" role="status">{{ previewMessage(selected) }}</p>
           <div class="relative">
-            <div v-if="detailLoading || detailError" :class="previewHTML ? 'absolute inset-0 z-10 bg-white/70 dark:bg-dark-800/70' : 'aspect-[4/3]'" class="flex flex-col items-center justify-center gap-3" role="status">
+            <div v-if="detailLoading || detailError" :class="previewHTML ? 'absolute inset-0 z-10' : 'aspect-[4/3]'" class="flex flex-col items-center justify-center gap-3" role="status">
               <LoadingSpinner v-if="detailLoading" />
               <template v-else>
                 <p class="text-sm text-red-600">{{ detailError }}</p>

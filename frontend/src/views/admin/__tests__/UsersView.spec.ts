@@ -87,7 +87,7 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
 })
 
 const DataTableStub = {
-  props: ['columns', 'data', 'selectedKeys'],
+  props: ['columns', 'data', 'selectedKeys', 'loading'],
   emits: ['sort', 'update:selectedKeys'],
   template: `
     <div>
@@ -211,6 +211,20 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('shows loading while attribute definitions and the initial user list are pending', async () => {
+    let finish!: (value: unknown[]) => void
+    listEnabledDefinitions.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(wrapper.getComponent(DataTableStub).props('loading')).toBe(true)
+    expect(listUsers).not.toHaveBeenCalled()
+    finish([])
+    await flushPromises()
+    expect(listUsers).toHaveBeenCalled()
+    expect(wrapper.getComponent(DataTableStub).props('loading')).toBe(false)
+    wrapper.unmount()
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

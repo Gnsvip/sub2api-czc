@@ -248,14 +248,23 @@ WHERE t.test_type='pelican' AND t.status NOT IN ('queued','running','cancelled')
     SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
     WHERE ag.account_id=a.id AND g.deleted_at IS NULL AND g.status='active' AND g.id=$1
   )`
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, f.GroupID).Scan(&out.Total); err != nil {
+	args := []any{f.GroupID}
+	if f.PelicanID > 0 {
+		// Detail access retains every list constraint (including visibility,
+		// current group membership and the rolling 24-hour retention window).
+		base += " AND t.id=$2"
+		args = append(args, f.PelicanID)
+	}
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, args...).Scan(&out.Total); err != nil {
 		return nil, err
 	}
+	limitParam := len(args) + 1
+	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	rows, err := r.db.QueryContext(ctx, `SELECT t.id,t.status,t.result,t.model,t.created_at,t.finished_at,t.duration_ms,
 COALESCE((SELECT name FROM groups WHERE id=$1 AND deleted_at IS NULL),''),
 COALESCE(NULLIF(t.config_snapshot#>>'{execution,reasoning_effort}',''),'low'),
 COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),''),t.evaluation
-`+base+` ORDER BY t.id DESC LIMIT $2 OFFSET $3`, f.GroupID, f.PageSize, (f.Page-1)*f.PageSize)
+`+base+fmt.Sprintf(" ORDER BY t.id DESC LIMIT $%d OFFSET $%d", limitParam, limitParam+1), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +288,10 @@ COALESCE(NULLIF(t.input,''),NULLIF(t.config_snapshot->>'prompt',''),''),t.evalua
 			item.PreviewIssue = "incomplete"
 		} else {
 			item.HTML, item.PreviewIssue = service.PreviewIntelligentTestHTML(raw)
+		}
+		item.HasHTML = item.HTML != ""
+		if f.PelicanSummary {
+			item.HTML = ""
 		}
 		out.Items = append(out.Items, item)
 	}

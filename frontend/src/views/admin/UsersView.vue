@@ -1088,7 +1088,7 @@ const columns = computed<Column[]>(() =>
 )
 
 const users = ref<AdminUser[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
 const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' } => {

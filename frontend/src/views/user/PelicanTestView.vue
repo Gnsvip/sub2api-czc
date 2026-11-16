@@ -22,7 +22,7 @@
             :class="selected?.id === row.id
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/30 dark:text-primary-200'
               : 'border-gray-200 text-gray-600 hover:border-gray-300 dark:border-dark-600 dark:text-gray-300'"
-            @click="selected = row"
+            @click="selectResult(row)"
           >
             {{ formatSlot(row.created_at) }}
             <span class="mt-1 block" :class="resultTone(row)">{{ resultLabel(row) }}</span>
@@ -32,8 +32,17 @@
         <article v-if="selected" class="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
           <span class="pointer-events-none absolute -right-9 top-6 z-10 w-36 rotate-45 py-1.5 text-center text-xs font-semibold text-white shadow-sm" :class="ribbonTone(selected)" data-testid="pelican-ribbon">{{ resultLabel(selected) }}</span>
           <p v-if="previewMessage(selected)" class="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200" role="status">{{ previewMessage(selected) }}</p>
-          <PelicanAnimationPreview v-if="selected.html && !isIncomplete(selected)" :html="selected.html" :title="t('nav.pelicanTest')" />
-          <p v-else class="flex aspect-[4/3] items-center justify-center px-6 text-center text-sm text-gray-400">{{ isIncomplete(selected) ? t('pelicanTest.incompletePreview') : t('pelicanTest.htmlUnavailable') }}</p>
+          <div class="relative">
+            <div v-if="detailLoading || detailError" :class="previewHTML ? 'absolute inset-0 z-10' : 'aspect-[4/3]'" class="flex flex-col items-center justify-center gap-3" role="status">
+              <LoadingSpinner v-if="detailLoading" />
+              <template v-else>
+                <p class="text-sm text-red-600">{{ detailError }}</p>
+                <button type="button" class="btn btn-secondary" @click="selectResult(selected)">{{ t('pelicanTest.previewRetry') }}</button>
+              </template>
+            </div>
+            <PelicanAnimationPreview v-if="previewHTML" :html="previewHTML" :title="t('nav.pelicanTest')" />
+            <p v-else-if="!detailLoading && !detailError" class="flex aspect-[4/3] items-center justify-center px-6 text-center text-sm text-gray-400">{{ isIncomplete(selected) ? t('pelicanTest.incompletePreview') : t('pelicanTest.htmlUnavailable') }}</p>
+          </div>
           <details class="border-t border-gray-100 p-4 dark:border-dark-700" data-testid="pelican-details">
             <summary class="cursor-pointer text-sm text-gray-500">{{ t('pelicanTest.details') }}</summary>
             <PelicanVisualAssessment :assessment="selected.visual_judgement" class="mt-4" />
@@ -67,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePelicanStore } from '@/stores/pelican'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -83,9 +92,55 @@ const loading = ref(true)
 const error = ref('')
 const items = ref<PelicanTestItem[]>([])
 const selected = ref<PelicanTestItem | null>(null)
+const previewHTML = ref('')
+const detailLoading = ref(false)
+const detailError = ref('')
+const listController = new AbortController()
+let detailController: AbortController | null = null
+let selectionVersion = 0
+let disposed = false
+function clearRequests() {
+  selectionVersion++
+  listController.abort()
+  detailController?.abort()
+}
 watch(() => pelican.visible, visible => {
-  if (!visible) { items.value = []; selected.value = null }
+  if (!visible) {
+    clearRequests()
+    items.value = []; selected.value = null; previewHTML.value = ''
+    detailLoading.value = false; detailError.value = ''
+  }
 })
+onBeforeUnmount(() => { disposed = true; clearRequests() })
+
+async function selectResult(row: PelicanTestItem) {
+  const version = ++selectionVersion
+  detailController?.abort()
+  selected.value = row
+  detailLoading.value = false
+  detailError.value = ''
+  // Full records from older servers remain compatible. No animation cache:
+  // every selection rechecks visibility, group membership and expiration.
+  if (row.html || row.has_html === false || isIncomplete(row)) {
+    previewHTML.value = isIncomplete(row) ? '' : row.html
+    return
+  }
+  const controller = new AbortController()
+  detailController = controller
+  detailLoading.value = true
+  try {
+    const detail = await pelicanTestsAPI.detail(row.id, controller.signal)
+    if (disposed || version !== selectionVersion || !pelican.visible) return
+    selected.value = detail
+    previewHTML.value = isIncomplete(detail) ? '' : detail.html
+  } catch (err) {
+    if (disposed || version !== selectionVersion || controller.signal.aborted || !pelican.visible) return
+    previewHTML.value = ''
+    detailError.value = extractApiErrorMessage(err, t('pelicanTest.loadFailed'))
+  } finally {
+    if (!disposed && version === selectionVersion) detailLoading.value = false
+  }
+}
 
 function resultLabel(item: PelicanTestItem) {
   if (isIncomplete(item)) return t('pelicanTest.incompleteLabel')
@@ -138,10 +193,13 @@ function formatSlot(value?: string | null) {
 
 onMounted(async () => {
   try {
-    const page = await pelicanTestsAPI.list(1, 33)
+    const page = await pelicanTestsAPI.list(1, 33, true, listController.signal)
+    if (disposed || listController.signal.aborted || !pelican.visible) return
     items.value = page.items || []
-    selected.value = items.value.find((item) => item.html && !isIncomplete(item)) ?? items.value[0] ?? null
+    const first = items.value.find((item) => (item.has_html ?? !!item.html) && !isIncomplete(item)) ?? items.value[0]
+    if (first) void selectResult(first)
   } catch (err) {
+    if (disposed || listController.signal.aborted || !pelican.visible) return
     items.value = []; selected.value = null
     if ((err as { response?: { status?: number }; status?: number }).response?.status === 404 || (err as { status?: number }).status === 404) pelican.setVisible(false)
     error.value = extractApiErrorMessage(err, t('pelicanTest.loadFailed'))

@@ -40,7 +40,7 @@ async function loadPreview(wrapper: VueWrapper) {
 }
 
 vi.mock('@/api/pelicanTests', () => ({
-  pelicanTestsAPI: { list: vi.fn(), visibility: vi.fn() }
+  pelicanTestsAPI: { list: vi.fn(), detail: vi.fn(), visibility: vi.fn() }
 }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({
   default: { template: '<div><slot /></div>' }
@@ -102,6 +102,38 @@ function mountView() {
 }
 
 describe('PelicanTestView', () => {
+  it('loads only selected HTML, ignores stale details and aborts when hidden', async () => {
+    const base = { status: 'completed', html: '', has_html: true, prompt: 'draw', model: 'fixture', group_name: 'group', reasoning_effort: 'low', created_at: '2026-11-17T02:00:00Z', duration_ms: 10 }
+    const rows = [{ ...base, id: 3 }, { ...base, id: 2 }, { ...base, id: 1 }]
+    vi.mocked(pelicanTestsAPI.list).mockResolvedValue({ items: rows, total: 3, page: 1, page_size: 33 })
+    const resolvers: Array<(value: typeof base & { id: number }) => void> = []
+    vi.mocked(pelicanTestsAPI.detail).mockImplementation(() => new Promise(resolve => { resolvers.push(resolve) }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(pelicanTestsAPI.detail).toHaveBeenLastCalledWith(3, expect.any(AbortSignal))
+    const firstSignal = vi.mocked(pelicanTestsAPI.detail).mock.calls.at(-1)![1]!
+    await wrapper.findAll('button')[1].trigger('click')
+    expect(firstSignal.aborted).toBe(true)
+    resolvers[1]({ ...rows[1], html: '<html><svg id="selected"></svg></html>' })
+    await flushPromises()
+    await loadPreview(wrapper)
+    resolvers[0]({ ...rows[0], html: '<html><svg id="stale"></svg></html>' })
+    await flushPromises()
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('id="selected"')
+    expect(wrapper.html()).not.toContain('id="stale"')
+    await wrapper.findAll('button')[2].trigger('click')
+    // The previous frame remains mounted while the next picture downloads.
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('id="selected"')
+    const lastSignal = vi.mocked(pelicanTestsAPI.detail).mock.calls.at(-1)![1]!
+    usePelicanStore().setVisible(false)
+    await flushPromises()
+    expect(lastSignal.aborted).toBe(true)
+    resolvers[2]({ ...rows[2], html: '<html><svg id="hidden"></svg></html>' })
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('refreshes visibility and ignores a response started before an administrator hid it', async () => {
     setActivePinia(createPinia())
     const store = usePelicanStore()
@@ -201,7 +233,7 @@ describe('PelicanTestView', () => {
     const wrapper = mountView()
     await flushPromises()
     await loadPreview(wrapper)
-    expect(pelicanTestsAPI.list).toHaveBeenCalledWith(1, 33)
+    expect(pelicanTestsAPI.list).toHaveBeenCalledWith(1, 33, true, expect.any(AbortSignal))
     expect(wrapper.findAll('h1')).toHaveLength(1)
     expect(wrapper.get('h1').classes()).toContain('lg:hidden')
     expect(wrapper.findAll('iframe')).toHaveLength(1)

@@ -93,6 +93,7 @@ func TestScheduledPelicanRequiresExplicitSwitchAndGroup(t *testing.T) {
 
 type userPelicanListRepo struct {
 	IntelligentTestRepository
+	result  *UserPelicanTests
 	filter  IntelligentTestFilter
 	setting *IntelligentTestSetting
 	called  bool
@@ -108,6 +109,9 @@ func (r *userPelicanListRepo) Settings(context.Context) ([]IntelligentTestSettin
 func (r *userPelicanListRepo) UserPelicanTests(_ context.Context, f IntelligentTestFilter) (*UserPelicanTests, error) {
 	r.filter = f
 	r.called = true
+	if r.result != nil {
+		return r.result, nil
+	}
 	return &UserPelicanTests{Items: []UserPelicanTest{}, Page: f.Page, PageSize: f.PageSize}, nil
 }
 
@@ -443,4 +447,36 @@ func TestPelicanLoopWaitRetriesInsideWindowAndSleepsOvernight(t *testing.T) {
 	require.NoError(t, err)
 	nextEight := time.Date(2026, 9, 21, 8, 0, 0, 0, pelicanBeijingLocation())
 	require.Equal(t, nextEight.Sub(night), pelicanLoopWait(night))
+}
+
+func TestUserPelicanDetailUsesCurrentVisibilityAndGroup(t *testing.T) {
+	ctx := context.Background()
+	repo := &userPelicanListRepo{result: &UserPelicanTests{Items: []UserPelicanTest{{ID: 123, HTML: "safe"}}}}
+	svc := &IntelligentTestService{repo: repo}
+	item, err := svc.UserPelicanTest(ctx, 9, 123)
+	require.NoError(t, err)
+	require.EqualValues(t, 123, item.ID)
+	require.EqualValues(t, 123, repo.filter.PelicanID)
+	require.EqualValues(t, 77, repo.filter.GroupID)
+	require.False(t, repo.filter.PelicanSummary)
+	_, err = svc.UserPelicanTests(ctx, 9, IntelligentTestFilter{PelicanSummary: true, GroupID: 999})
+	require.NoError(t, err)
+	require.True(t, repo.filter.PelicanSummary)
+	require.EqualValues(t, 77, repo.filter.GroupID)
+	repo.result = &UserPelicanTests{}
+	_, err = svc.UserPelicanTest(ctx, 9, 123)
+	require.ErrorIs(t, err, ErrIntelligentTestNotFound)
+	repo.called = false
+	_, err = svc.UserPelicanTest(ctx, 0, 123)
+	require.ErrorIs(t, err, ErrIntelligentTestForbidden)
+	require.False(t, repo.called)
+	for _, setting := range []IntelligentTestSetting{
+		{TestType: "pelican", Enabled: true, UserVisible: false},
+		{TestType: "pelican", Enabled: false, UserVisible: true},
+	} {
+		repo.setting = &setting
+		_, err = svc.UserPelicanTest(ctx, 9, 123)
+		require.ErrorIs(t, err, ErrIntelligentTestNotFound)
+		require.False(t, repo.called)
+	}
 }

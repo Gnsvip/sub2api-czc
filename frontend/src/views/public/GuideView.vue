@@ -13,9 +13,9 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getPublicGuide, type PublicGuide } from '@/api/guide'
-import CustomGuideView from './CustomGuideView.vue'
+const CustomGuideView = defineAsyncComponent(() => import('./CustomGuideView.vue'))
 
 const published = ref<PublicGuide | null>(null)
 const loaded = ref(false)

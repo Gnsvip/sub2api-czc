@@ -113,7 +113,24 @@ func (h *IntelligentTestHandler) UserPelicanTests(c *gin.Context) {
 	if !ok {
 		return
 	}
+	f.PelicanSummary = c.Query("summary") == "true"
 	out, err := h.svc.UserPelicanTests(c.Request.Context(), actor, f)
+	if !response.ErrorFrom(c, err) {
+		response.Success(c, out)
+	}
+}
+
+func (h *IntelligentTestHandler) UserPelicanTest(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	actor, ok := intelligentUserActor(c)
+	if !ok {
+		return
+	}
+	id, ok := IntelligentTestParamID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := h.svc.UserPelicanTest(c.Request.Context(), actor, id)
 	if !response.ErrorFrom(c, err) {
 		response.Success(c, out)
 	}

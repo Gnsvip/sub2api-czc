@@ -807,15 +807,28 @@ const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) =>
   setUsageBatchState(accountID, usage, null)
 }
 
+// Match the server's six-account worker limit. Publish each small batch as
+// soon as it finishes instead of holding every row for the slowest account.
+let usageBatchFlushing = false
+let usageBatchDisposed = false
 const flushQueuedUsageBatch = async () => {
   usageBatchFlushTimer = null
-  const accountIDs = Array.from(pendingUsageBatchIds)
-  const force = queuedUsageBatchForce
-  pendingUsageBatchIds.clear()
-  queuedUsageBatchForce = false
+  if (usageBatchFlushing || usageBatchDisposed) return
+  usageBatchFlushing = true
+  try {
+    while (pendingUsageBatchIds.size && !usageBatchDisposed) {
+      const accountIDs = Array.from(pendingUsageBatchIds).slice(0, 6)
+      const force = queuedUsageBatchForce
+      accountIDs.forEach(id => pendingUsageBatchIds.delete(id))
+      if (!pendingUsageBatchIds.size) queuedUsageBatchForce = false
+      await loadUsageBatch(accountIDs, force)
+    }
+  } finally {
+    usageBatchFlushing = false
+  }
+}
 
-  if (accountIDs.length === 0) return
-
+const loadUsageBatch = async (accountIDs: number[], force: boolean) => {
   const requestTokensByAccount = accountIDs.reduce<Record<string, number>>((acc, accountID) => {
     acc[String(accountID)] = usageBatchRequestTokenByAccountId.value[String(accountID)] ?? 0
     return acc
@@ -823,6 +836,7 @@ const flushQueuedUsageBatch = async () => {
 
   try {
     const result = await adminAPI.accounts.getBatchUsage(accountIDs, force)
+    if (usageBatchDisposed) return
 
     const usageMap = result.usage ?? {}
     const errorMap = result.errors ?? {}
@@ -851,6 +865,7 @@ const flushQueuedUsageBatch = async () => {
     usageBatchErrorByAccountId.value = nextErrors
     usageBatchLoadingByAccountId.value = nextLoading
   } catch (error) {
+    if (usageBatchDisposed) return
     const nextErrors = { ...usageBatchErrorByAccountId.value }
     const nextLoading = { ...usageBatchLoadingByAccountId.value }
     for (const accountID of accountIDs) {
@@ -2544,6 +2559,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  usageBatchDisposed = true
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

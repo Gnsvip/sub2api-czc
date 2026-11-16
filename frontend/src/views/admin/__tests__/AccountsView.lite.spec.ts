@@ -6,6 +6,7 @@ import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 
 const {
+  getBatchUsage,
   listAccounts,
   listWithEtag,
   getById,
@@ -17,6 +18,7 @@ const {
   showError,
   showWarning
 } = vi.hoisted(() => ({
+  getBatchUsage: vi.fn(),
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getById: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
+      getBatchUsage,
       getById,
       listWithEtag,
       getBatchTodayStatsWithEtag,
@@ -67,6 +70,7 @@ const DataTableStub = defineComponent({
     <div>
       <template v-if="!loading"><div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-usage" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div></template>
     </div>
@@ -123,7 +127,10 @@ function mountView(stubActionMenu = true) {
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,
-        AccountUsageCell: true,
+        AccountUsageCell: {
+          props: ['account', 'requestBatchedUsage', 'batchedUsage', 'batchedUsageLoading', 'batchedUsageError'],
+          template: `<div :data-usage="account.id"><button @click="requestBatchedUsage(account)">load</button><button @click="requestBatchedUsage(account, {force:true})">force</button><span>{{ batchedUsage?.plan_name || batchedUsageError || (batchedUsageLoading ? 'loading' : 'empty') }}</span></div>`
+        },
         UpstreamBillingRateCell: true,
         HelpTooltip: true,
         Icon: true,
@@ -158,6 +165,7 @@ const fullAccount = {
 describe('admin AccountsView lite account list', () => {
   beforeEach(() => {
     localStorage.clear()
+    getBatchUsage.mockReset().mockResolvedValue({usage:{}, errors:{}})
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
@@ -173,6 +181,39 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('publishes six-account quota batches progressively and preserves force refresh', async () => {
+    vi.useFakeTimers()
+    const rows = Array.from({length: 13}, (_, index) => ({ ...listRow, id: index + 1 }))
+    listAccounts.mockResolvedValue({ items: rows, total: 13, page: 1, page_size: 20, pages: 1 })
+    const completions: Array<(value: unknown) => void> = []
+    getBatchUsage.mockImplementation(() => new Promise(resolve => { completions.push(resolve) }))
+    const wrapper = mountView()
+    await flushPromises()
+    for (const row of rows) await wrapper.get(`[data-usage="${row.id}"] button`).trigger('click')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getBatchUsage).toHaveBeenCalledTimes(1)
+    expect(getBatchUsage).toHaveBeenLastCalledWith([1,2,3,4,5,6], false)
+    completions[0]({ usage: { '1': { plan_name: 'ready' } }, errors: {} })
+    await flushPromises()
+    expect(wrapper.get('[data-usage="1"] span').text()).toBe('ready')
+    expect(wrapper.get('[data-usage="7"] span').text()).toBe('loading')
+    expect(getBatchUsage).toHaveBeenLastCalledWith([7,8,9,10,11,12], false)
+    completions[1]({ usage: {}, errors: {} })
+    await flushPromises()
+    expect(getBatchUsage).toHaveBeenLastCalledWith([13], false)
+    completions[2]({ usage: {}, errors: {} })
+    await flushPromises()
+    await wrapper.get('[data-usage="1"] button').trigger('click')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getBatchUsage).toHaveBeenCalledTimes(3)
+    await wrapper.findAll('[data-usage="1"] button')[1].trigger('click')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getBatchUsage).toHaveBeenLastCalledWith([1], true)
+    wrapper.unmount()
+    completions[3]({ usage: { '1': {plan_name:'after-unmount'} }, errors: {} })
+    await flushPromises()
   })
 
   it('keeps lite=1 on the initial list request', async () => {

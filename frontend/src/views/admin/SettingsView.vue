@@ -45,7 +45,7 @@
         </div>
 
         <!-- Tab: Security — Admin API Key -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <div v-if="visitedTabs.has('security')" v-show="activeTab === 'security'" class="space-y-6">
           <AdminAccessKeysSettings />
           <!-- 已有全权密钥只提供轮换和删除入口。 -->
           <details v-if="adminApiKeyExists" class="card">
@@ -162,7 +162,7 @@
         <!-- /Tab: Security — Admin API Key -->
 
         <!-- Tab: Gateway -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <div v-if="visitedTabs.has('gateway')" v-show="activeTab === 'gateway'" class="space-y-6">
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -1382,7 +1382,7 @@
         <!-- /Tab: Gateway -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <div v-if="visitedTabs.has('security')" v-show="activeTab === 'security'" class="space-y-6">
           <!-- Registration Settings -->
           <div class="card">
             <div
@@ -3771,7 +3771,7 @@
         <!-- /Tab: Security — Registration, Turnstile, LinuxDo, OIDC -->
 
         <!-- Tab: Users -->
-        <div v-show="activeTab === 'users'" class="space-y-6">
+        <div v-if="visitedTabs.has('users')" v-show="activeTab === 'users'" class="space-y-6">
           <!-- Default Settings -->
           <div class="card">
             <div
@@ -4385,7 +4385,7 @@
         <!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <div v-if="visitedTabs.has('gateway')" v-show="activeTab === 'gateway'" class="space-y-6">
           <!-- Claude Code Settings -->
           <div class="card">
             <div
@@ -5876,7 +5876,11 @@
                 {{ t("admin.settings.webSearchEmulation.description") }}
               </p>
             </div>
-            <div class="space-y-5 p-6">
+            <div v-if="!webSearchLoaded" class="p-6" role="status">
+              <span v-if="webSearchLoading">{{ t("common.loading") }}</span>
+              <button v-else type="button" class="btn btn-secondary" @click="loadWebSearchConfig">{{ t("common.retry") }}</button>
+            </div>
+            <div v-else class="space-y-5 p-6">
               <!-- Global Toggle -->
               <div class="flex items-center justify-between">
                 <div>
@@ -6355,7 +6359,7 @@
         <!-- /Tab: Gateway — Claude Code, Scheduling -->
 
         <!-- Tab: General -->
-        <div v-show="activeTab === 'general'" class="space-y-6">
+        <div v-if="visitedTabs.has('general')" v-show="activeTab === 'general'" class="space-y-6">
           <!-- Site Settings -->
           <div class="card">
             <div
@@ -6963,7 +6967,7 @@
 	        <!-- /Tab: General -->
 
 	        <!-- Tab: Login Agreement -->
-	        <div v-show="activeTab === 'agreement'" class="space-y-6">
+	        <div v-if="visitedTabs.has('agreement')" v-show="activeTab === 'agreement'" class="space-y-6">
 	          <div class="card">
 	            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
 	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -7165,7 +7169,7 @@
         <!-- /Tab: Login Agreement -->
 
 	        <!-- Tab: Features (功能开关) -->
-        <div v-show="activeTab === 'features'" class="space-y-6">
+        <div v-if="visitedTabs.has('features')" v-show="activeTab === 'features'" class="space-y-6">
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -7921,7 +7925,7 @@
 
         <!-- Tab: Email -->
         <!-- Tab: Payment -->
-        <div v-show="activeTab === 'payment'" class="space-y-6">
+        <div v-if="visitedTabs.has('payment')" v-show="activeTab === 'payment'" class="space-y-6">
           <!-- Payment System Settings -->
           <div class="card">
             <div
@@ -8480,7 +8484,7 @@
           />
         </div>
 
-        <div v-show="activeTab === 'email'" class="space-y-6">
+        <div v-if="visitedTabs.has('email')" v-show="activeTab === 'email'" class="space-y-6">
           <!-- Email disabled hint - show when email_verify_enabled is off -->
           <div v-if="!form.email_verify_enabled" class="card">
             <div class="p-6">
@@ -8902,7 +8906,7 @@
         <!-- /Tab: Email -->
 
         <!-- Tab: Backup -->
-        <div v-show="activeTab === 'backup'">
+        <div v-if="visitedTabs.has('backup')" v-show="activeTab === 'backup'">
           <BackupSettings />
         </div>
 
@@ -9114,6 +9118,8 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+// Keep visited panels mounted so switching tabs never discards unsaved edits.
+const visitedTabs = reactive(new Set<SettingsTab>(["general"]));
 const route = useRoute();
 const router = useRouter();
 const guideEditorOpen = ref(false);
@@ -10464,7 +10470,11 @@ async function testWebSearchProvider() {
   }
 }
 
+const webSearchLoaded = ref(false);
+const webSearchLoading = ref(false);
 async function loadWebSearchConfig() {
+  if (webSearchLoading.value) return;
+  webSearchLoading.value = true;
   try {
     const [resp, proxiesResp] = await Promise.all([
       adminAPI.settings.getWebSearchEmulationConfig(),
@@ -10475,12 +10485,16 @@ async function loadWebSearchConfig() {
       webSearchConfig.providers = resp.providers || [];
     }
     webSearchProxies.value = proxiesResp.items || [];
+    webSearchLoaded.value = true;
   } catch (err: unknown) {
     // 404 is expected when config hasn't been created yet; show error for other failures
     const status = (err as { status?: number })?.status;
+    if (status === 404) webSearchLoaded.value = true;
     if (status !== 404 && status !== undefined) {
       appStore.showError(extractApiErrorMessage(err, t("common.error")));
     }
+  } finally {
+    webSearchLoading.value = false;
   }
 }
 
@@ -11262,8 +11276,7 @@ async function loadSettings() {
       openaiFastPolicyLoaded.value = true;
     }
 
-    // Load web search emulation config separately
-    await loadWebSearchConfig();
+    // Tab-specific endpoints load on first visit, independently of the shared form.
   } catch (error: unknown) {
     loadFailed.value = true;
     appStore.showError(
@@ -11969,7 +11982,7 @@ async function saveSettings() {
       openaiFastPolicyLoaded.value = true;
     }
     // Save web search emulation config separately (errors handled internally)
-    const wsOk = await saveWebSearchConfig();
+    const wsOk = !webSearchLoaded.value || await saveWebSearchConfig();
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
@@ -12967,21 +12980,28 @@ async function handleDeleteProvider() {
   }
 }
 
-onMounted(() => {
-  loadSettings();
-  loadSubscriptionGroups();
-  loadAdminApiKey();
-  loadUpstreamBillingProbeSettings();
-  loadOllamaCloudUsageSettings();
-  loadOpenCodeGoUsageSettings();
-  loadOverloadCooldownSettings();
-  loadRateLimit429CooldownSettings();
-  loadPanelRateLimitSettings();
-  loadStreamTimeoutSettings();
-  loadRectifierSettings();
-  loadBetaPolicySettings();
-  loadProviders();
+watch(activeTab, (tab) => {
+  if (visitedTabs.has(tab)) return;
+  visitedTabs.add(tab);
+  if (tab === "users") void loadSubscriptionGroups();
+  if (tab === "security") {
+    void loadAdminApiKey();
+    void loadPanelRateLimitSettings();
+  }
+  if (tab === "payment") void loadProviders();
+  if (tab === "gateway") {
+    void loadUpstreamBillingProbeSettings();
+    void loadOllamaCloudUsageSettings();
+    void loadOpenCodeGoUsageSettings();
+    void loadOverloadCooldownSettings();
+    void loadRateLimit429CooldownSettings();
+    void loadStreamTimeoutSettings();
+    void loadRectifierSettings();
+    void loadBetaPolicySettings();
+    void loadWebSearchConfig();
+  }
 });
+onMounted(() => { void loadSettings(); });
 
 // =========================
 // Affiliate (邀请返利) 专属用户管理

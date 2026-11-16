@@ -84,6 +84,9 @@ type IntelligentTestOverview struct {
 	SuspectedDegradation int64 `json:"suspected_degradation"`
 }
 type IntelligentTestFilter struct {
+	// User pelican projections share the exact same visibility query.
+	PelicanSummary                                                 bool
+	PelicanID                                                      int64
 	Page, PageSize                                                 int
 	AccountID, GroupID                                             int64
 	Search, Platform, AccountType, AccountStatus, TestType, Status string
@@ -158,6 +161,7 @@ type UserPelicanTest struct {
 	ID              int64                    `json:"id"`
 	Status          string                   `json:"status"`
 	HTML            string                   `json:"html"`
+	HasHTML         bool                     `json:"has_html"`
 	PreviewIssue    string                   `json:"preview_issue,omitempty"`
 	Prompt          string                   `json:"prompt"`
 	Model           string                   `json:"model"`

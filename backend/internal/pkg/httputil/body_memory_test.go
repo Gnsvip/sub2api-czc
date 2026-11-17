@@ -40,6 +40,9 @@ func TestReadRequestBodyChunksPreservesReadErrors(t *testing.T) {
 		if !errors.As(err, &progress) || progress.BytesRead != 7 || progress.Elapsed < 0 {
 			t.Fatalf("missing upload progress: %#v", progress)
 		}
+		if progress.ReadCalls != 2 || progress.LastProgressElapsed < progress.FirstByteElapsed || progress.LastProgressElapsed > progress.Elapsed || progress.LastReadElapsed > progress.Elapsed {
+			t.Fatalf("invalid body read timings: %#v", progress)
+		}
 	}
 }
 
@@ -67,6 +70,9 @@ func TestReadRequestBodyChunksCountsBytesReturnedWithError(t *testing.T) {
 			}
 			if progress.BytesRead != int64(size) || progress.Elapsed < 0 || progress.Elapsed > time.Since(started) {
 				t.Fatalf("wrong progress across chunks/final read: %#v", progress)
+			}
+			if progress.ReadCalls < 1 || progress.LastProgressElapsed > progress.Elapsed || progress.LastReadElapsed > progress.Elapsed {
+				t.Fatalf("missing timing for read returning bytes and error: %#v", progress)
 			}
 		})
 	}

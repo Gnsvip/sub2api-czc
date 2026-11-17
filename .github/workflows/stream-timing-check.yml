@@ -6,11 +6,22 @@ on:
     paths:
       - 'backend/internal/pkg/httputil/**'
       - 'backend/internal/handler/request_body_read_log*.go'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/openai_codex_call_output_gate_test.go'
       - 'backend/internal/server/middleware/request_body_read_error.go'
       - 'backend/internal/server/middleware/group_model_allowlist_test.go'
       - 'backend/internal/server/middleware/openai_fast_policy_forwarding_test.go'
       - 'backend/internal/service/openai_*timing*.go'
       - 'backend/internal/service/openai_compact_sse_keepalive*.go'
+      - 'backend/internal/service/openai_compact_body_signal*.go'
+      - 'backend/internal/service/openai_gateway_request_body*.go'
+      - 'backend/internal/service/openai_responses_namespace*.go'
+      - 'backend/internal/service/openai_reasoning_effort_policy*.go'
+      - 'backend/internal/service/openai_call_output_probe.go'
+      - 'backend/internal/service/json_escape_probe*.go'
+      - 'backend/internal/service/hot_path_zero_copy_test.go'
+      - 'backend/internal/service/bedrock_request*.go'
+      - 'backend/internal/service/bedrock_stream*.go'
       - 'backend/internal/service/openai_gateway_response_handling.go'
       - 'backend/internal/service/openai_gateway_passthrough.go'
       - 'backend/internal/service/openai_gateway_chat_completions.go'
@@ -53,6 +64,15 @@ jobs:
         working-directory: backend
         run: |
           go test -race -tags=unit ./internal/service ./internal/repository -run '^(TestOpenAISlowTiming|Test.*OpenAI.*Keepalive|TestOpenAIFirstOutput|TestOpenAINativeFirstOutput|TestOpenAIPassthrough|TestOpenAIGatewayService_.*Streaming|TestHandleChatStreamingResponse|TestHTTPUpstream|TestDecompressResponseBody|TestCodexOwnedH2)' -count=1 -json > "$RUNNER_TEMP/stream-timing-tests.jsonl"
+      - name: Request-body zero-copy and compatibility race regressions
+        working-directory: backend
+        run: |
+          go test -race -tags=unit ./internal/service ./internal/handler -run '^(TestJSONMayEscapePlainASCII|TestCodexCallOutputGate|TestNormalizeCodex.*Bootstrap|TestNormalizeCodexPageContext|TestCompactionTrigger|TestNormalizeCompactionTrigger|TestHasCompactionTrigger|TestResponsesInputHasFunctionCallOutputNamed|TestOpenAIRequestBodyHasTools|TestDeleteJSONPathIfPresent|Test.*Bedrock|Test.*Namespace|Test.*Base64|Test.*Empty.*Image|Test.*ReasoningEffort|TestNormalizeOpenAIResponsesRejectedFieldRetryBody|TestOpenAIResponsesRejectedFieldRetryState|TestOpenAIGatewayService_OAuthReasoningContentBatchRetry|TestNormalizeOpenAIResponsesReasoningContentReplay|TestNormalizeOpenAIResponsesWebSocketCompatibilityBodyScopesReasoningContentToDestination)' -count=1 -json > "$RUNNER_TEMP/request-body-tests.jsonl"
+      - name: Synthetic large-body allocation comparison
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/service -run '^$' -bench '^BenchmarkLargeRequestBodyHotPaths$' -benchmem -benchtime=3x -count=1 | tee "$RUNNER_TEMP/request-body-benchmark.txt"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -60,4 +80,6 @@ jobs:
           path: |
             ${{ runner.temp }}/stream-timing-tests.jsonl
             ${{ runner.temp }}/upload-tests.jsonl
+            ${{ runner.temp }}/request-body-tests.jsonl
+            ${{ runner.temp }}/request-body-benchmark.txt
           retention-days: 7

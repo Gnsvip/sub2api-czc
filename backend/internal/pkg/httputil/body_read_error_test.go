@@ -97,7 +97,8 @@ func TestRequestBodyReadIncomplete(t *testing.T) {
 func TestRequestBodyReadLogFieldsProgressAndPrivacy(t *testing.T) {
 	for _, length := range []int64{-1, 0, 2, 100} {
 		req := &http.Request{ContentLength: length, Proto: "secret-protocol-marker", Header: http.Header{"Content-Encoding": {"secret-encoding-marker"}}, TransferEncoding: []string{"chunked", "secret-transfer-marker"}}
-		err := fmt.Errorf("secret-outer-marker: %w", &RequestBodyReadError{Err: fmt.Errorf("secret-body-marker: %w", io.ErrUnexpectedEOF), BytesRead: 7, Elapsed: 24757 * time.Millisecond})
+		err := fmt.Errorf("secret-outer-marker: %w", &RequestBodyReadError{Err: fmt.Errorf("secret-body-marker: %w", io.ErrUnexpectedEOF), BytesRead: 7, Elapsed: 24757 * time.Millisecond,
+			ReadCalls: 3, FirstByteElapsed: 10 * time.Millisecond, LastProgressElapsed: 757 * time.Millisecond, LastReadElapsed: 24 * time.Second})
 		encoder := zapcore.NewMapObjectEncoder()
 		for _, field := range RequestBodyReadLogFields(req, err) {
 			field.AddTo(encoder)
@@ -105,6 +106,11 @@ func TestRequestBodyReadLogFieldsProgressAndPrivacy(t *testing.T) {
 		fields := encoder.Fields
 		if fields["bytes_read"] != int64(7) || fields["read_ms"] != int64(24757) || fields["chunked"] != true || fields["error_kind"] != BodyReadKindTruncatedBody {
 			t.Fatalf("missing progress: %v", fields)
+		}
+		for key, want := range map[string]int64{"body_read_calls": 3, "body_first_byte_ms": 10, "body_last_progress_ms": 757, "body_last_read_ms": 24000, "body_idle_ms": 24000} {
+			if fields[key] != want {
+				t.Fatalf("%s=%v, want %d", key, fields[key], want)
+			}
 		}
 		gap, present := fields["content_length_gap_bytes"]
 		if present != (length >= 7) || (present && gap != length-7) {
@@ -120,6 +126,20 @@ func TestRequestBodyReadLogFieldsProgressAndPrivacy(t *testing.T) {
 	}
 	if _, present := encoder.Fields["bytes_read"]; present {
 		t.Fatal("unobserved byte count must not be presented as zero")
+	}
+	for _, progress := range []*RequestBodyReadError{
+		{Err: io.ErrUnexpectedEOF, BytesRead: 7},                                  // Legacy/unobserved timings.
+		{Err: os.ErrDeadlineExceeded, ReadCalls: 1, LastReadElapsed: time.Second}, // No bytes.
+	} {
+		fields := zapcore.NewMapObjectEncoder()
+		for _, field := range RequestBodyReadLogFields(nil, progress) {
+			field.AddTo(fields)
+		}
+		for _, key := range []string{"body_first_byte_ms", "body_last_progress_ms", "body_idle_ms"} {
+			if _, present := fields.Fields[key]; present {
+				t.Fatalf("unobserved timing %s must not be reported as zero", key)
+			}
+		}
 	}
 }
 

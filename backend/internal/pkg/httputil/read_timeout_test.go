@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -11,6 +12,84 @@ import (
 	"testing"
 	"time"
 )
+
+// A configurable idle window must admit a paused upload that resumes within
+// that window, even when the whole upload takes longer than the window.
+func TestBodyReadTimeoutAllowsResumedUpload(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout time.Duration
+		want    int
+	}{
+		{"short_window_expires", 100 * time.Millisecond, http.StatusRequestTimeout},
+		{"longer_window_recovers", 2 * time.Second, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := make(chan struct{})
+			progress := make(chan *RequestBodyReadError, 1)
+			srv := httptest.NewServer(WithBodyReadTimeout(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(started)
+				body, err := ReadRequestBodyWithPrealloc(r)
+				if err != nil {
+					var readErr *RequestBodyReadError
+					_ = errors.As(err, &readErr)
+					progress <- readErr
+					w.WriteHeader(DescribeRequestBodyReadFailure(r, err).Status)
+					return
+				}
+				_, _ = w.Write(body)
+			}), tc.timeout))
+			defer srv.Close()
+			conn, err := net.DialTimeout("tcp", srv.Listener.Addr().String(), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+			if _, err = io.WriteString(conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Length: 3\r\nConnection: close\r\n\r\na"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("handler did not start")
+			}
+			// Each pause fits the longer idle window; the total exceeds it.
+			for _, part := range []string{"b", "c"} {
+				time.Sleep(1200 * time.Millisecond)
+				_, err = io.WriteString(conn, part)
+				if err != nil && tc.want == http.StatusOK {
+					t.Fatal(err)
+				}
+				if tc.want != http.StatusOK {
+					break
+				}
+			}
+			resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status=%d, want %d", resp.StatusCode, tc.want)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == http.StatusOK {
+				if string(body) != "abc" {
+					t.Fatalf("upload lost data: %q", body)
+				}
+			} else {
+				p := <-progress
+				if p == nil || p.BytesRead != 1 || p.ReadCalls < 2 || p.LastReadElapsed < tc.timeout || p.Elapsed-p.LastProgressElapsed < tc.timeout {
+					t.Fatalf("stalled upload timing was lost: %#v", p)
+				}
+			}
+		})
+	}
+}
 
 func TestBodyReadTimeoutReleasesStalledUpload(t *testing.T) {
 	readDone := make(chan error, 1)

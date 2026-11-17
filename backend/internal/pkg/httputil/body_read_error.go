@@ -33,6 +33,12 @@ type RequestBodyReadError struct {
 	Err       error
 	BytesRead int64
 	Elapsed   time.Duration
+	// Timings describe application Reader.Read calls, not packet arrival at
+	// the client, CDN or reverse proxy. ReadCalls == 0 means unobserved.
+	ReadCalls           int64
+	FirstByteElapsed    time.Duration
+	LastProgressElapsed time.Duration
+	LastReadElapsed     time.Duration
 }
 
 func (e *RequestBodyReadError) Error() string { return e.Err.Error() }
@@ -72,6 +78,19 @@ func RequestBodyReadLogFields(req *http.Request, err error) []zap.Field {
 		)
 		if contentLength >= progress.BytesRead {
 			fields = append(fields, zap.Int64("content_length_gap_bytes", contentLength-progress.BytesRead))
+		}
+		if progress.ReadCalls > 0 {
+			fields = append(fields,
+				zap.Int64("body_read_calls", progress.ReadCalls),
+				zap.Int64("body_last_read_ms", progress.LastReadElapsed.Milliseconds()),
+			)
+			if progress.BytesRead > 0 {
+				fields = append(fields,
+					zap.Int64("body_first_byte_ms", progress.FirstByteElapsed.Milliseconds()),
+					zap.Int64("body_last_progress_ms", progress.LastProgressElapsed.Milliseconds()),
+					zap.Int64("body_idle_ms", max(0, progress.Elapsed-progress.LastProgressElapsed).Milliseconds()),
+				)
+			}
 		}
 	}
 	return fields

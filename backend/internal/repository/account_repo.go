@@ -3308,12 +3308,25 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		// Mixed bulk edits keep OAuth mapping records intact for inspection.
-		credentialPatch := credentialPlaceholder + "::jsonb"
-		credentialPatch = "CASE WHEN platform = 'openai' AND type = 'oauth' THEN (" + credentialPatch + " - 'model_mapping' - 'compact_model_mapping') ELSE " + credentialPatch + " END"
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || ("+credentialPatch+")")
 		args = append(args, payload)
 		idx++
+		// Evaluate the effective extra for each row: ordinary OAuth keeps its
+		// mappings, while an opted-in passthrough account can edit source keys.
+		effectiveExtra := "COALESCE(extra, '{}'::jsonb)"
+		if len(updates.Extra) > 0 {
+			extraPayload, err := json.Marshal(updates.Extra)
+			if err != nil {
+				return 0, err
+			}
+			effectiveExtra = "(" + effectiveExtra + " || $" + itoa(idx) + "::jsonb)"
+			args = append(args, extraPayload)
+			idx++
+		}
+		passthrough := "(CASE WHEN jsonb_typeof(" + effectiveExtra + " -> 'openai_passthrough') = 'boolean' THEN " + effectiveExtra + " -> 'openai_passthrough' ELSE " + effectiveExtra + " -> 'openai_oauth_passthrough' END) = 'true'::jsonb"
+		filterEnabled := "(" + passthrough + " AND " + effectiveExtra + " -> 'openai_passthrough_model_filter' = 'true'::jsonb)"
+		credentialPatch := credentialPlaceholder + "::jsonb"
+		credentialPatch = "CASE WHEN platform = 'openai' AND type = 'oauth' THEN CASE WHEN " + filterEnabled + " THEN (" + credentialPatch + " - 'compact_model_mapping') ELSE (" + credentialPatch + " - 'model_mapping' - 'compact_model_mapping') END ELSE " + credentialPatch + " END"
+		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || ("+credentialPatch+")")
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)

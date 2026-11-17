@@ -164,6 +164,9 @@ func (m *mockAccountRepoForTest) ClearRateLimit(ctx context.Context, id int64) e
 func (m *mockAccountRepoForTest) ClearModelRateLimits(ctx context.Context, id int64) error {
 	return nil
 }
+func (m *mockAccountRepoForTest) ClearModelRateLimit(ctx context.Context, id int64, scope string) error {
+	return nil
+}
 func (m *mockAccountRepoForTest) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	return nil
 }

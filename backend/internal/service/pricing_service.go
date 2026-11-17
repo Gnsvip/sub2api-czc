@@ -1614,6 +1614,12 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 4. gpt-5.4* -> 业务静态兜底价
 // 5. 最终回退到 DefaultTestModel (gpt-6-luna)
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
+	if base := openai.CanonicalGPT62Model(model); base != "" {
+		if pricing, ok := s.pricingData[base]; ok {
+			return pricing
+		}
+		return openAIGPT62FallbackPricing[base]
+	}
 	if openai.IsGPT61TerraModelSpelling(model) {
 		if pricing, ok := s.pricingData["gpt-6.1-terra"]; ok {
 			return pricing

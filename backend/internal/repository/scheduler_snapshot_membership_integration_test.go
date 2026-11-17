@@ -95,7 +95,7 @@ func TestSchedulerSnapshotConfiguredMembership(t *testing.T) {
 							return out
 						}
 						for range 2 {
-							accounts, useMixed, err := svc.ListSchedulableAccounts(ctx, groupID, platform, forced)
+							accounts, useMixed, err := svc.ListSchedulableAccountsWithMode(ctx, groupID, platform, forced)
 							require.NoError(t, err)
 							require.Equal(t, mixed, useMixed)
 							require.ElementsMatch(t, wantReady, accountIDs(accounts), "both DB fallback and cache hit enforce current eligibility")

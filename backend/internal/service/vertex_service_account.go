@@ -84,6 +84,8 @@ func (a *Account) VertexProjectID() string {
 	return ""
 }
 
+// VertexLocation 返回模型请求使用的区域：vertex_model_locations 显式指定优先；否则取账号区域，
+// Gemini 账号区域为多区域（us/eu）时按 vertexModelLocations 判断模型是否支持，不支持的走 global。
 func (a *Account) VertexLocation(model string) string {
 	if a == nil {
 		return vertexDefaultLocation
@@ -95,6 +97,15 @@ func (a *Account) VertexLocation(model string) string {
 			}
 		}
 	}
+	location := a.vertexAccountLocation()
+	if a.Platform != PlatformGemini {
+		return location
+	}
+	return resolveVertexModelLocation(location, model)
+}
+
+// vertexAccountLocation 返回账号配置的区域，未配置时为 vertexDefaultLocation。
+func (a *Account) vertexAccountLocation() string {
 	if v := strings.TrimSpace(a.GetCredential("location")); v != "" {
 		return v
 	}
@@ -334,10 +345,7 @@ func buildVertexGeminiURL(projectID, location, model, action string, stream bool
 	default:
 		return "", fmt.Errorf("unsupported vertex gemini action: %s", action)
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = "aiplatform.googleapis.com"
-	}
+	host := vertexAPIHost(location)
 	u := fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
 		host,
@@ -372,10 +380,7 @@ func buildVertexAnthropicURL(projectID, location, model string, stream bool) (st
 	if stream {
 		action = "streamRawPredict"
 	}
-	host := fmt.Sprintf("%s-aiplatform.googleapis.com", location)
-	if location == "global" {
-		host = "aiplatform.googleapis.com"
-	}
+	host := vertexAPIHost(location)
 	escapedModel := strings.ReplaceAll(url.PathEscape(model), "%40", "@")
 	return fmt.Sprintf(
 		"https://%s/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
@@ -408,11 +413,11 @@ func buildVertexAnthropicRequestBody(body []byte) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-func buildVertexGeminiAccountURL(account *Account, model, action string, stream bool) (string, error) {
+func buildVertexGeminiAccountURL(account *Account, model, action string, stream bool, cachedContentLocation string) (string, error) {
 	if account.IsVertexAPIKey() && account.VertexProjectID() == "" {
 		return buildVertexGeminiExpressURL(model, action, stream)
 	}
-	return buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(model), model, action, stream)
+	return buildVertexGeminiURL(account.VertexProjectID(), vertexGeminiRequestLocation(account, model, cachedContentLocation), model, action, stream)
 }
 
 func setVertexGeminiAuth(ctx context.Context, req *http.Request, account *Account, tokenProvider *GeminiTokenProvider) error {

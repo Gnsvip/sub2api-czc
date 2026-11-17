@@ -186,7 +186,8 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 	if account.IsExcelBPSEnabled() {
 		mapping = account.excelBPSModelMapping()
 	}
-	if account.IsOpenAIPassthroughEnabled() || len(mapping) == 0 {
+	passthrough := account.IsOpenAIPassthroughEnabled()
+	if (passthrough && !account.IsOpenAIPassthroughModelFilterEnabled()) || len(mapping) == 0 {
 		return body, nil
 	}
 	field, idField := "data", "id"
@@ -250,6 +251,10 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 		// original catalog entry when the configured target is outside BPS.
 		if account.IsExcelBPSEnabled() && (!matched || !account.isExcelBPSUpstreamModelEnabled(target)) {
 			target, matched = id, true
+		}
+		if passthrough {
+			// Filtering changes eligibility, never the upstream/public model name.
+			target, matched = id, account.IsModelSupported(id)
 		}
 		raw, available := byID[strings.TrimSpace(target)]
 		if !matched || !available {

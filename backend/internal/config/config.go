@@ -2828,7 +2828,7 @@ func setDefaults() {
 	// Without explicit config or env, load() replaces this with a size derived
 	// from the memory limit (see autoRequestBodyMemoryBudget).
 	viper.SetDefault("gateway.request_body_memory_budget_bytes", defaultRequestBodyMemoryBudgetBytes)
-	viper.SetDefault("gateway.request_body_read_timeout_seconds", 120)
+	viper.SetDefault("gateway.request_body_read_timeout_seconds", 180)
 	viper.SetDefault("gateway.downstream_write_timeout_seconds", 120)
 	viper.SetDefault("gateway.text_max_body_size", int64(32*1024*1024))
 	viper.SetDefault("gateway.upstream_response_read_max_bytes", DefaultUpstreamResponseReadMaxBytes)

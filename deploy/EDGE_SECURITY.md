@@ -35,10 +35,15 @@ response. Healthy generations can remain open while an upstream is thinking.
 - Compressed request output is capped at 64 MiB, with overflow rejected rather
   than truncated. Zstd additionally has an 8 MiB window cap and one decoder
   worker per request.
-- `gateway.request_body_read_timeout_seconds: 120` bounds a stalled body read;
+- `gateway.request_body_read_timeout_seconds: 180` bounds a stalled body read;
   `gateway.downstream_write_timeout_seconds: 120` bounds each write/flush.
   Successful operations clear their deadline, so upstream thinking does not
   consume a whole-response time budget. Zero disables the corresponding limit.
+  An explicitly configured older value is not overridden on upgrade. For a
+  binary/systemd deployment, set `GATEWAY_REQUEST_BODY_READ_TIMEOUT_SECONDS=180`
+  and the API virtual host's Nginx `client_body_timeout 180s` together. A shorter
+  timeout at any ingress hop can still close the upload first. See
+  [upload timeout operations](upload-timeout.md) before applying this change.
 - `gateway.max_line_size: 524288000` preserves the 500 MiB SSE line default
   required by large base64 4K images, image-generation output and multi-image
   responses. Upgrading does not silently lower this compatibility limit.

@@ -40,6 +40,27 @@ func TestAutoRequestBodyMemoryBudget(t *testing.T) {
 	require.Equal(t, int64(math.MaxUint64/4), autoRequestBodyMemoryBudget(math.MaxUint64))
 }
 
+func TestLoadRequestBodyReadTimeoutOverrides(t *testing.T) {
+	for _, value := range []int{0, 120, 180, 300} {
+		for _, source := range []string{"environment", "yaml"} {
+			t.Run(fmt.Sprintf("%s_%d", source, value), func(t *testing.T) {
+				resetViperWithJWTSecret(t)
+				if source == "environment" {
+					t.Setenv("GATEWAY_REQUEST_BODY_READ_TIMEOUT_SECONDS", fmt.Sprint(value))
+				} else {
+					t.Setenv("GATEWAY_REQUEST_BODY_READ_TIMEOUT_SECONDS", "")
+					path := filepath.Join(t.TempDir(), "config.yaml")
+					require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf("gateway:\n  request_body_read_timeout_seconds: %d\n", value)), 0o600))
+					t.Setenv("CONFIG_FILE", path)
+				}
+				cfg, err := Load()
+				require.NoError(t, err)
+				require.Equal(t, value, cfg.Gateway.RequestBodyReadTimeoutSeconds)
+			})
+		}
+	}
+}
+
 func TestLoadRequestBodyMemoryBudget(t *testing.T) {
 	t.Run("auto-sized from memory limit when unset", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
@@ -218,7 +239,7 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
 	require.Equal(t, int64(1<<30), cfg.Gateway.RequestBodyMemoryBudgetBytes)
-	require.Equal(t, 120, cfg.Gateway.RequestBodyReadTimeoutSeconds)
+	require.Equal(t, 180, cfg.Gateway.RequestBodyReadTimeoutSeconds)
 	require.Equal(t, 120, cfg.Gateway.DownstreamWriteTimeoutSeconds)
 	require.Equal(t, 500<<20, cfg.Gateway.MaxLineSize)
 	require.Equal(t, int64(8<<20), cfg.Gateway.SSEQueueMaxBytes)

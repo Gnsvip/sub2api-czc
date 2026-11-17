@@ -288,7 +288,8 @@ gateway:
   # request_body_memory_budget_bytes: 1073741824
   # Individual socket read/write idle deadlines, not the entire SSE lifetime; 0 disables.
   # 上传单次读取、下游单次写入/flush 超时（秒），不会限制正常长流的总时长；0 禁用。
-  request_body_read_timeout_seconds: 120
+  # Match the reverse proxy's client_body_timeout; explicit older values are preserved.
+  request_body_read_timeout_seconds: 180
   downstream_write_timeout_seconds: 120
   # Pure-text endpoint body limit (embeddings and alpha/search), default 32 MiB.
   # 纯文本端点请求体上限（embeddings、alpha/search），默认 32 MiB。

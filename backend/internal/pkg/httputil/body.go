@@ -108,13 +108,8 @@ func readRequestBodyWithBudget(req *http.Request) (requestBodyBuffer, error) {
 		}
 	}
 
-	startedAt := time.Now()
 	raw, err := readRequestBodyChunksWithBudget(req.Context(), req.Body, capHint, req.ContentLength)
 	if err != nil {
-		var readErr *RequestBodyReadError
-		if errors.As(err, &readErr) {
-			readErr.Elapsed = time.Since(startedAt)
-		}
 		return requestBodyBuffer{}, err
 	}
 
@@ -141,7 +136,21 @@ func readRequestBodyWithBudget(req *http.Request) (requestBodyBuffer, error) {
 // Content-Length before the corresponding bytes have arrived.
 func readRequestBodyChunksWithBudget(ctx context.Context, reader io.Reader, initialCapacity int, contentLength int64) (result requestBodyBuffer, err error) {
 	var reserved int64
+	startedAt := time.Now()
+	var readCalls int64
+	var firstByteAt, lastProgressAt time.Time
+	var lastReadElapsed time.Duration
 	defer func() {
+		var progress *RequestBodyReadError
+		if errors.As(err, &progress) {
+			progress.Elapsed = time.Since(startedAt)
+			progress.ReadCalls = readCalls
+			progress.LastReadElapsed = lastReadElapsed
+			if !firstByteAt.IsZero() {
+				progress.FirstByteElapsed = firstByteAt.Sub(startedAt)
+				progress.LastProgressElapsed = lastProgressAt.Sub(startedAt)
+			}
+		}
 		// Chunks and the EOF probe are temporary once the final buffer is
 		// assembled. On failure there is no result, so refund all allocations.
 		releaseRequestBodyMemory(ctx, reserved-result.charged)
@@ -166,7 +175,17 @@ func readRequestBodyChunksWithBudget(ctx context.Context, reader io.Reader, init
 				return requestBodyBuffer{}, &RequestBodyReadError{Err: ctxErr, BytesRead: int64(total + n)}
 			}
 			var read int
+			readStartedAt := time.Now()
 			read, err = reader.Read(chunk[n:])
+			readFinishedAt := time.Now()
+			readCalls++
+			lastReadElapsed = readFinishedAt.Sub(readStartedAt)
+			if read > 0 {
+				if firstByteAt.IsZero() {
+					firstByteAt = readFinishedAt
+				}
+				lastProgressAt = readFinishedAt
+			}
 			n += read
 		}
 		// Report the read error before the context: on HTTP/1 a read deadline

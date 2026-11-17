@@ -1640,7 +1640,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBodyWithMetadata(body []byte, pre
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
-	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+	if (!openai.IsGPT62ModelSpelling(model) && !openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
 		return body, false, nil
 	}
 	out := body
@@ -2920,7 +2920,7 @@ func validateGPT61CompatRequest(body []byte, model string) error {
 }
 
 func validateGPT61RawEffort(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
+	if !openai.IsGPT62ModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {

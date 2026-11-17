@@ -283,7 +283,7 @@
 
       <!-- Model restriction -->
       <p v-if="hasManagedOAuthTargets" data-testid="astra-policy-bulk" class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.astraPolicyBulk') }}</p>
-      <div v-if="!allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="!allOpenAIOAuthOnly || applyOAuthPassthroughFilter" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-model-restriction-label"
@@ -317,8 +317,8 @@
           </div>
 
           <template v-else>
-            <!-- Mode Toggle -->
-            <div class="mb-4 flex gap-2">
+            <!-- Native OAuth only edits source-key whitelists. -->
+            <div v-if="!allOpenAIOAuthOnly" class="mb-4 flex gap-2">
               <button
                 type="button"
                 :class="[
@@ -372,7 +372,7 @@
             </div>
 
             <!-- Whitelist Mode -->
-            <div v-if="modelRestrictionMode === 'whitelist'">
+            <div v-if="allOpenAIOAuthOnly || modelRestrictionMode === 'whitelist'">
               <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
                 <p class="text-xs text-blue-700 dark:text-blue-400">
                   <svg
@@ -1860,6 +1860,10 @@ const upstreamBillingAutoProbeOptions = computed(() => [
   { value: 'enabled', label: t('common.enabled') },
   { value: 'disabled', label: t('common.disabled') }
 ])
+const applyOAuthPassthroughFilter = computed(() =>
+  allOpenAIPassthroughCapable.value && enableOpenAIPassthrough.value &&
+  openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value
+)
 const isOpenAIModelRestrictionDisabled = computed(
   () =>
     allOpenAIPassthroughCapable.value &&
@@ -2137,9 +2141,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : openAIResponsesMode.value
   }
 
-  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value && !allOpenAIOAuthOnly.value) {
+  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value && (!allOpenAIOAuthOnly.value || applyOAuthPassthroughFilter.value)) {
     // 统一使用 model_mapping 字段
-    if (modelRestrictionMode.value === 'whitelist') {
+    if (allOpenAIOAuthOnly.value || modelRestrictionMode.value === 'whitelist') {
       // 白名单模式：将模型转换为 model_mapping 格式（key=value）
       // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
       const mapping: Record<string, string> = {}

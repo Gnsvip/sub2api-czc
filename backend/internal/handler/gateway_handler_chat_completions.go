@@ -409,9 +409,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Error(err),
 			)
 			h.gatewayService.ReleaseStickySessionAfterCommittedNoContent(context.WithoutCancel(c.Request.Context()), apiKey.GroupID, selectionSessionHash, account.ID, err)
-			if result != nil {
-				submitForwardUsage(result)
-			}
 			return
 		}
 

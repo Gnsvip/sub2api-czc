@@ -68,6 +68,9 @@ func TestOpenAIPassthroughModelFilterEligibility(t *testing.T) {
 					}
 					require.Equal(t, tc.want, account.IsModelSupported(tc.model))
 					require.Equal(t, tc.want, (&GatewayService{}).isModelSupportedByAccount(account, tc.model))
+					if accountType == AccountTypeOAuth {
+						require.Equal(t, tc.model, account.GetMappedModel(tc.model), "OAuth whitelist must not rewrite models")
+					}
 				})
 			}
 			account := &Account{Platform: PlatformOpenAI, Type: accountType,
@@ -75,6 +78,31 @@ func TestOpenAIPassthroughModelFilterEligibility(t *testing.T) {
 			require.True(t, account.IsModelSupported("qwen3.8-max"), "empty restrictions still allow all models")
 		})
 	}
+}
+
+func TestOpenAIPassthroughModelFilterAdminUpdate(t *testing.T) {
+	account := astraPolicyTestAccount("healthy")
+	compactMapping := account.Credentials["compact_model_mapping"]
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	whitelist := map[string]any{"gpt-6.1-sol": "must-not-rewrite"}
+	updated, err := svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{
+		Credentials: map[string]any{"model_mapping": whitelist, "compact_model_mapping": map[string]any{"changed": "no"}},
+		Extra:       map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": true},
+	})
+	require.NoError(t, err)
+	require.Equal(t, whitelist, updated.Credentials["model_mapping"])
+	require.Equal(t, compactMapping, updated.Credentials["compact_model_mapping"])
+	require.True(t, updated.IsModelSupported("gpt-6.1-sol"))
+	require.False(t, updated.IsModelSupported("gpt-6-luna"))
+	require.Equal(t, "gpt-6.1-sol", updated.GetMappedModel("gpt-6.1-sol"))
+	updated, err = svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{
+		Credentials: map[string]any{"model_mapping": map[string]any{"changed": "no"}},
+		Extra:       map[string]any{"openai_passthrough": false},
+	})
+	require.NoError(t, err)
+	require.Equal(t, whitelist, updated.Credentials["model_mapping"])
+	require.Nil(t, updated.GetModelMapping(), "ordinary OAuth ignores the saved whitelist when passthrough is disabled")
 }
 
 func TestOpenAIPassthroughModelFilterMixedPoolSelection(t *testing.T) {

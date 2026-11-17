@@ -598,9 +598,9 @@ func stringMappingFromRaw(raw any) map[string]string {
 }
 
 func (a *Account) GetModelMapping() map[string]string {
-	// OAuth models are not rewritten by stored mapping. Probe history is
-	// diagnostic only; opened/servable models are gated separately.
-	if a.IsOpenAIOAuth() {
+	// Native OAuth ignores legacy mappings. An explicit passthrough whitelist
+	// exposes source keys for selection/catalog filtering, never model rewriting.
+	if a.IsOpenAIOAuth() && !a.IsOpenAIPassthroughModelFilterEnabled() {
 		return nil
 	}
 	runtimeVersion := xai.RuntimeModelMappingVersion()
@@ -945,6 +945,9 @@ func (a *Account) GetMappedModel(requestedModel string) string {
 // ResolveMappedModel 获取映射后的模型名，并返回是否命中了账号级映射。
 // matched=true 表示命中了精确映射或通配符映射，即使映射结果与原模型名相同。
 func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	if a.IsOpenAIOAuth() {
+		return requestedModel, false
+	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
 		return requestedModel, false
@@ -2508,11 +2511,7 @@ func (a *Account) GetWebSearchEmulationMode() string {
 // platform can set the account-level web search emulation mode. Keep it in sync
 // with WEB_SEARCH_EMULATION_PLATFORMS in frontend/src/views/admin/ChannelsView.vue.
 func webSearchEmulationPlatformEnabled(platform string) bool {
-	switch platform {
-	case PlatformAnthropic, PlatformOpenAI, PlatformZhipu, PlatformCommandCode, PlatformOpenCodeGo, PlatformMiniMax:
-		return true
-	}
-	return false
+	return domain.UsesOpenAIGateway(platform) || platform == PlatformAnthropic || platform == PlatformAntigravity
 }
 
 // IsCodexCLIOnlyEnabled 返回 OpenAI OAuth 账号是否启用"仅允许 Codex 官方客户端"。

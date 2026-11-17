@@ -3263,6 +3263,13 @@
             </span>
           </span>
         </label>
+        <ModelWhitelistSelector
+          v-if="isOAuthFlow && openaiPassthroughEnabled && openaiPassthroughModelFilterEnabled"
+          v-model="allowedModels"
+          :model-mappings="modelMappings"
+          platform="openai"
+          class="mt-3"
+        />
       </div>
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
@@ -6361,6 +6368,9 @@ const createAccountAndFinish = async (
     if (Object.keys(quotaExtra).length > 0) {
       finalExtra = quotaExtra
     }
+  }
+  if (platform === 'openai' && type === 'oauth' && openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value) {
+    credentials.model_mapping = buildModelMappingObject('combined', allowedModels.value, modelMappings.value) ?? {}
   }
   if (platform === 'openai' && type !== 'oauth') {
     if (type === 'apikey') {

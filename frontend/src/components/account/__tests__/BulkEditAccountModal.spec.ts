@@ -70,6 +70,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
         ProxySelector: true,
         GroupSelector: true,
         ModelWhitelistSelector: {
+          name: 'ModelWhitelistSelector',
           props: ['modelValue'],
           emits: ['update:modelValue'],
           template: '<div data-testid="model-whitelist-stub"></div>'
@@ -922,8 +923,8 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.find('#bulk-edit-openai-compact-model-mapping-enabled').exists()).toBe(manual)
   })
 
-  it('can bulk-enable passthrough model filtering and submit an explicit whitelist', async () => {
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+  it.each(['apikey', 'oauth'])('can bulk-enable passthrough model filtering and submit an explicit whitelist for %s', async (type) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: [type] })
     await wrapper.get('#bulk-edit-openai-passthrough-enabled').setValue(true)
     await wrapper.get('#bulk-edit-openai-passthrough-toggle').trigger('click')
     await wrapper.get('[data-testid="bulk-openai-passthrough-model-filter"]').setValue(true)

@@ -845,7 +845,7 @@ describe('AccountUsageCell', () => {
         global: { stubs }
       })
       await flushPromises()
-      await wrapper.get('button').trigger('click')
+      await wrapper.get('[data-testid="openai-active-query"]').trigger('click')
       await flushPromises()
       expect(getUsage).toHaveBeenLastCalledWith(8102, 'active', true)
       expect(wrapper.get('[role="alert"]').text()).toContain('quotaRefreshFailedCached')
@@ -857,7 +857,7 @@ describe('AccountUsageCell', () => {
         ...snapshot(), source: 'active', updated_at: refreshedAt,
         seven_day: { utilization: 0, resets_at: null, remaining_seconds: 0 }
       })
-      await wrapper.get('button').trigger('click')
+      await wrapper.get('[data-testid="openai-active-query"]').trigger('click')
       await flushPromises()
       expect(wrapper.find('[role="alert"]').exists()).toBe(false)
       expect(wrapper.text()).toContain('7d|0')

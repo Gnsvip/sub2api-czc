@@ -2049,6 +2049,13 @@
             </span>
           </span>
         </label>
+        <ModelWhitelistSelector
+          v-if="account?.type === 'oauth' && openaiPassthroughEnabled && openaiPassthroughModelFilterEnabled"
+          v-model="allowedModels"
+          :model-mappings="modelMappings"
+          platform="openai"
+          class="mt-3"
+        />
       </div>
 
       <BPSAuthorization v-if="account?.platform === 'openai' && account?.type === 'oauth' && account.credentials?.client_id !== 'app_fnr0pYvVwwFDocDumLG3H2Bp' && (bpsSettings.enabled || bpsSettings.autoPolicy?.enabled)" :account-id="account.id" />
@@ -4709,7 +4716,12 @@ const buildModelRestrictionMapping = () =>
   buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
 
 const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>) => {
-  if (props.account?.platform === 'openai' && props.account.type === 'oauth') return
+  if (props.account?.platform === 'openai' && props.account.type === 'oauth') {
+    if (openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value) {
+      credentials.model_mapping = buildModelRestrictionMapping() ?? {}
+    }
+    return
+  }
   const shouldApplyModelMapping = !isOpenAIModelRestrictionDisabled.value
 
   if (shouldApplyModelMapping) {

@@ -53,29 +53,35 @@ func TestOpenAIPassthroughModelFilterEligibility(t *testing.T) {
 				{"default ignores leftover mapping", nil, "gpt-6.1-sol", true},
 				{"disabled ignores leftover mapping", false, "gpt-6.1-sol", true},
 				{"invalid flag does not opt in", "true", "gpt-6.1-sol", true},
-				{"opt in rejects other provider", true, "gpt-6.1-sol", false},
+				{"opt in rejects models outside whitelist", true, "gpt-6.1-sol", false},
 				{"opt in accepts exact source key", true, "qwen3.8-max", true},
 				{"opt in accepts wildcard source key", true, "qwen3.8-plus", true},
 				{"mapping targets do not grant access", true, "upstream-only", false},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
+					model := tc.model
+					mapping := map[string]any{"qwen3.8-max": "upstream-only", "qwen3.8-*": "wildcard-target"}
+					if accountType == AccountTypeOAuth {
+						// Native Codex credentials still cannot serve another provider.
+						model = strings.NewReplacer("qwen3.8-max", "gpt-6.2-sol", "qwen3.8-plus", "gpt-6.2-astra").Replace(model)
+						mapping = map[string]any{"gpt-6.2-sol": "upstream-only", "gpt-6.2-*": "wildcard-target"}
+					}
 					account := &Account{
 						Platform: PlatformOpenAI, Type: accountType,
-						Extra: map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": tc.flag},
-						Credentials: map[string]any{"model_mapping": map[string]any{
-							"qwen3.8-max": "upstream-only", "qwen3.8-*": "wildcard-target",
-						}},
+						Extra:       map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": tc.flag},
+						Credentials: map[string]any{"model_mapping": mapping},
 					}
-					require.Equal(t, tc.want, account.IsModelSupported(tc.model))
-					require.Equal(t, tc.want, (&GatewayService{}).isModelSupportedByAccount(account, tc.model))
+					require.Equal(t, tc.want, account.IsModelSupported(model))
+					require.Equal(t, tc.want, (&GatewayService{}).isModelSupportedByAccount(account, model))
 					if accountType == AccountTypeOAuth {
-						require.Equal(t, tc.model, account.GetMappedModel(tc.model), "OAuth whitelist must not rewrite models")
+						require.Equal(t, model, account.GetMappedModel(model), "OAuth whitelist must not rewrite models")
+						require.False(t, account.IsModelSupported("qwen3.8-max"), "passthrough does not grant native OAuth another provider's models")
 					}
 				})
 			}
 			account := &Account{Platform: PlatformOpenAI, Type: accountType,
 				Extra: map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": true}}
-			require.True(t, account.IsModelSupported("qwen3.8-max"), "empty restrictions still allow all models")
+			require.True(t, account.IsModelSupported("gpt-6.2-sol"), "empty restrictions still allow servable models")
 		})
 	}
 }
@@ -186,6 +192,7 @@ func TestOpenAIPassthroughModelFilterPreservesForwardBody(t *testing.T) {
 func TestOpenAIPassthroughModelFilterGroupCatalog(t *testing.T) {
 	accounts := passthroughModelFilterAccounts(true, 2)
 	accounts[0].Extra["openai_passthrough_model_filter"] = true
+	accounts[1].Extra = map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": true}
 	svc := &GatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
 	groupID := int64(17)
 	models := svc.GetAvailableModels(context.Background(), &groupID, PlatformOpenAI)

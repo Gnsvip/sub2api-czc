@@ -418,7 +418,7 @@ func TestBedrockUpstreamErrors_ThrottlingCooldownDisabledWritesNothing(t *testin
 	repo := &bedrockErrorRepoStub{}
 	settingRepo := newMockSettingRepo()
 	settingRepo.data[SettingKeyRateLimit429CooldownSettings] = `{"enabled":false,"cooldown_seconds":12}`
-	rateLimiter := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimiter := NewRateLimitService(repo, nil, &config.Config{}, nil)
 	rateLimiter.SetSettingService(NewSettingService(settingRepo, &config.Config{}))
 	upstream := &bedrockErrorUpstreamStub{status: http.StatusTooManyRequests, body: []byte(`{"message":"Too many requests, please wait before trying again."}`)}
 

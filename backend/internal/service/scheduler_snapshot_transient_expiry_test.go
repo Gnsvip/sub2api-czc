@@ -105,7 +105,7 @@ func TestSchedulerSnapshotRecoversTransientCooldownWithoutIntervalRebuild(t *tes
 					return ids
 				}
 
-				accounts, _, err := svc.ListSchedulableAccounts(context.Background(), nil, PlatformOpenAI, false)
+				accounts, _, err := svc.ListSchedulableAccountsWithMode(context.Background(), nil, PlatformOpenAI, false)
 				require.NoError(t, err)
 				require.Equal(t, []int64{1, 6}, eligible(accounts))
 				require.Len(t, accounts, 2, "the DB fallback returns only currently eligible accounts")
@@ -115,7 +115,7 @@ func TestSchedulerSnapshotRecoversTransientCooldownWithoutIntervalRebuild(t *tes
 
 				time.Sleep(31 * time.Second)
 				require.True(t, cooling.IsSchedulable(), "the account's own cooldown has expired")
-				accounts, _, err = svc.ListSchedulableAccounts(context.Background(), nil, PlatformOpenAI, false)
+				accounts, _, err = svc.ListSchedulableAccountsWithMode(context.Background(), nil, PlatformOpenAI, false)
 				require.NoError(t, err)
 				t.Logf("after expiry: eligible=%v cached_members=%d source_calls=%d", eligible(accounts), len(cache.accounts), repo.calls)
 				assert.ElementsMatch(t, []int64{1, 2}, eligible(accounts), "an expired cooldown must not wait for the interval rebuild")
@@ -124,7 +124,7 @@ func TestSchedulerSnapshotRecoversTransientCooldownWithoutIntervalRebuild(t *tes
 
 				// Positive control: a fresh source read immediately restores the account.
 				cache.hit = false
-				accounts, _, err = svc.ListSchedulableAccounts(context.Background(), nil, PlatformOpenAI, false)
+				accounts, _, err = svc.ListSchedulableAccountsWithMode(context.Background(), nil, PlatformOpenAI, false)
 				require.NoError(t, err)
 				require.ElementsMatch(t, []int64{1, 2}, eligible(accounts))
 			})

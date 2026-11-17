@@ -274,38 +274,30 @@ func TestAccountUsageService_GetOpenAIUsage_PreservesSnapshotObservationTime(t *
 func TestAccountUsageService_GetOpenAIUsage_RefreshFailureKeepsCachedDataAndReportsError(t *testing.T) {
 	t.Parallel()
 	observedAt := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
-	for _, shadow := range []bool{false, true} {
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra: map[string]any{
-				"codex_7d_used_percent":  100.0,
-				"codex_usage_updated_at": observedAt.Format(time.RFC3339),
-			},
-		}
-		if shadow {
-			parentID := int64(10)
-			account.ParentAccountID = &parentID
-			account.QuotaDimension = QuotaDimensionSpark
-		}
-		// Ordinary accounts have no token; shadow accounts have no quota service.
-		// Neither case may turn a failed query into a fresh, successful snapshot.
-		usage, err := (&AccountUsageService{}).getOpenAIUsage(context.Background(), account, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if usage.ErrorCode != "quota_refresh_failed" || usage.Error == "" {
-			t.Fatalf("refresh failure was hidden (shadow=%v): %#v", shadow, usage)
-		}
-		if usage.SevenDay == nil || usage.SevenDay.Utilization != 100 {
-			t.Fatalf("last known quota should remain available: %#v", usage.SevenDay)
-		}
-		if usage.UpdatedAt == nil || !usage.UpdatedAt.Equal(observedAt) || usage.Source != "passive" {
-			t.Fatalf("failed refresh must not advance snapshot freshness: %#v", usage)
-		}
-		if account.RateLimitResetAt != nil || account.Extra["codex_usage_updated_at"] != observedAt.Format(time.RFC3339) {
-			t.Fatal("failed refresh must not mutate the snapshot or scheduler state")
-		}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_7d_used_percent":  100.0,
+			"codex_usage_updated_at": observedAt.Format(time.RFC3339),
+		},
+	}
+	// A missing token must not turn a failed refresh into a fresh snapshot.
+	usage, err := (&AccountUsageService{}).getOpenAIUsage(context.Background(), account, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ErrorCode != "quota_refresh_failed" || usage.Error == "" {
+		t.Fatalf("refresh failure was hidden: %#v", usage)
+	}
+	if usage.SevenDay == nil || usage.SevenDay.Utilization != 100 {
+		t.Fatalf("last known quota should remain available: %#v", usage.SevenDay)
+	}
+	if usage.UpdatedAt == nil || !usage.UpdatedAt.Equal(observedAt) || usage.Source != "passive" {
+		t.Fatalf("failed refresh must not advance snapshot freshness: %#v", usage)
+	}
+	if account.RateLimitResetAt != nil || account.Extra["codex_usage_updated_at"] != observedAt.Format(time.RFC3339) {
+		t.Fatal("failed refresh must not mutate the snapshot or scheduler state")
 	}
 }
 

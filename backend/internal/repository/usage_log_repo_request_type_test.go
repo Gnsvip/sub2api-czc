@@ -884,14 +884,15 @@ func TestUsageLogRepositoryGetEndpointStatsAccountFilterKeepsUserActualCost(t *t
 	mock.ExpectQuery(`(?s)COALESCE\(SUM\(actual_cost\), 0\) as actual_cost.*AND account_id = \$3`).
 		WithArgs(start, end, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"endpoint", "requests", "total_tokens", "cost", "actual_cost",
-		}).AddRow("/v1/responses", int64(10), int64(300), 1.0, 0.15))
+			"endpoint", "requests", "total_tokens", "cost", "actual_cost", "account_cost",
+		}).AddRow("/v1/responses", int64(10), int64(300), 1.0, 0.15, 0.7))
 
 	results, err := repo.GetEndpointStatsWithFilters(context.Background(), start, end, 0, 0, 42, 0, "", nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, 1.0, results[0].Cost)
 	require.Equal(t, 0.15, results[0].ActualCost)
+	require.Equal(t, 0.7, results[0].AccountCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

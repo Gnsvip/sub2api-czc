@@ -87,7 +87,7 @@ func TestSchedulerFallbackConcurrentMissesShareOneDBLoad(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				results[i], _, errs[i] = svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+				results[i], _, errs[i] = svc.ListSchedulableAccountsWithMode(context.Background(), &groupID, PlatformOpenAI, false)
 			}(i)
 		}
 		synctest.Wait()
@@ -129,7 +129,7 @@ func TestSchedulerFallbackCanceledWaiterLeavesSharedLoadRunning(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		canceled := make(chan error, 1)
 		go func() {
-			_, _, err := svc.ListSchedulableAccounts(ctx, &groupID, PlatformOpenAI, false)
+			_, _, err := svc.ListSchedulableAccountsWithMode(ctx, &groupID, PlatformOpenAI, false)
 			canceled <- err
 		}()
 		synctest.Wait()
@@ -137,7 +137,7 @@ func TestSchedulerFallbackCanceledWaiterLeavesSharedLoadRunning(t *testing.T) {
 
 		joined := make(chan []Account, 1)
 		go func() {
-			accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+			accounts, _, err := svc.ListSchedulableAccountsWithMode(context.Background(), &groupID, PlatformOpenAI, false)
 			if err != nil {
 				accounts = nil
 			}
@@ -179,7 +179,7 @@ func TestSchedulerSnapshotListUsesValuesReaderWithoutCopy(t *testing.T) {
 	svc := newFallbackCoalesceService(cache, nil)
 	groupID := int64(73)
 
-	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	accounts, _, err := svc.ListSchedulableAccountsWithMode(context.Background(), &groupID, PlatformOpenAI, false)
 	require.NoError(t, err)
 	require.Len(t, accounts, 2)
 	require.Same(t, &cache.values[0], &accounts[0])
@@ -199,7 +199,7 @@ func TestSchedulerSnapshotValuesReaderFiltersTimeBlockedAccounts(t *testing.T) {
 	svc := newFallbackCoalesceService(cache, nil)
 	groupID := int64(74)
 
-	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	accounts, _, err := svc.ListSchedulableAccountsWithMode(context.Background(), &groupID, PlatformOpenAI, false)
 	require.NoError(t, err)
 	require.Equal(t, []int64{7312, 7314}, []int64{accounts[0].ID, accounts[1].ID})
 	require.Len(t, accounts, 2)
@@ -221,7 +221,7 @@ func TestSchedulerFallbackPublishesPoolAndReturnsSchedulable(t *testing.T) {
 	svc := newFallbackCoalesceService(cache, repo)
 	groupID := int64(75)
 
-	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	accounts, _, err := svc.ListSchedulableAccountsWithMode(context.Background(), &groupID, PlatformOpenAI, false)
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	require.Equal(t, int64(7401), accounts[0].ID)

@@ -111,7 +111,7 @@ func TestGatewayService_RotatedClaudeToken(t *testing.T) {
 					calls := 0
 					var firstWireBody []byte
 					var rejectedBodies []*rotatedClaudeTokenBody
-					upstream := &systemOneHTTPUpstream{do: func(req *http.Request) (*http.Response, error) {
+					upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 						calls++
 						wireBody, err := io.ReadAll(req.Body)
 						require.NoError(t, err)

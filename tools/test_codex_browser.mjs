@@ -50,7 +50,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
@@ -98,6 +98,8 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               if (scenario === 'radio_workspace' || scenario === 'personal_radio_fallback') {
                 const target = scenario === 'radio_workspace' ? '<label><input type="radio" name="workspace" value="workspace">Business</label>' : '';
                 body = form('Select a workspace', '<label><input type="radio" name="workspace" value="other" checked>Personal account</label>' + target, '/finish');
+              } else if (scenario === 'personal_locked_default') {
+                body = form('Select a workspace', '<label><input type="radio" name="workspace_id" value="other" checked disabled>JG<br>Personal account</label><label><input type="radio" name="workspace_id" value="workspace" disabled>Unavailable team</label><input type="hidden" name="workspace" value="other">', '/finish');
               } else if (['personal_select_fallback', 'wrong_fallback_workspace', 'team_token_fallback'].includes(scenario)) {
                 body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option></select>', '/finish');
               } else if (scenario === 'personal_with_other_team') {

@@ -129,12 +129,15 @@ async function selectWorkspace(page, expected) {
     const radios = page.locator('input[type="radio"]');
     for (let index = 0; index < await radios.count(); index++) {
       const radio = radios.nth(index);
-      if (!(await radio.isEnabled())) continue;
+      const checked = await radio.isChecked();
+      // With one workspace, the live consent page locks its already-selected
+      // radio. It is still the active choice; do not try to click a disabled UI.
+      if (!(await radio.isEnabled()) && !checked) continue;
       const choice = await radio.evaluate(element => ({ value: element.value,
         label: [...(element.labels || [])].map(label => label.innerText || label.textContent).join(' ') ||
           element.getAttribute('aria-label') || (element.getAttribute('aria-labelledby') || '')
             .split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ') }));
-      if (choice.value) choices.push({ ...choice, choose: () => radio.check() });
+      if (choice.value) choices.push({ ...choice, choose: async () => { if (!checked) await radio.check(); } });
     }
   }
   if (!choices.length) return; // Keep the final token check for unrecognized widgets.

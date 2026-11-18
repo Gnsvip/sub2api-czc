@@ -3,7 +3,8 @@
     <label class="block">
       <span class="input-label">登录资料</span>
       <textarea v-model="content" class="input font-mono text-sm" rows="5" autocomplete="off" autocapitalize="off" :spellcheck="false" :disabled="submitting"
-        placeholder="邮箱----密码----TOTP 密钥&#10;每行一个，最多 50 个；未启用二次验证可留空最后一项" data-testid="codex-login-content" />
+        placeholder="邮箱----密码----2FA 密钥&#10;每行一个，最多 50 个；未启用 2FA 可留空最后一项" data-testid="codex-login-content" />
+      <span class="input-hint">填写 TOTP 密钥，不是 6 位验证码；账号名称留空时使用邮箱。</span>
     </label>
     <label class="flex items-center gap-2 text-sm">
       <input v-model="autoRecover" type="checkbox" :disabled="submitting" /> 掉授权后自动恢复
@@ -12,7 +13,7 @@
     <p v-if="error" class="text-sm text-red-600" role="alert">{{ error }}</p>
     <p v-if="runtime?.state === 'preparing'" class="text-sm text-gray-500">正在准备登录运行环境…</p>
     <p v-if="runtime?.state === 'unavailable'" class="text-sm text-amber-600">登录运行环境暂不可用，任务尚未完成。请稍后检查。</p>
-    <button type="button" class="btn btn-primary" :disabled="submitting || !content.trim()" data-testid="codex-login-submit" @click="submit">
+    <button v-if="!hideSubmit" type="button" class="btn btn-primary" :disabled="!canSubmit" data-testid="codex-login-submit" @click="submit">
       {{ submitting ? '正在提交…' : '开始自动授权' }}
     </button>
     <ul v-if="results.length" class="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-dark-600 dark:border-dark-600" aria-live="polite">
@@ -27,14 +28,15 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { createCodexLoginAccounts, getCodexLoginStatus, codexLoginTaskLabel, codexLoginError, type CodexLoginCreateOptions, type CodexLoginResult, type CodexLoginStatus } from '@/api/admin/codexLogin'
 
-const props = defineProps<{ options: CodexLoginCreateOptions }>()
+const props = defineProps<{ options: CodexLoginCreateOptions; hideSubmit?: boolean }>()
 const emit = defineEmits<{ created: [] }>()
 const content = ref('')
 const autoRecover = ref(false)
 const submitting = ref(false)
+const canSubmit = computed(() => !submitting.value && !!content.value.trim())
 const error = ref('')
 const results = ref<CodexLoginResult[]>([])
 const runtime = ref<CodexLoginStatus['runtime']>()
@@ -78,4 +80,5 @@ async function submit() {
   } finally { submitting.value = false }
 }
 onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); content.value = '' })
+defineExpose({ submit, canSubmit, submitting })
 </script>

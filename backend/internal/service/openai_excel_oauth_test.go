@@ -778,6 +778,10 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 
 func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
+		{"browser_unavailable", "browser_unavailable"},
+		{"browser_start_failed", "browser_start_failed"},
+		{"browser_dependency_failed", "browser_dependency_failed"},
+		{"browser_start_failed private-secret", "worker_failed"},
 		{"local_protocol_failed stage=web_login reason=password_rejected elapsed_ms=10 exit=1", "password_rejected"},
 		{"local_protocol_failed stage=mfa_challenge reason=totp_rejected elapsed_ms=20 exit=1", "totp_rejected"},
 		{"local_protocol_failed stage=workspace_select reason=workspace_mismatch elapsed_ms=20 exit=1", "identity_mismatch"},

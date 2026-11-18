@@ -112,7 +112,12 @@ func (m *Manager) run() {
 		m.set("unavailable", "runtime_install_failed")
 		return
 	}
-	cmd := exec.CommandContext(m.ctx, filepath.Join(dir, "python"), filepath.Join(dir, "worker.py"))
+	overlay, err := m.prepareBrowserOverlay()
+	if err != nil {
+		m.set("unavailable", "browser_adapter_install_failed")
+		return
+	}
+	cmd := exec.CommandContext(m.ctx, filepath.Join(dir, "python"), filepath.Join(overlay, "browser_worker.py"), dir)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1",
 		"SUB2API_BASE_URL=" + m.baseURL, "OPENAI_REAUTH_WORKER_TOKEN=" + m.token,
 		"OPENAI_TOTP_JOURNAL_DIR=" + filepath.Join(m.root, "totp-recovery"),
@@ -122,6 +127,9 @@ func (m *Manager) run() {
 	// concurrency setting; Python validates it before claiming anything.
 	if concurrency := os.Getenv("OPENAI_REAUTH_CONCURRENCY"); concurrency != "" {
 		cmd.Env = append(cmd.Env, "OPENAI_REAUTH_CONCURRENCY="+concurrency)
+	}
+	if executable := os.Getenv("OPENAI_CODEX_BROWSER_EXECUTABLE"); executable != "" {
+		cmd.Env = append(cmd.Env, "OPENAI_CODEX_BROWSER_EXECUTABLE="+executable)
 	}
 	cmd.Dir = dir
 	// Worker/external runner output must never reach the application journal.

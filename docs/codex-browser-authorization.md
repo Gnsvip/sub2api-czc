@@ -1,0 +1,71 @@
+# Codex 自动授权浏览器
+
+普通 Codex 的 `local_worker` 密码/TOTP 任务默认使用隔离 CloakBrowser，会完成官方
+OAuth 页面中的邮箱、密码、TOTP、工作区确认和 PKCE 回调。Excel/BPS/SIWC 与
+Session Studio 保留各自流程。首次授权和启用自动恢复后的重登共用这一入口。
+
+## 运行与下载
+
+主程序嵌入 `backend/internal/reauthruntime/browser/` 两个运行文件，并按内容哈希
+写入私有数据目录。托管运行器启动 `browser_worker.py`，导入已校验的固定版本
+基础 Worker。旧运行包及其 `ready` 缓存不被覆盖。
+
+Linux amd64 首次任务从 CloakHQ 官方 GitHub Release 下载已实测的免密钥版本
+`146.0.7680.177.5`，SHA-256 固定为
+`4a12bcde95fa1bb1beef2b41ab5e5c27c36be78e3be3d0dac8c64d705216670e`。
+固定该值前已验证上游清单的 Ed25519 签名。下载有大小和时间上限，完整校验后
+才解压到私有目录，拒绝越界路径、链接及特殊文件；写完后原子发布。并发任务共享
+安装锁与缓存，失败的临时下载自动删除；损坏缓存明确失败，不改用其他浏览器。
+
+默认缓存位于 `DATA_DIR/excel-login-worker/cloak-146.0.7680.177.5-linux-amd64/`，
+约占 700 MB，保留以避免每次授权重新下载；单次登录的临时资料另行清理。
+浏览器不打进 Sub2API 发布包，不自动升级到需要许可证的新版。
+需要自行维护其他可信 Cloak 版本时，可显式设置 `OPENAI_CODEX_BROWSER_EXECUTABLE`
+为绝对路径，并同步核对沙箱配置和真实授权；这项覆盖不会获得固定下载的完整性保证。
+
+Playwright core 固定为 `1.62.1`，下载前端锁文件对应的包并核对 SHA-512。
+两类下载都不包含账号登录资料。程序不会自动安装系统包、修改 AppArmor 或关闭沙箱。
+
+## Linux 部署前置条件
+
+- 安装 Chromium 所需的共享库、`xvfb` 与 `xauth`。本机已有 Google Chrome 时可复用
+  其系统依赖，但普通 Codex 默认执行上述 Cloak 文件。
+- 必须以非 root 用户运行并启用 Chromium 沙箱；Linux 每个任务使用独立
+  Xvfb/Xauthority，禁止显示服务监听 TCP。不能使用 `--no-sandbox` 替代环境配置。
+- Ubuntu 24.04 需要允许该可执行文件创建 user namespace。默认部署路径对应的
+  模板为 `deploy/sub2api-codex-browser.apparmor`；先检查模板中的路径，再由管理员安装：
+
+  ```sh
+  sudo install -m 0644 deploy/sub2api-codex-browser.apparmor /etc/apparmor.d/sub2api-codex-browser
+  sudo apparmor_parser -r /etc/apparmor.d/sub2api-codex-browser
+  ```
+
+  压缩包中的文件位于包根目录。使用其他 DATA_DIR 或自定义浏览器路径时，修改
+  profile 的可执行文件路径；不要放开全局 user namespace 限制。
+- 浏览器启动失败、下载/校验失败均显示环境错误，停止自动重登，管理员修复后再试。
+
+## 账号与失败处理
+
+浏览器、回调令牌交换及后端连通验证使用账号原代理。HTTP/HTTPS 支持用户名密码；
+SOCKS5 仅支持无认证模式。不支持的代理明确失败，不能静默直连，也不轮换出口。
+
+每个任务有独立临时 HOME 和浏览器资料；浏览器阶段上限四分钟，结束后关闭浏览器并
+清理。密码、TOTP、回调和令牌通过内存管道传递，不进入命令行、环境变量、日志、
+截图或 trace。不共享其他账号的登录态。验证码、额外邮箱/手机验证、安全校验、
+密码错误及 2FA 错误仍会停止流程；没有接入验证码解题服务。
+
+只有后端邮箱、工作区、客户端、令牌有效期、配置版本、连通性与 CAS 回写全部通过，
+才显示“已授权”。原账号分组、代理池、额度和调度规则继续由已有后台管理。
+
+## 验证
+
+GitHub Actions 在真实沙箱 Cloak 中运行既有合成 OAuth 页面回归，检查密码/TOTP、
+workspace/state/PKCE、代理配置、失败原因及清理；同时验证下载篡改、解压越界、
+并发共享缓存、托管入口、前后端和 Linux amd64 embed 构建。合成数据不登录真实账号。
+
+2026-11-18 已在 OVH Linux amd64 直连、独立 PostgreSQL/Redis 上完成专用测试账号的
+密码、TOTP、回调、令牌交换、后端校验及回写，随后真实默认模型调用成功。
+最初测试脚本误用 `model` 字段而非管理接口的 `model_id`，因此实际使用默认
+`gpt-6-luna`，整次模型测试为 1.523 秒；不能将该记录写为 GPT-6.2 Sol 或首字耗时。
+这次验证使用候选浏览器适配层和独立后台；后续发布候选仍需通过托管入口验收。
+一次成功不代表所有账号、出口或未来上游校验均能自动通过。

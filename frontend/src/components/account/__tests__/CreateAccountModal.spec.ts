@@ -165,8 +165,9 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
-function mountModal(groups: any[] = [], proxies: any[] = []) {
+function mountModal(groups: any[] = [], proxies: any[] = [], attachTo?: HTMLElement) {
   return mount(CreateAccountModal, {
+    attachTo,
     props: { show: true, proxies, groups },
     global: {
       stubs: {
@@ -285,7 +286,8 @@ describe('Codex automatic authorization and remembered settings', () => {
 
   it('restores available groups after asynchronous loading and honors clearing', async () => {
     writeAccountCreationDefaults(7, 'openai', 'oauth', true, { group_ids: [1, 2, 3, 404], proxy_ids: [8, 9], concurrency: 27, priority: 4 })
-    const wrapper = mountModal()
+    // Keep computed visibility live in jsdom while v-show toggles the settings.
+    const wrapper = mountModal([], [], document.body)
     await selectButtonByText(wrapper, 'OpenAI')
     await wrapper.setProps({
       groups: [{ id: 1, name: 'GPT', platform: 'openai', status: 'active' }, { id: 2, name: 'Disabled', platform: 'openai', status: 'inactive' }, { id: 3, name: 'Claude', platform: 'anthropic', status: 'active' }] as any,

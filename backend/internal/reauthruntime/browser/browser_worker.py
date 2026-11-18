@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import queue
 import shutil
 import subprocess
@@ -20,6 +21,13 @@ from urllib.request import urlopen
 
 PLAYWRIGHT_VERSION = "1.62.1"
 PLAYWRIGHT_SHA512 = "wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="
+# This keyless upstream release passed the OVH password/TOTP/token/model trial.
+# Its signed upstream manifest was verified before pinning this archive digest.
+CLOAK_VERSION = "146.0.7680.177.5"
+CLOAK_SHA256 = "4a12bcde95fa1bb1beef2b41ab5e5c27c36be78e3be3d0dac8c64d705216670e"
+CLOAK_ARCHIVE_SIZE = 216890134
+CLOAK_URL = ("https://github.com/CloakHQ/CloakBrowser/releases/download/"
+             f"chromium-v{CLOAK_VERSION}/cloakbrowser-linux-x64.tar.gz")
 FAILURES = frozenset({"browser_unavailable", "browser_start_failed", "browser_dependency_failed",
                      "security_check", "additional_verification", "password_rejected", "totp_rejected",
                      "identity_mismatch", "proxy_unavailable", "timeout", "transport_error",
@@ -33,6 +41,87 @@ class BrowserFailure(Exception):
     def __init__(self, code):
         self.code = code if code in FAILURES else "worker_failed"
         super().__init__(self.code)
+
+
+def unpack_cloak(archive, destination):
+    """Authenticate the complete archive before creating executable files."""
+    with archive.open("rb") as source:
+        if hashlib.file_digest(source, "sha256").hexdigest() != CLOAK_SHA256:
+            raise BrowserFailure("browser_dependency_failed")
+    total = 0
+    with tarfile.open(archive, "r:gz") as package:
+        for count, entry in enumerate(package, 1):
+            if entry.isdir() and entry.name in (".", "./"):
+                continue
+            name = PurePosixPath(entry.name)
+            if (count > 10000 or not name.parts or name.is_absolute()
+                    or ".." in name.parts or "\\" in entry.name or ":" in entry.name):
+                raise BrowserFailure("browser_dependency_failed")
+            target = destination.joinpath(*name.parts)
+            if entry.isdir():
+                target.mkdir(parents=True, exist_ok=True, mode=0o700)
+            elif entry.isfile():
+                total += entry.size
+                if entry.size < 0 or total > 1024 * 1024 * 1024:
+                    raise BrowserFailure("browser_dependency_failed")
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                with target.open("xb") as output, package.extractfile(entry) as source:
+                    shutil.copyfileobj(source, output)
+                target.chmod(0o700 if entry.mode & 0o111 else 0o600)
+            else:
+                # Browser distributions must not install symlinks, devices or
+                # hard links outside the private, versioned cache.
+                raise BrowserFailure("browser_dependency_failed")
+
+
+def ensure_cloak(root):
+    """Install once under the shared runtime root; never fall back to Chrome."""
+    if sys.platform != "linux" or platform.machine().lower() not in ("x86_64", "amd64"):
+        raise BrowserFailure("browser_unavailable")
+    import fcntl
+
+    root = Path(root)
+    destination = root / ("cloak-" + CLOAK_VERSION + "-linux-amd64")
+    marker = destination / ".integrity"
+    executable = destination / "chrome"
+    try:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Concurrent account jobs share one download, not three 217 MB copies.
+        with (root / (".cloak-" + CLOAK_VERSION + ".lock")).open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if destination.exists():
+                if (not destination.is_symlink() and marker.is_file()
+                        and not marker.is_symlink() and marker.read_text() == CLOAK_SHA256
+                        and executable.is_file() and not executable.is_symlink()
+                        and os.access(executable, os.X_OK)):
+                    return executable
+                raise BrowserFailure("browser_dependency_failed")
+            with tempfile.TemporaryDirectory(prefix=".cloak-download-", dir=root) as temp:
+                archive = Path(temp) / "browser.tar.gz"
+                digest = hashlib.sha256()
+                received = 0
+                deadline = time.monotonic() + 180
+                with urlopen(CLOAK_URL, timeout=60) as response, archive.open("xb") as output:
+                    while chunk := response.read(1024 * 1024):
+                        received += len(chunk)
+                        if received > CLOAK_ARCHIVE_SIZE or time.monotonic() > deadline:
+                            raise BrowserFailure("browser_dependency_failed")
+                        digest.update(chunk)
+                        output.write(chunk)
+                if received != CLOAK_ARCHIVE_SIZE or digest.hexdigest() != CLOAK_SHA256:
+                    raise BrowserFailure("browser_dependency_failed")
+                package = Path(temp) / "package"
+                package.mkdir(mode=0o700)
+                unpack_cloak(archive, package)
+                if not (package / "chrome").is_file() or not os.access(package / "chrome", os.X_OK):
+                    raise BrowserFailure("browser_dependency_failed")
+                (package / ".integrity").write_text(CLOAK_SHA256)
+                package.rename(destination)
+            return executable
+    except BrowserFailure:
+        raise
+    except Exception:
+        raise BrowserFailure("browser_dependency_failed") from None
 
 
 def unpack_playwright(data, destination):
@@ -103,10 +192,12 @@ def run_browser(api, claim, worker, root=None):
     if task_id <= 0 or not claim.get("login_email") or not claim.get("password"):
         raise BrowserFailure("worker_failed")
     root = Path(root or __file__).resolve().parent
-    executable = os.environ.get("OPENAI_CODEX_BROWSER_EXECUTABLE", "/opt/google/chrome/chrome")
-    if not Path(executable).is_file():
+    executable = os.environ.get("OPENAI_CODEX_BROWSER_EXECUTABLE", "").strip()
+    if executable and not Path(executable).is_file():
         raise BrowserFailure("browser_unavailable")
     worker._best_effort_progress(api, task_id, "browser_starting")
+    if not executable:
+        executable = str(ensure_cloak(root.parent))
     playwright = ensure_playwright(root)
     node = os.environ.get("NODE_EXECUTABLE", "node")
     command = [node, str(root / "codex_browser.mjs"), str(playwright)]

@@ -7,6 +7,9 @@ import unittest
 import base64
 import importlib.util
 import io
+import hashlib
+import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -85,10 +88,77 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                 browser.unpack_playwright(b"tampered archive", Path(root))
             self.assertEqual(list(Path(root).iterdir()), [])
 
+    @staticmethod
+    def cloak_archive(name="chrome", kind=tarfile.REGTYPE):
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            entry = tarfile.TarInfo(name)
+            entry.type = kind
+            entry.mode = 0o755
+            if kind == tarfile.REGTYPE:
+                data = b"synthetic browser executable"
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+            else:
+                entry.linkname = "../outside"
+                archive.addfile(entry)
+        return output.getvalue()
+
+    @unittest.skipUnless(os.name == "posix", "managed Cloak download targets Linux amd64")
+    def test_managed_cloak_download_is_shared_cached_and_partial_failures_are_removed(self):
+        browser = self.browser_adapter()
+        data = self.cloak_archive()
+        for broken in (False, True):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as root:
+                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()), \
+                     patch.object(browser, "CLOAK_ARCHIVE_SIZE", len(data)), \
+                     patch.object(browser.platform, "machine", return_value="x86_64"), \
+                     patch.object(browser.sys, "platform", "linux"), \
+                     patch.object(browser, "urlopen", side_effect=lambda *a, **k: io.BytesIO(data[:-1] if broken else data)) as fetch:
+                    if broken:
+                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                            browser.ensure_cloak(Path(root))
+                        self.assertEqual([p for p in Path(root).iterdir() if p.is_dir()], [])
+                    else:
+                        with ThreadPoolExecutor(max_workers=2) as pool:
+                            results = list(pool.map(browser.ensure_cloak, [Path(root), Path(root)]))
+                        self.assertEqual(results[0], results[1])
+                        self.assertEqual(results[0].read_bytes(), b"synthetic browser executable")
+                        self.assertTrue(os.access(results[0], os.X_OK))
+                        fetch.assert_called_once()
+                        (results[0].parent / ".integrity").write_text("damaged")
+                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                            browser.ensure_cloak(Path(root))
+                        fetch.assert_called_once()
+
+    def test_managed_cloak_rejects_tampering_traversal_and_archive_links(self):
+        browser = self.browser_adapter()
+        for name, kind in (("../outside", tarfile.REGTYPE), ("/outside", tarfile.REGTYPE),
+                           ("chrome", tarfile.SYMTYPE), ("chrome", tarfile.LNKTYPE)):
+            with self.subTest(name=name, kind=kind), tempfile.TemporaryDirectory() as root:
+                data = self.cloak_archive(name, kind)
+                archive = Path(root) / "browser.tar.gz"
+                archive.write_bytes(data)
+                destination = Path(root) / "package"
+                destination.mkdir()
+                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()):
+                    with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                        browser.unpack_cloak(archive, destination)
+                self.assertEqual(list(destination.iterdir()), [])
+                self.assertFalse((Path(root) / "outside").exists())
+        with tempfile.TemporaryDirectory() as root:
+            archive = Path(root) / "browser.tar.gz"
+            archive.write_bytes(self.cloak_archive())
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                browser.unpack_cloak(archive, Path(root) / "package")
+            self.assertFalse((Path(root) / "package").exists())
+
     def test_managed_browser_submission_and_cleanup(self):
         browser = self.browser_adapter()
         credentials = {key: "synthetic-" + key for key in ("access_token", "refresh_token", "id_token", "client_id")}
-        for accepted, error in ((True, None), (False, None), (False, "security_check"), (False, "not-a-safe-code")):
+        for accepted, error, override in ((True, None, True), (True, None, False),
+                                         (False, None, True), (False, "security_check", True),
+                                         (False, "not-a-safe-code", True)):
             with self.subTest(accepted=accepted, error=error), tempfile.TemporaryDirectory() as root:
                 executable = Path(root) / "chrome"
                 executable.touch()
@@ -104,7 +174,8 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                 claim = {"task_id": 12, "account_id": 42, "login_email": "test@example.com",
                          "password": "synthetic-password", "totp_secret": "synthetic-totp",
                          "proxy_url": "http://user:synthetic-proxy-password@127.0.0.1:9999", "expected_workspace": "workspace"}
-                with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable), "DATABASE_PASSWORD": "private-db"}), \
+                with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable) if override else "", "DATABASE_PASSWORD": "private-db"}), \
+                     patch.object(browser, "ensure_cloak", return_value=executable) as prepare_browser, \
                      patch.object(browser, "ensure_playwright", return_value=Path(root) / "index.mjs"), \
                      patch.object(browser.shutil, "which", return_value="/usr/bin/test-display-tool"), \
                      patch.object(browser.subprocess, "Popen", return_value=child) as popen:
@@ -114,6 +185,7 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                         expected = error if error in browser.FAILURES else "worker_failed" if error else "verification_failed"
                         with self.assertRaisesRegex(browser.BrowserFailure, expected):
                             browser.run_browser(api, claim, worker)
+                self.assertEqual(prepare_browser.call_count, 0 if override else 1)
                 kwargs = popen.call_args.kwargs
                 self.assertFalse(Path(kwargs["cwd"]).exists(), "temporary browser profile must be removed")
                 for secret in ("synthetic-password", "synthetic-totp", "synthetic-proxy-password", "private-db"):

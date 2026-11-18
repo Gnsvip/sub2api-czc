@@ -30,12 +30,16 @@ jobs:
   browser-authorization:
     if: ${{ !inputs.frontend_only }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/codex-cloak
+          key: codex-cloak-linux-amd64-146.0.7680.177.5-4a12bcde95fa
       - name: Prepare pinned browser library (synthetic credentials only)
         run: |
           python3 - <<'PY'
@@ -47,10 +51,22 @@ jobs:
           spec.loader.exec_module(module)
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write('CODEX_TEST_PLAYWRIGHT=' + str(module.ensure_playwright(Path(os.environ['RUNNER_TEMP']))) + '\n')
+              output.write('CODEX_TEST_CHROME=' + str(module.ensure_cloak(Path(os.environ['RUNNER_TEMP']) / 'codex-cloak')) + '\n')
           PY
-          echo "CODEX_TEST_CHROME=$(readlink -f "$(command -v google-chrome)")" >> "$GITHUB_ENV"
-      - name: Run sandboxed browser OAuth checks
+      - name: Permit the isolated Cloak executable to create sandbox namespaces
+        run: |
+          if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile codex-cloak-ci "%s" flags=(unconfined) {\n  userns,\n}\n' "$CODEX_TEST_CHROME" > "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+            sudo apparmor_parser -r "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+          fi
+      - name: Run sandboxed Cloak OAuth checks
         run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24 -nolisten tcp' env CODEX_TEST_HEADED=1 node --test tools/test_codex_browser.mjs > "$RUNNER_TEMP/codex-browser-tests.log" 2>&1
+      - name: Remove the temporary browser profile
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/codex-cloak-ci.apparmor" ]; then
+            sudo apparmor_parser -R "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:

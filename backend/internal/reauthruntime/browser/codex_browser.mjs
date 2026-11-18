@@ -1,5 +1,5 @@
-// Normal OAuth in an isolated browser. No stealth, challenge solver or proxy rotation.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+// Official OAuth in isolated CloakBrowser sessions; challenges still stop login.
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 export const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -150,10 +150,13 @@ export async function authorize(chromium, input, options = {}) {
     try {
       browser = await chromium.launch({ executablePath: options.executablePath,
         headless: options.headless ?? false, chromiumSandbox: true, timeout: 30000,
-        ...(!proxy ? { args: ['--no-proxy-server'] } : {}),
+        // Match the tested Cloak 0.6 defaults, while retaining Chromium sandbox.
+        ignoreDefaultArgs: ['--enable-automation', '--enable-unsafe-swiftshader'],
+        args: [`--fingerprint=${randomInt(10000, 100000)}`, '--fingerprint-platform=windows',
+          ...(!proxy ? ['--no-proxy-server'] : [])],
         ...(proxy ? { proxy } : {}) });
     } catch { fail('browser_start_failed'); }
-    context = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block',
+    context = await browser.newContext({ locale: 'en-US', viewport: null, serviceWorkers: 'block',
       acceptDownloads: false, ...(proxy ? { proxy } : {}) });
     const page = await context.newPage();
     page.setDefaultTimeout(5000);

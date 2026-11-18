@@ -3,7 +3,7 @@
 ## 使用
 
 - 添加账号时选择 OpenAI OAuth，再选择「自动授权」。名称可留空，以邮箱命名。
-- 下一步按 `邮箱----密码----TOTP 密钥` 填写，每行一个，最多 50 个。未开启二次验证时保留最后的分隔符，密钥留空。TOTP 项填写 Base32 密钥，不是六位验证码。
+- 在同一页面按 `邮箱----密码----TOTP 密钥` 填写，每行一个，最多 50 个。未开启二次验证时保留最后的分隔符，密钥留空。TOTP 项填写 Base32 密钥，不是六位验证码。
 - 所有新账号使用当前选择的分组、代理、并发、优先级等设置。授权和连通验证通过前不可调度。关闭页面不会停止已提交的后台任务。
 - 已有同邮箱账号不自动覆盖，进入编辑账号中的「Codex 自动授权」配置、保存或重新授权。授权成功后刷新并关闭编辑窗口；其他修改应先保存。
 - 「记住添加设置」默认开启，在当前浏览器按管理员、平台和账号类型保存分组、代理、并发、优先级。下次自动带入仍然有效的选项；可取消或清除。密码、TOTP、Token 和账号名称不写入该存储。
@@ -22,7 +22,7 @@
 
 ## 维护与验证
 
-参考 [ranxi2001/sub2api](https://github.com/ranxi2001/sub2api/tree/701612f6e9f7b697eb36397b9fb49bf7324e56a1) 的普通 Codex 协议登录、身份验证与有限重试。执行器为 Python 调用 Node.js 协议程序，不启动浏览器。
+保留 [ranxi2001/sub2api](https://github.com/ranxi2001/sub2api/tree/701612f6e9f7b697eb36397b9fb49bf7324e56a1) 运行包与有限重试调度；普通 Codex 的密码/TOTP 任务由应用内嵌的 Python/Node.js 适配层启动隔离 CloakBrowser，完成官方 OAuth 页面流程。环境与缓存说明见 [浏览器部署说明](codex-browser-authorization.md)。
 
 迁移 `282_codex_automatic_authorization.sql` 增加独立登录配置和共享任务队列的 profile/状态快照；既有 Excel 任务默认仍为 Excel。自动准备环境使用上游 `v2.22.0` 运行包；Linux amd64 包校验值：`9090add61ebdea7b8d15f2086293be1b3ebb9ef26bf3b3dd2d8af41df85593f7`。
 

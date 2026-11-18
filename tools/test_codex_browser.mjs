@@ -55,8 +55,13 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
       const stages = [];
       const injected = { launch: async options => {
         assert.equal(options.chromiumSandbox, true);
+        assert.ok(options.args.some(arg => /^--fingerprint=\d+$/.test(arg)));
+        assert.ok(options.args.includes('--fingerprint-platform=windows'));
+        assert.ok(!options.args.includes('--no-sandbox'));
+        assert.deepEqual(options.ignoreDefaultArgs, ['--enable-automation', '--enable-unsafe-swiftshader']);
         actualBrowser = await chromium.launch({ ...options, executablePath: process.env.CODEX_TEST_CHROME });
         return { close: () => actualBrowser.close(), newContext: async contextOptions => {
+          assert.equal(contextOptions.viewport, null);
           actualContext = await actualBrowser.newContext(contextOptions);
           await actualContext.route('https://auth.openai.com/**', async route => {
             const url = new URL(route.request().url());

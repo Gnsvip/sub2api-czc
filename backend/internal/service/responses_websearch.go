@@ -1203,6 +1203,7 @@ func responsesWebSearchAccountStatsCost[T any](ctx context.Context, channels *Ch
 		var tokens UsageTokens
 		var upstreamModel, model, tier, effort string
 		var imageCount int
+		upstreamPriceFactor := 1.0
 		roundCost := 0.0
 		if roundCosts[index] != nil {
 			roundCost = roundCosts[index].TotalCost
@@ -1219,6 +1220,7 @@ func responsesWebSearchAccountStatsCost[T any](ctx context.Context, channels *Ch
 			tokens = UsageTokens{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, CacheCreationTokens: result.Usage.CacheCreationInputTokens, CacheReadTokens: result.Usage.CacheReadInputTokens, CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens, ImageOutputTokens: result.Usage.ImageOutputTokens}
 			upstreamModel, model, tier, effort = result.UpstreamModel, result.Model, optionalStringValue(result.ServiceTier), optionalStringValue(result.ReasoningEffort)
 			imageCount = result.ImageCount
+			upstreamPriceFactor = result.upstreamPriceFactor()
 		}
 		if upstreamModel == "" {
 			upstreamModel = model
@@ -1227,7 +1229,7 @@ func responsesWebSearchAccountStatsCost[T any](ctx context.Context, channels *Ch
 		if count < 1 {
 			count = 1
 		}
-		cost := resolveAccountStatsCost(ctx, channels, billing, accountID, groupID, upstreamModel, tokens, count, roundCost, tier, pricingAt, longContext, effort)
+		cost := resolveAccountStatsCost(ctx, channels, billing, accountID, groupID, upstreamModel, tokens, count, roundCost, tier, pricingAt, longContext, upstreamPriceFactor, effort)
 		if cost == nil {
 			return nil
 		}

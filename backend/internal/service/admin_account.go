@@ -660,9 +660,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
 		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
 		if account.IsOpenAIOAuth() {
-			// Stored mapping remains unused for OAuth routing; keep it intact
-			// across ordinary edits so administrators can still inspect it.
+			// Ordinary OAuth edits preserve legacy mappings. Only an explicit
+			// passthrough filter may update its selection whitelist.
+			effectiveAccount := *account
+			if input.Extra != nil {
+				effectiveAccount.Extra = normalizedExtra
+			}
 			for _, key := range []string{"model_mapping", "compact_model_mapping"} {
+				if key == "model_mapping" && effectiveAccount.IsOpenAIPassthroughModelFilterEnabled() {
+					continue
+				}
 				if value, ok := originalCredentials[key]; ok {
 					account.Credentials[key] = value
 				} else {

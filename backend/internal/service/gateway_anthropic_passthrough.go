@@ -505,6 +505,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
 	inPartialEvent := false
+	clientModel := compositeClientModel(ctx, "")
 	pendingEventLines := make([]string, 0, 4)
 	writeBlock := func(block string) bool {
 		if clientDisconnected {
@@ -535,7 +536,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 			parseSSEUsagePassthrough(event.data, usage)
 		}
-		_ = writeBlock(event.rawBlock())
+		block := event.rawBlock()
+		if clientModel != "" && gjson.Get(event.data, "type").String() == "message_start" && gjson.Get(event.data, "message.model").Exists() {
+			if rewritten, err := sjson.Set(event.data, "message.model", clientModel); err == nil {
+				block = event.blockWithData(rewritten)
+			}
+		}
+		_ = writeBlock(block)
 	}
 
 	for {
@@ -984,6 +991,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	body = restoreCompositeClientModel(ctx, body)
 	body = reverseToolNamesIfPresent(c, body)
 	c.Data(resp.StatusCode, contentType, body)
 	return usage, nil

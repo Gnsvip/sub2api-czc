@@ -2,6 +2,12 @@ package domain
 
 import "testing"
 
+func TestDefaultAntigravityModelMapping_Gemini4Carbon(t *testing.T) {
+	if got := DefaultAntigravityModelMapping["gemini-4-carbon"]; got != "gemini-4-carbon" {
+		t.Fatalf("unexpected Carbon mapping: %q", got)
+	}
+}
+
 func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {
 	t.Parallel()
 

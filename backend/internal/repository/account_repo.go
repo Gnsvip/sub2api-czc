@@ -1524,9 +1524,37 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 	caseSQL += " END, updated_at = NOW() WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
 	args = append(args, pq.Array(ids))
 
-	_, err := r.sql.ExecContext(ctx, caseSQL, args...)
+	// 同一事务内先按 id 升序锁定目标行再更新，与计费合并事务锁多个账号行的顺序一致；
+	// 锁强度与更新非键列相同，不阻塞引用 accounts 的外键检查。
+	exec := r.sql
+	var tx *sql.Tx
+	if db, ok := r.sql.(*sql.DB); ok {
+		var err error
+		if tx, err = db.BeginTx(ctx, nil); err != nil {
+			return err
+		}
+		defer func() {
+			if tx != nil {
+				_ = tx.Rollback()
+			}
+		}()
+		exec = tx
+	}
+	rows, err := exec.QueryContext(ctx, "SELECT id FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL ORDER BY id FOR NO KEY UPDATE", pq.Array(ids))
 	if err != nil {
 		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, caseSQL, args...); err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		tx = nil
 	}
 	lastUsedPayload := make(map[string]int64, len(updates))
 	for id, ts := range updates {
@@ -2757,6 +2785,49 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	return nil
 }
 
+// ClearModelRateLimit 删除 model_rate_limits 中指定的单个 scope。
+// 与 ClearModelRateLimits 的全量清除不同，这里只解封一个模型窗口，
+// 不会把其他模型或并发新写入的限流一起抹掉。
+func (r *accountRepository) ClearModelRateLimit(ctx context.Context, id int64, scope string) error {
+	if strings.TrimSpace(scope) == "" {
+		return nil
+	}
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.ClearModelRateLimit(ctx, id, scope)
+	}
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(
+		ctx,
+		`UPDATE accounts SET
+			extra = jsonb_set(
+				COALESCE(extra, '{}'::jsonb),
+				'{model_rate_limits}'::text[],
+				COALESCE(extra->'model_rate_limits', '{}'::jsonb) - $1::text,
+				true
+			),
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL`,
+		strings.TrimSpace(scope),
+		id,
+	)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit scope failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	builder := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
@@ -2781,8 +2852,11 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 }
 
 func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
+	// Active five-hour quota reads must advance both bounds. Keeping the old
+	// start would charge the previous window against the new window's cost limit.
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
+		SetSessionWindowStart(end.Add(-5 * time.Hour)).
 		SetSessionWindowEnd(end).
 		Save(ctx)
 	if err != nil {
@@ -3234,12 +3308,25 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		// Mixed bulk edits keep OAuth mapping records intact for inspection.
-		credentialPatch := credentialPlaceholder + "::jsonb"
-		credentialPatch = "CASE WHEN platform = 'openai' AND type = 'oauth' THEN (" + credentialPatch + " - 'model_mapping' - 'compact_model_mapping') ELSE " + credentialPatch + " END"
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || ("+credentialPatch+")")
 		args = append(args, payload)
 		idx++
+		// Evaluate the effective extra for each row: ordinary OAuth keeps its
+		// mappings, while an opted-in passthrough account can edit source keys.
+		effectiveExtra := "COALESCE(extra, '{}'::jsonb)"
+		if len(updates.Extra) > 0 {
+			extraPayload, err := json.Marshal(updates.Extra)
+			if err != nil {
+				return 0, err
+			}
+			effectiveExtra = "(" + effectiveExtra + " || $" + itoa(idx) + "::jsonb)"
+			args = append(args, extraPayload)
+			idx++
+		}
+		passthrough := "(CASE WHEN jsonb_typeof(" + effectiveExtra + " -> 'openai_passthrough') = 'boolean' THEN " + effectiveExtra + " -> 'openai_passthrough' ELSE " + effectiveExtra + " -> 'openai_oauth_passthrough' END) = 'true'::jsonb"
+		filterEnabled := "(" + passthrough + " AND " + effectiveExtra + " -> 'openai_passthrough_model_filter' = 'true'::jsonb)"
+		credentialPatch := credentialPlaceholder + "::jsonb"
+		credentialPatch = "CASE WHEN platform = 'openai' AND type = 'oauth' THEN CASE WHEN " + filterEnabled + " THEN (" + credentialPatch + " - 'compact_model_mapping') ELSE (" + credentialPatch + " - 'model_mapping' - 'compact_model_mapping') END ELSE " + credentialPatch + " END"
+		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || ("+credentialPatch+")")
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)

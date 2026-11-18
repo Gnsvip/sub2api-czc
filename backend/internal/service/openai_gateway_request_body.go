@@ -1604,9 +1604,9 @@ func normalizeOpenAIOAuthResponsesCompatibilityBodyWithMetadata(body []byte, pre
 	}
 	normalized := body
 	changed := false
-	prompt := gjson.GetBytes(normalized, "prompt")
+	prompt := parseRawJSONView(normalized).Get("prompt")
 	if prompt.Exists() {
-		input := gjson.GetBytes(normalized, "input")
+		input := parseRawJSONView(normalized).Get("input")
 		if prompt.Type != gjson.Null && (!input.Exists() || input.Type == gjson.Null) {
 			next, err := sjson.SetRawBytes(normalized, "input", []byte(prompt.Raw))
 			if err != nil {
@@ -1621,7 +1621,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBodyWithMetadata(body []byte, pre
 		normalized = next
 		changed = true
 	}
-	if gjson.GetBytes(normalized, "commands").Exists() {
+	if parseRawJSONView(normalized).Get("commands").Exists() {
 		next, err := sjson.DeleteBytes(normalized, "commands")
 		if err != nil {
 			return body, false, fmt.Errorf("normalize oauth responses delete commands: %w", err)
@@ -1630,37 +1630,55 @@ func normalizeOpenAIOAuthResponsesCompatibilityBodyWithMetadata(body []byte, pre
 		changed = true
 	}
 	// Only remove the input-item field, never same-named user content.
-	input := gjson.GetBytes(normalized, "input")
+	input := parseRawJSONView(normalized).Get("input")
 	if !input.IsArray() {
 		return normalized, changed, nil
 	}
-	for i, item := range input.Array() {
-		if !item.IsObject() || !item.Get("internal_chat_message_metadata_passthrough").Exists() {
-			continue
-		}
-		path := fmt.Sprintf("input.%d.internal_chat_message_metadata_passthrough", i)
-		if preserveMetadata {
-			if keepContentMetadata {
-				continue
-			}
-			meta := item.Get("internal_chat_message_metadata_passthrough")
+	const field = "internal_chat_message_metadata_passthrough"
+	hasMetadata := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		hasMetadata = item.IsObject() && item.Get(field).Exists()
+		return !hasMetadata
+	})
+	if !hasMetadata || (preserveMetadata && keepContentMetadata) {
+		return normalized, changed, nil
+	}
+
+	// Clean each item locally, then rebuild the request once. Deleting by
+	// input.N on the full body copies the entire history for every message.
+	var items []string
+	var normalizeErr error
+	inputChanged := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		raw := item.Raw
+		path := field
+		meta := item.Get(field)
+		remove := item.IsObject() && meta.Exists()
+		if remove && preserveMetadata {
 			fields := meta.Map()
 			_, hasContentMetadata := fields["content_item_metadata"]
-			if !meta.IsObject() || (!hasContentMetadata && len(fields) != 0) {
-				continue
-			}
-			if len(fields) > 1 {
+			remove = meta.IsObject() && (hasContentMetadata || len(fields) == 0)
+			if remove && len(fields) > 1 {
 				path += ".content_item_metadata"
 			}
 		}
-		next, err := sjson.DeleteBytes(normalized, path)
-		if err != nil {
-			return body, false, fmt.Errorf("normalize oauth input metadata: %w", err)
+		if remove {
+			raw, normalizeErr = sjson.Delete(raw, path)
+			if normalizeErr != nil {
+				return false
+			}
+			inputChanged = true
 		}
-		normalized = next
-		changed = true
+		items = append(items, raw)
+		return true
+	})
+	if normalizeErr != nil {
+		return body, false, fmt.Errorf("normalize oauth input metadata: %w", normalizeErr)
 	}
-	return normalized, changed, nil
+	if !inputChanged {
+		return normalized, changed, nil
+	}
+	return replaceOpenAIRawInput(normalized, input, items), true, nil
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
@@ -1788,6 +1806,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		normalized, changed, err = normalizeOpenAIResponsesLegacyIngressWithConfig(opts.Config, body)
 		if err != nil {
 			return body, false, err
+		}
+		if next, idsChanged, err := normalizeCodexAdditionalToolsIDsBody(normalized); err != nil {
+			return body, false, err
+		} else if idsChanged {
+			normalized = next
+			changed = true
 		}
 	}
 	if next, normalizedReasoningContent, err := normalizeOpenAIResponsesReasoningContentReplayForAccount(normalized, account); err != nil {
@@ -2371,12 +2395,42 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 	return nil
 }
 
-func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
+// openAIModelSupportsUltrafast reports whether OpenAI offers the Ultrafast
+// service tier for the model: GPT-6 Astra and GPT-6.1 Sol only. It is the single
+// source for both the group-forced tier gate and the 6x Ultrafast billing
+// multiplier, so a model can never be forced onto Ultrafast yet billed below it.
+func openAIModelSupportsUltrafast(model string) bool {
+	normalized := normalizeKnownOpenAICodexModel(model)
+	return isOpenAIGPT6AstraModel(normalized) || normalized == "gpt-6.1-sol"
+}
+
+// openAIGroupForcedServiceTier returns the service_tier that the trusted request
+// Group forces onto an OpenAI-account request for the given upstream model, or
+// "" when the group forces nothing and the client's value is kept.
+//
+// The two group flags are independent and resolve as Ultrafast > Fast > client:
+//   - ForceOpenAIUltrafast applies only to models that support Ultrafast
+//     (openAIModelSupportsUltrafast) and yields "ultrafast".
+//   - Otherwise ForceOpenAIFast yields "priority", for every model.
+//
+// So a group with only ForceOpenAIUltrafast leaves unsupported models to the
+// client, and a group with both flags falls back to Fast for them.
+func openAIGroupForcedServiceTier(ctx context.Context, account *Account, model string) string {
 	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
-		return false
+		return ""
 	}
 	group, _ := ctx.Value(ctxkey.Group).(*Group)
-	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
+	if !IsGroupContextValid(group) || !groupSupportsOpenAIFast(group.Platform) {
+		return ""
+	}
+	switch {
+	case group.ForceOpenAIUltrafast && openAIModelSupportsUltrafast(model):
+		return OpenAIFastTierUltrafast
+	case group.ForceOpenAIFast:
+		return OpenAIFastTierPriority
+	default:
+		return ""
+	}
 }
 
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request
@@ -2385,7 +2439,9 @@ func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
 // normalizes the service_tier value (e.g. client alias "fast" → "priority").
 // action=force_priority rewrites any matched known tier to "priority". Before
 // the global policy is evaluated, a trusted request Group with
-// ForceOpenAIFast enabled unconditionally sets service_tier to "priority".
+// ForceOpenAIFast enabled unconditionally sets service_tier to "priority";
+// ForceOpenAIUltrafast sets it to "ultrafast" for models that support it and
+// takes precedence there (see openAIGroupForcedServiceTier).
 // The global policy remains authoritative and may still pass, filter, or block
 // that final value.
 //
@@ -2398,10 +2454,10 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, 
 	if len(body) == 0 {
 		return body, nil
 	}
-	if openAIGroupForcesFast(ctx, account) {
-		updated, err := sjson.SetBytes(body, "service_tier", OpenAIFastTierPriority)
+	if forcedTier := openAIGroupForcedServiceTier(ctx, account, model); forcedTier != "" {
+		updated, err := sjson.SetBytes(body, "service_tier", forcedTier)
 		if err != nil {
-			return body, fmt.Errorf("force group service_tier priority on body: %w", err)
+			return body, fmt.Errorf("force group service_tier %s on body: %w", forcedTier, err)
 		}
 		body = updated
 	}
@@ -2485,7 +2541,9 @@ func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlocked
 //   - filter: returns a copy with top-level service_tier removed
 //   - force_priority: keeps service_tier and rewrites it to "priority"
 //   - block: returns (frame, *OpenAIFastBlockedError)
-//   - Group ForceOpenAIFast: sets priority first, then applies the global rule
+//   - Group ForceOpenAIFast / ForceOpenAIUltrafast: sets priority / ultrafast
+//     (ultrafast only for models that support it) first, then applies the
+//     global rule
 //
 // Only frames whose "type" field strictly equals "response.create" are
 // inspected/mutated. Any other frame type — including the empty string —
@@ -2524,10 +2582,10 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 	if frameType != "response.create" {
 		return frame, nil, nil
 	}
-	if openAIGroupForcesFast(ctx, account) {
-		updated, err := sjson.SetBytes(frame, "service_tier", OpenAIFastTierPriority)
+	if forcedTier := openAIGroupForcedServiceTier(ctx, account, model); forcedTier != "" {
+		updated, err := sjson.SetBytes(frame, "service_tier", forcedTier)
 		if err != nil {
-			return frame, nil, fmt.Errorf("force group service_tier priority in ws frame: %w", err)
+			return frame, nil, fmt.Errorf("force group service_tier %s in ws frame: %w", forcedTier, err)
 		}
 		frame = updated
 	}

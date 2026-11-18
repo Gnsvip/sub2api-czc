@@ -146,6 +146,41 @@ func TestAccountRepoSuite(t *testing.T) {
 	suite.Run(t, new(AccountRepoSuite))
 }
 
+func TestAccountPassthroughFilterBulkPreservesNativeOAuth(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	for _, enabled := range []bool{false, true} {
+		account := mustCreateAccount(t, tx.Client(), &service.Account{
+			Name: "passthrough-filter", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Credentials: map[string]any{"access_token": "synthetic", "model_mapping": map[string]any{"original": "original"}, "compact_model_mapping": map[string]any{"compact": "original"}},
+		})
+		updates := service.AccountBulkUpdate{
+			Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "ignored-target"}, "compact_model_mapping": map[string]any{"changed": "no"}},
+			Extra:       map[string]any{"openai_passthrough": true, "openai_passthrough_model_filter": enabled},
+		}
+		_, err := repo.BulkUpdate(ctx, []int64{account.ID}, updates)
+		require.NoError(t, err)
+		got, err := repo.GetByID(ctx, account.ID)
+		require.NoError(t, err)
+		require.Equal(t, "synthetic", got.Credentials["access_token"])
+		require.Equal(t, map[string]any{"compact": "original"}, got.Credentials["compact_model_mapping"])
+		if enabled {
+			require.Equal(t, updates.Credentials["model_mapping"], got.Credentials["model_mapping"])
+			// Editing only the whitelist must also honor the persisted opt-in.
+			updates.Extra = nil
+			updates.Credentials["model_mapping"] = map[string]any{"gpt-6-luna": "gpt-6-luna"}
+			_, err = repo.BulkUpdate(ctx, []int64{account.ID}, updates)
+			require.NoError(t, err)
+			got, err = repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			require.Equal(t, updates.Credentials["model_mapping"], got.Credentials["model_mapping"])
+		} else {
+			require.Equal(t, map[string]any{"original": "original"}, got.Credentials["model_mapping"])
+		}
+	}
+}
+
 // --- Create / GetByID / Update / Delete ---
 
 func (s *AccountRepoSuite) TestCreate() {

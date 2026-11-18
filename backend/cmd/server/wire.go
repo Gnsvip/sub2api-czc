@@ -104,6 +104,8 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	pricing *service.PricingService,
 	billingCache *service.BillingCacheService,
+	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	usageBillingLanes *service.UsageBillingLaneCombiner,
 	balanceNotify *service.BalanceNotifyService,
 	digestSessions *service.DigestSessionStore,
 	subscriptionService *service.SubscriptionService,
@@ -309,6 +311,10 @@ func provideCleanup(
 				if geminiCachedContent != nil {
 					geminiCachedContent.Stop()
 				}
+				return nil
+			}},
+			{"UsageBillingLaneCombiner", func() error {
+				usageBillingLanes.Stop()
 				return nil
 			}},
 			{"GeminiOAuthService", func() error {

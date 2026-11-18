@@ -105,13 +105,13 @@ func (s *AccountUsageService) addOpenAIWindowStats(ctx context.Context, pending 
 		value := stats[item.accountID]
 		if value.Primary != nil {
 			if item.usage.FiveHour == nil {
-				item.usage.FiveHour = &UsageProgress{Utilization: 0}
+				item.usage.FiveHour = &UsageProgress{UtilizationUnknown: true}
 			}
 			item.usage.FiveHour.WindowStats = windowStatsFromAccountStats(value.Primary)
 		}
 		if value.Secondary != nil {
 			if item.usage.SevenDay == nil {
-				item.usage.SevenDay = &UsageProgress{Utilization: 0}
+				item.usage.SevenDay = &UsageProgress{UtilizationUnknown: true}
 			}
 			item.usage.SevenDay.WindowStats = windowStatsFromAccountStats(value.Secondary)
 		}

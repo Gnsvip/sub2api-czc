@@ -83,6 +83,21 @@
               ]"
             />
           </button>
+          <label v-if="openaiPassthroughEnabled" class="mt-3 flex items-start gap-2">
+            <input
+              v-model="openaiPassthroughModelFilterEnabled"
+              type="checkbox"
+              data-testid="bulk-openai-passthrough-model-filter"
+              :disabled="!enableOpenAIPassthrough"
+              class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm">
+              {{ t('admin.accounts.openai.passthroughModelFilter') }}
+              <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.passthroughModelFilterDesc') }}
+              </span>
+            </span>
+          </label>
         </div>
       </div>
 
@@ -268,7 +283,7 @@
 
       <!-- Model restriction -->
       <p v-if="hasManagedOAuthTargets" data-testid="astra-policy-bulk" class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.astraPolicyBulk') }}</p>
-      <div v-if="!allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="!allOpenAIOAuthOnly || applyOAuthPassthroughFilter" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-model-restriction-label"
@@ -302,8 +317,8 @@
           </div>
 
           <template v-else>
-            <!-- Mode Toggle -->
-            <div class="mb-4 flex gap-2">
+            <!-- Native OAuth only edits source-key whitelists. -->
+            <div v-if="!allOpenAIOAuthOnly" class="mb-4 flex gap-2">
               <button
                 type="button"
                 :class="[
@@ -357,7 +372,7 @@
             </div>
 
             <!-- Whitelist Mode -->
-            <div v-if="modelRestrictionMode === 'whitelist'">
+            <div v-if="allOpenAIOAuthOnly || modelRestrictionMode === 'whitelist'">
               <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
                 <p class="text-xs text-blue-700 dark:text-blue-400">
                   <svg
@@ -1787,6 +1802,7 @@ const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
+const openaiPassthroughModelFilterEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -1844,11 +1860,16 @@ const upstreamBillingAutoProbeOptions = computed(() => [
   { value: 'enabled', label: t('common.enabled') },
   { value: 'disabled', label: t('common.disabled') }
 ])
+const applyOAuthPassthroughFilter = computed(() =>
+  allOpenAIPassthroughCapable.value && enableOpenAIPassthrough.value &&
+  openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value
+)
 const isOpenAIModelRestrictionDisabled = computed(
   () =>
     allOpenAIPassthroughCapable.value &&
     enableOpenAIPassthrough.value &&
-    openaiPassthroughEnabled.value
+    openaiPassthroughEnabled.value &&
+    !openaiPassthroughModelFilterEnabled.value
 )
 
 const openAIWSModeOptions = computed(() => [
@@ -2079,6 +2100,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   if (enableOpenAIPassthrough.value) {
     const extra = ensureExtra()
     extra.openai_passthrough = openaiPassthroughEnabled.value
+    extra.openai_passthrough_model_filter = openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value
     if (!openaiPassthroughEnabled.value) {
       extra.openai_oauth_passthrough = false
     }
@@ -2119,9 +2141,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         : openAIResponsesMode.value
   }
 
-  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value && !allOpenAIOAuthOnly.value) {
+  if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value && (!allOpenAIOAuthOnly.value || applyOAuthPassthroughFilter.value)) {
     // 统一使用 model_mapping 字段
-    if (modelRestrictionMode.value === 'whitelist') {
+    if (allOpenAIOAuthOnly.value || modelRestrictionMode.value === 'whitelist') {
       // 白名单模式：将模型转换为 model_mapping 格式（key=value）
       // 空白名单表示“支持所有模型”，需显式发送空对象以覆盖已有限制。
       const mapping: Record<string, string> = {}
@@ -2477,6 +2499,7 @@ watch(
       // Reset all values
       baseUrl.value = ''
       openaiPassthroughEnabled.value = false
+      openaiPassthroughModelFilterEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAILongContextBillingEnabled.value = false
       openAIImageSizeTiers.value = [...OPENAI_IMAGE_SIZE_TIERS]

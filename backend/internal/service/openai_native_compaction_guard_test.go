@@ -224,7 +224,12 @@ func TestOrdinaryTurnStillTimesOutAfterStreamInterval(t *testing.T) {
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
 	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-6-astra","stream":true,"input":"hello"}`))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "stream data interval timeout")
-	require.Contains(t, rec.Body.String(), "stream_timeout")
+	// Ordinary turns still hit the configured idle deadline; v0.2.23 allows a
+	// pre-output timeout to share the bounded first-output failover budget.
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.Contains(t, gjson.GetBytes(failoverErr.ResponseBody, "error.message").String(), "stream idle timeout before model output")
+	require.Empty(t, rec.Body.String(), "the timeout must remain retryable before any model output")
 }

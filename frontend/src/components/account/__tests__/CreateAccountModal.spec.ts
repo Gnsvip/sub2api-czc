@@ -289,12 +289,15 @@ describe('Codex automatic authorization and remembered settings', () => {
     // Keep computed visibility live in jsdom while v-show toggles the settings.
     const wrapper = mountModal([], [], document.body)
     await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-automatic-mode"]').trigger('click')
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth').settings).toMatchObject({
+      group_ids: [1, 2, 3, 404], proxy_ids: [8, 9], authorization_mode: 'automatic',
+    })
     await wrapper.setProps({
       groups: [{ id: 1, name: 'GPT', platform: 'openai', status: 'active' }, { id: 2, name: 'Disabled', platform: 'openai', status: 'inactive' }, { id: 3, name: 'Claude', platform: 'anthropic', status: 'active' }] as any,
       proxies: [{ id: 8, name: 'Proxy', status: 'active' }, { id: 9, name: 'Disabled', status: 'inactive' }] as any,
     })
     expect(wrapper.getComponent(GroupSelectorStub).props('modelValue')).toEqual([1])
-    await wrapper.get('[data-testid="openai-automatic-mode"]').trigger('click')
     await flushPromises()
     const automatic = wrapper.getComponent(CodexAutomaticAuthorization)
     expect(automatic.props('options')).toMatchObject({ group_ids: [1], proxy_ids: [8], concurrency: 27, priority: 4 })

@@ -7583,7 +7583,8 @@ function selectOpenAICreationMode(mode: 'manual' | 'automatic') {
 }
 function saveCreationSettings() {
   writeAccountCreationDefaults(creationAuthStore.user?.id, form.platform, form.type, rememberCreationSettings.value, {
-    group_ids: form.group_ids, proxy_ids: form.proxy_ids, concurrency: form.concurrency, priority: form.priority,
+    group_ids: pendingCreationGroups ?? form.group_ids, proxy_ids: pendingCreationProxies ?? form.proxy_ids,
+    concurrency: form.concurrency, priority: form.priority,
     ...(isOpenAIOAuth.value ? { authorization_mode: openaiCreationMode.value } : {})
   })
 }

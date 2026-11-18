@@ -49,7 +49,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'password_choice', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0;
       const stages = [];
@@ -63,6 +63,8 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         return { close: () => actualBrowser.close(), newContext: async contextOptions => {
           assert.equal(contextOptions.viewport, null);
           actualContext = await actualBrowser.newContext(contextOptions);
+          await actualContext.route('https://challenges.cloudflare.com/**', route =>
+            route.fulfill({ status: 200, contentType: 'text/html', body: '<p>Synthetic loading frame</p>' }));
           await actualContext.route('https://auth.openai.com/**', async route => {
             const url = new URL(route.request().url());
             const form = (label, field, next) => `<h1>${label}</h1><form action="${next}" method="post">${field}<button type="submit">Continue</button></form>`;
@@ -71,6 +73,15 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               state = url.searchParams.get('state'); challenge = url.searchParams.get('code_challenge');
               assert.equal(url.searchParams.get('allowed_workspace_id'), input.expected_workspace);
               body = scenario === 'security_check' ? '<h1>Verify you are human</h1>' : form('Log in', '<input type="email" name="email">', '/password');
+              if (scenario === 'temporary_security_iframe' || scenario === 'resolved_http_challenge') {
+                const login = JSON.stringify(body);
+                body = '<title>Just a moment</title><p>Checking your browser</p>' +
+                  (scenario === 'temporary_security_iframe' ? '<iframe src="https://challenges.cloudflare.com/fixture"></iframe>' : '') +
+                  `<script>setTimeout(() => { document.title = 'Log in'; document.body.innerHTML = ${login}; }, 1800)</script>`;
+                await route.fulfill({ status: scenario === 'resolved_http_challenge' ? 403 : 200,
+                  contentType: 'text/html', headers: scenario === 'resolved_http_challenge' ? { 'cf-mitigated': 'challenge' } : {}, body });
+                return;
+              }
             } else if (url.pathname === '/password') {
               submitted.push(new URLSearchParams(route.request().postData()).get('email'));
               body = scenario === 'password_choice' ? '<p>Check your email</p><a href="/use-password">Use password instead</a>' : form('Password', '<input type="password" name="password">', '/mfa');
@@ -108,7 +119,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, input, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (scenario === 'success' || scenario === 'password_choice') {
+      if (['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);

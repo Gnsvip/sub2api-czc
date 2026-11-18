@@ -612,6 +612,12 @@ func TestCodexLoginRecoveryOnlyUsesAuthenticationFailures(t *testing.T) {
 		{CodexAuthorizationPending, true},
 		{"Token revoked (401): account authentication permanently revoked", true},
 		{"Unauthorized (401): account authentication failed permanently", true},
+		{`Authentication failed (401): {"error":{"code":"token_revoked"},"status":401}`, true},
+		{"Authentication failed (401): expired credentials", true},
+		{"Authentication failed (401): account_deactivated", false},
+		{"Authentication failed (401): cyber_policy", false},
+		{"Authentication failed (403): permission denied", false},
+		{"untrusted text: Authentication failed (401): token_revoked", false},
 		{"Token refresh failed (non-retryable): refresh_token_reused", true},
 		{"Token refresh failed (non-retryable): invalid_grant", true},
 		{"Token refresh failed (non-retryable): invalid_client", false},
@@ -623,6 +629,7 @@ func TestCodexLoginRecoveryOnlyUsesAuthenticationFailures(t *testing.T) {
 	} {
 		require.Equal(t, tc.expected, CodexLoginCanRecoverState(StatusError, tc.message), tc.message)
 		require.False(t, CodexLoginCanRecoverState(StatusDisabled, tc.message))
+		require.False(t, CodexLoginCanRecoverState(StatusActive, tc.message))
 	}
 }
 

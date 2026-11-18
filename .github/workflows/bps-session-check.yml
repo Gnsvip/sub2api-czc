@@ -119,6 +119,26 @@ jobs:
       - name: Frontend regressions
         working-directory: frontend
         run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/bps-frontend-tests.json"
+      - name: Install browser for automatic authorization checks
+        working-directory: frontend
+        timeout-minutes: 5
+        run: |
+          pnpm exec playwright install chromium
+          if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
+            pnpm exec playwright install-deps chromium
+          fi
+      - name: Automatic authorization desktop and mobile checks (mocked login)
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/codex-login-browser-results
+          PLAYWRIGHT_PREVIEW_BUILD: '1'
+        run: pnpm exec playwright test e2e/performance-optimization.spec.ts --grep '^Codex automatic authorization:'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codex-login-browser-results
+          path: ${{ runner.temp }}/codex-login-browser-results/
+          retention-days: 7
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod

@@ -5,8 +5,19 @@
     width="wide"
     @close="handleClose"
   >
-    <!-- Step Indicator for OAuth accounts -->
-    <div v-if="isOAuthFlow" class="mb-6 flex items-center justify-center">
+    <div v-if="step === 1" class="mb-5 space-y-3" data-testid="account-creation-toolbar">
+      <div v-if="isOpenAIOAuth" class="flex gap-2" aria-label="授权方式">
+        <button type="button" class="btn" :class="openaiCreationMode === 'manual' ? 'btn-primary' : 'btn-secondary'" :disabled="automaticAuthorizationRef?.submitting" data-testid="openai-manual-mode" @click="selectOpenAICreationMode('manual')">手动授权</button>
+        <button type="button" class="btn" :class="openaiCreationMode === 'automatic' ? 'btn-primary' : 'btn-secondary'" :disabled="automaticAuthorizationRef?.submitting" data-testid="openai-automatic-mode" @click="selectOpenAICreationMode('automatic')">自动授权</button>
+      </div>
+      <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-400">
+        <label class="flex items-center gap-2"><input v-model="rememberCreationSettings" type="checkbox" data-testid="remember-account-settings" @change="saveCreationSettings" /> 记住添加设置（分组、代理、并发、优先级）</label>
+        <button type="button" class="text-xs hover:underline" @click="clearCreationSettings">清除已记住设置</button>
+      </div>
+    </div>
+
+    <!-- Automatic authorization stays on one page. -->
+    <div v-if="isOAuthFlow && !isAutomaticAuthorization" class="mb-6 flex items-center justify-center">
       <div class="flex items-center space-x-4">
         <div class="flex items-center">
           <div
@@ -45,12 +56,22 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <template v-if="isAutomaticAuthorization">
+        <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-sm text-gray-600 dark:text-gray-300" data-testid="automatic-settings-summary">{{ automaticSettingsSummary }}</p>
+            <button type="button" class="shrink-0 text-sm text-primary-600 hover:underline dark:text-primary-400" :aria-expanded="automaticSettingsExpanded" aria-controls="account-creation-settings" data-testid="automatic-settings-toggle" @click="automaticSettingsExpanded = !automaticSettingsExpanded">{{ automaticSettingsExpanded ? '收起设置' : '调整设置' }}</button>
+          </div>
+        </div>
+        <CodexAutomaticAuthorization ref="automaticAuthorizationRef" :options="automaticAuthorizationOptions" hide-submit @created="notifyAccountCreated" />
+      </template>
+      <div v-show="!isAutomaticAuthorization || automaticSettingsExpanded" id="account-creation-settings" class="space-y-5">
       <div>
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
           v-model="form.name"
           type="text"
-          :required="!isGrokSSOInputMethod && !(isOpenAIOAuth && openaiCreationMode === 'automatic')"
+          :required="!isGrokSSOInputMethod && !isAutomaticAuthorization"
           class="input"
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
@@ -3773,21 +3794,11 @@
           data-tour="account-form-groups"
         />
       </div>
-      <div v-if="isOpenAIOAuth" class="flex gap-2" aria-label="授权方式">
-        <button type="button" class="btn" :class="openaiCreationMode === 'manual' ? 'btn-primary' : 'btn-secondary'" @click="openaiCreationMode = 'manual'">手动授权</button>
-        <button type="button" class="btn" :class="openaiCreationMode === 'automatic' ? 'btn-primary' : 'btn-secondary'" data-testid="openai-automatic-mode" @click="openaiCreationMode = 'automatic'">自动授权</button>
-      </div>
-      <p v-if="isOpenAIOAuth && openaiCreationMode === 'automatic'" class="text-xs text-gray-500">下一步粘贴登录资料。账号名称可留空，自动使用邮箱。</p>
-      <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-400">
-        <label class="flex items-center gap-2"><input v-model="rememberCreationSettings" type="checkbox" data-testid="remember-account-settings" @change="saveCreationSettings" /> 记住添加设置（分组、代理、并发、优先级）</label>
-        <button type="button" class="text-xs hover:underline" @click="clearCreationSettings">清除已记住设置</button>
       </div>
     </form>
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
-      <CodexAutomaticAuthorization v-if="form.platform === 'openai' && openaiCreationMode === 'automatic'" :options="automaticAuthorizationOptions" @created="notifyAccountCreated" />
-      <template v-else>
       <BPSAccountSettings v-if="form.platform === 'openai'" v-model="bpsSettings" :groups="groups" />
       <label v-if="form.platform === 'openai'" class="block">
         <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
@@ -3831,7 +3842,6 @@
         @import-sso="handleGrokImportSSO"
         @authorize-password="handleGrokAuthorizePassword"
       />
-      </template>
     </div>
 
     <template #footer>
@@ -3839,7 +3849,11 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
+        <button v-if="isAutomaticAuthorization" type="button" class="btn btn-primary" :disabled="!automaticAuthorizationRef?.canSubmit" data-testid="codex-login-submit" @click="automaticAuthorizationRef?.submit()">
+          {{ automaticAuthorizationRef?.submitting ? '正在提交…' : '开始自动授权' }}
+        </button>
         <button
+          v-else
           type="submit"
           form="create-account-form"
           :disabled="submitting"
@@ -3880,7 +3894,7 @@
           {{ t('common.back') }}
         </button>
         <button
-          v-if="isManualInputMethod && !(form.platform === 'openai' && openaiCreationMode === 'automatic')"
+          v-if="isManualInputMethod"
           type="button"
           :disabled="!canExchangeCode"
           class="btn btn-primary"
@@ -4377,6 +4391,8 @@ const appStore = useAppStore()
 const creationAuthStore = useAuthStore()
 const rememberCreationSettings = ref(true)
 const openaiCreationMode = ref<'manual' | 'automatic'>('manual')
+const automaticSettingsExpanded = ref(false)
+const automaticAuthorizationRef = ref<InstanceType<typeof CodexAutomaticAuthorization> | null>(null)
 
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
@@ -5116,6 +5132,7 @@ const selectedProxyIDs = computed({
 
 
 const isOpenAIOAuth = computed(() => form.platform === 'openai' && form.type === 'oauth')
+const isAutomaticAuthorization = computed(() => isOpenAIOAuth.value && openaiCreationMode.value === 'automatic')
 const concurrencyEdited = ref(false)
 const handleConcurrencyInput = () => {
   concurrencyEdited.value = true
@@ -5671,6 +5688,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 // Methods
 const resetForm = () => {
   openaiCreationMode.value = 'manual'
+  automaticSettingsExpanded.value = false
   openaiOAuthFlow.value = 'openai'
   step.value = 1
   form.name = ''
@@ -6034,9 +6052,13 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (isAutomaticAuthorization.value) {
+    await automaticAuthorizationRef.value?.submit()
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
-    if (!isGrokSSOInputMethod.value && !(isOpenAIOAuth.value && openaiCreationMode.value === 'automatic') && !form.name.trim()) {
+    if (!isGrokSSOInputMethod.value && !form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
@@ -7549,9 +7571,20 @@ const automaticAuthorizationOptions = computed(() => ({
   load_factor: form.load_factor, expires_at: form.expires_at, auto_pause_on_expired: autoPauseOnExpired.value,
   extra: withUpstreamRequestIdHeader(buildOpenAIExtra()), credential_extras: buildOpenAICodexImportCredentialExtras() || undefined
 }))
+const automaticSettingsSummary = computed(() => {
+  const groups = form.group_ids.map(id => props.groups.find(group => group.id === id)?.name || `#${id}`)
+  const proxy = form.proxy_ids.length ? `${form.proxy_ids.length} 个代理` : '服务器直连'
+  return `${groups.length ? groups.join('、') : '未选择分组'} · ${proxy} · 并发 ${form.concurrency} · 优先级 ${form.priority}`
+})
+function selectOpenAICreationMode(mode: 'manual' | 'automatic') {
+  openaiCreationMode.value = mode
+  automaticSettingsExpanded.value = false
+  saveCreationSettings()
+}
 function saveCreationSettings() {
   writeAccountCreationDefaults(creationAuthStore.user?.id, form.platform, form.type, rememberCreationSettings.value, {
-    group_ids: form.group_ids, proxy_ids: form.proxy_ids, concurrency: form.concurrency, priority: form.priority
+    group_ids: form.group_ids, proxy_ids: form.proxy_ids, concurrency: form.concurrency, priority: form.priority,
+    ...(isOpenAIOAuth.value ? { authorization_mode: openaiCreationMode.value } : {})
   })
 }
 let pendingCreationGroups: number[] | undefined
@@ -7572,6 +7605,8 @@ function restoreCreationSettings() {
   pendingCreationGroups = undefined; pendingCreationProxies = undefined
   const saved = readAccountCreationDefaults(creationAuthStore.user?.id, form.platform, form.type)
   rememberCreationSettings.value = saved.remember
+  openaiCreationMode.value = saved.settings?.authorization_mode || 'manual'
+  automaticSettingsExpanded.value = false
   form.group_ids = []; selectedProxyIDs.value = []
   if (!saved.settings) return
   applySavedCreationGroups(saved.settings.group_ids)

@@ -123,6 +123,10 @@ jobs:
         working-directory: frontend
         timeout-minutes: 5
         run: |
+          if [ -z "$(fc-list :lang=zh)" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fi
           pnpm exec playwright install chromium
           if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
             pnpm exec playwright install-deps chromium

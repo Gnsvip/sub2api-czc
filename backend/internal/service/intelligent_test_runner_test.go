@@ -204,6 +204,13 @@ func TestResolveIntelligentTestModelDefaultsChatGPTToGpt6Astra(t *testing.T) {
 	require.Equal(t, "gpt-6-astra", resolveIntelligentTestModel(oauth, ""))
 	require.Equal(t, "gpt-6-astra", resolveIntelligentTestModel(oauth, "  "))
 	require.Equal(t, "gpt-5.3-codex", resolveIntelligentTestModel(oauth, "gpt-5.3-codex"))
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		account := &Account{Platform: PlatformOpenAI, Type: accountType}
+		require.Equal(t, "gpt-6-astra", resolveIntelligentTestModel(account, ""))
+		for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol", "custom-model"} {
+			require.Equal(t, model, resolveIntelligentTestModel(account, "  "+model+"  "), accountType)
+		}
+	}
 	require.Equal(t, "", resolveIntelligentTestModel(&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}, ""))
 	require.Equal(t, "", resolveIntelligentTestModel(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, ""))
 }

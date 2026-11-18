@@ -27,6 +27,9 @@ func TestAnthropicCompatUpstreamObservation(t *testing.T) {
 					beginUpstreamResponseModelObservation(c).Observe("stale-model", false)
 					body := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"actual-model\",\"usage\":{\"input_tokens\":3,\"speed\":\"fast\"}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 
+					// A successful completion must contain output under this fork's
+					// empty-response failover policy.
+					body = strings.Replace(body, "event: message_delta", "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta", 1)
 					expectedModel, expectedTier := "actual-model", "fast"
 					switch scenario {
 					case "missing":

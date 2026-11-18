@@ -2827,7 +2827,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_GroupForceOpenAIUltrafastOverride
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
 	}}
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, tiboRouteDisabled: true}
 	account := &Account{
 		ID: 123, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
@@ -2870,6 +2870,7 @@ func TestOpenAIGatewayService_OAuthLegacy_GroupForceOpenAIUltrafast(t *testing.T
 			Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
 		}}
 		svc := newOpenAIGatewayServiceWithSettings(t, settings)
+		svc.tiboRouteDisabled = true
 		svc.cfg = &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}}
 		svc.httpUpstream = upstream
 		result, err := svc.Forward(ctx, c, account, inputBody)

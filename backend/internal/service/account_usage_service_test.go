@@ -248,9 +248,10 @@ func TestAccountUsageService_GetOpenAIUsage_PreservesSnapshotObservationTime(t *
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeOAuth,
 				Extra: map[string]any{
-					"codex_5h_used_percent":  10.0,
-					"codex_7d_used_percent":  100.0,
-					"codex_usage_updated_at": stamp,
+					"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
+					"codex_5h_used_percent":                     10.0,
+					"codex_7d_used_percent":                     100.0,
+					"codex_usage_updated_at":                    stamp,
 				},
 			}
 			usage, err := (&AccountUsageService{}).getOpenAIUsage(context.Background(), account, false)

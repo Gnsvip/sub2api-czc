@@ -348,7 +348,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 			stageCodexFingerprintIDs(c, fpIDs)
 		}
-		delete(reqBody, "prompt_cache_key")
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
 		}

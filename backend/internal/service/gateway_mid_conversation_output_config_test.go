@@ -224,9 +224,19 @@ func TestForward_PerTurnControlMessageOutputConfig(t *testing.T) {
 				} else {
 					require.Len(t, messages, 3)
 				}
-				require.Equal(t, "Hello", messages[0].Get("content").String())
-				require.Equal(t, "Hi", messages[1].Get("content").String())
-				require.Equal(t, "Summarize that in one sentence.", messages[len(messages)-1].Get("content").String())
+				for index, text := range map[int]string{0: "Hello", 1: "Hi", len(messages) - 1: "Summarize that in one sentence."} {
+					content := messages[index].Get("content")
+					if content.IsArray() {
+						// The customized passthrough cache policy wraps text in a
+						// cache-control block without changing per-turn controls.
+						require.Equal(t, "apikey_passthrough", mode)
+						require.Len(t, content.Array(), 1)
+						require.Equal(t, "text", content.Get("0.type").String())
+						require.Equal(t, text, content.Get("0.text").String())
+					} else {
+						require.Equal(t, text, content.String())
+					}
+				}
 				require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
 			})
 		}

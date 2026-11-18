@@ -38,7 +38,7 @@ func TestFilterCodexInput_AdditionalToolsDeclarationID(t *testing.T) {
 			require.Equal(t, "at_discovery", gjson.GetBytes(encoded, "0.id").String())
 			require.Equal(t, "tool_search", gjson.GetBytes(encoded, "0.tools.0.type").String())
 			require.Equal(t, preserveReferences, gjson.GetBytes(encoded, "1.id").Exists())
-			require.False(t, gjson.GetBytes(encoded, "2.id").Exists())
+			require.Equal(t, "rs_history", gjson.GetBytes(encoded, "2.id").String(), "native reasoning replay keeps its ID")
 			require.Equal(t, "sealed", gjson.GetBytes(encoded, "2.encrypted_content").String())
 			require.Equal(t, preserveReferences, gjson.GetBytes(encoded, "3.id").Exists())
 			after, err := json.Marshal(input)
@@ -180,7 +180,7 @@ func TestOpenAIGatewayService_OAuthAdditionalToolsDeclarationID(t *testing.T) {
 						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 						Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
 					}}
-					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, tiboRouteDisabled: true}
 					account := &Account{
 						ID: 8752, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 						Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"},
@@ -205,7 +205,7 @@ func TestOpenAIGatewayService_OAuthAdditionalToolsDeclarationID(t *testing.T) {
 					require.Equal(t, "at_00112233-4455-4677-8899-aabbccddeeff", gjson.GetBytes(body, "input.0.id").String())
 					require.JSONEq(t, gjson.GetBytes(body, "input.0.tools").Raw, gjson.GetBytes(upstream.lastBody, "input.0.tools").Raw)
 					require.Equal(t, passthrough, gjson.GetBytes(upstream.lastBody, "input.1.id").Exists())
-					require.Equal(t, passthrough, gjson.GetBytes(upstream.lastBody, "input.2.id").Exists())
+					require.Equal(t, "rs_history", gjson.GetBytes(upstream.lastBody, "input.2.id").String(), "native reasoning replay keeps its ID")
 					require.Equal(t, "sealed", gjson.GetBytes(upstream.lastBody, "input.2.encrypted_content").String())
 					require.Contains(t, recorder.Body.String(), `"type":"tool_search_call"`)
 					require.Contains(t, recorder.Body.String(), `"call_id":"tsc_discovery"`)

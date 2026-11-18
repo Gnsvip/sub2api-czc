@@ -199,6 +199,14 @@ export async function authorize(chromium, input, options = {}) {
       if (callback) break;
       if (current.origin !== AUTH) fail('additional_verification');
       const text = (await page.locator('body').innerText()).slice(0, 24000);
+      if (!sent.has('password') && !sent.has('password_method')) {
+        const usePassword = page.getByRole('button', { name: /^(?:use (?:your )?password(?: instead)?|log in with (?:a )?password|使用密码(?:登录)?|改用密码(?:登录)?)$/i })
+          .or(page.getByRole('link', { name: /^(?:use (?:your )?password(?: instead)?|log in with (?:a )?password|使用密码(?:登录)?|改用密码(?:登录)?)$/i })).first();
+        if (await usePassword.isVisible()) {
+          await usePassword.click(); sent.add('password_method'); idleSince = Date.now();
+          continue;
+        }
+      }
       const reason = pageFailure(text, await page.title(), current.href);
       if (await visible(page, 'iframe[src*="challenges.cloudflare.com"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"]')) fail('security_check');
       if (reason === 'security_check' || blocked === 'security_check') {
@@ -221,7 +229,15 @@ export async function authorize(chromium, input, options = {}) {
         await password.fill(input.password);
         await advance(page); sent.add('password'); stage('password_submitted'); progressed = true;
       } else if (code && !sent.has('mfa')) {
-        if (!/authenticator|authentication app|验证器|身份验证应用/i.test(text) || !input.totp_secret) fail('additional_verification');
+        if (!input.totp_secret) fail('additional_verification');
+        // Navigation may finish between the body read and locating the input.
+        // Read the current label again; never send a TOTP to an email OTP form.
+        const mfaText = await page.locator('body').innerText();
+        if (!/authenticator|authentication app|验证器|身份验证应用/i.test(mfaText)) {
+          if (Date.now() - idleSince > 30000) fail('additional_verification');
+          await new Promise(resolve => setTimeout(resolve, 400));
+          continue;
+        }
         const remaining = 30000 - (Date.now() % 30000);
         if (remaining < 5000) await new Promise(resolve => setTimeout(resolve, remaining + 300));
         await code.fill(totp(input.totp_secret));

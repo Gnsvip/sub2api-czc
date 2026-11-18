@@ -49,7 +49,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'password_choice', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0;
       const stages = [];
@@ -67,6 +67,8 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               body = scenario === 'security_check' ? '<h1>Verify you are human</h1>' : form('Log in', '<input type="email" name="email">', '/password');
             } else if (url.pathname === '/password') {
               submitted.push(new URLSearchParams(route.request().postData()).get('email'));
+              body = scenario === 'password_choice' ? '<p>Check your email</p><a href="/use-password">Use password instead</a>' : form('Password', '<input type="password" name="password">', '/mfa');
+            } else if (url.pathname === '/use-password') {
               body = form('Password', '<input type="password" name="password">', '/mfa');
             } else if (url.pathname === '/mfa') {
               submitted.push(new URLSearchParams(route.request().postData()).get('password'));
@@ -100,7 +102,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, input, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (scenario === 'success') {
+      if (scenario === 'success' || scenario === 'password_choice') {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);

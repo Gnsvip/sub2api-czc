@@ -54,7 +54,7 @@ class OTPHandler(BaseHTTPRequestHandler):
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
     def test_managed_browser_dispatch_preserves_other_profiles_and_safe_failures(self):
         browser = self.browser_adapter()
-        worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed")
+        worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed", WorkerError=WorkerError)
         original = worker.process_password_claim
         browser.install(worker)
         with patch.object(browser, "run_browser") as run:
@@ -65,6 +65,8 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
             worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "session_studio"})
             self.assertEqual(original.call_count, 3)
         self.assertEqual(worker.safe_worker_failure(browser.BrowserFailure("security_check")), "security_check")
+        for code in ("browser_unavailable", "totp_rejected", "identity_mismatch"):
+            self.assertEqual(worker.safe_worker_failure(WorkerError(code)), code)
         self.assertEqual(worker.safe_worker_failure(RuntimeError("password=synthetic-secret")), "worker_failed")
         self.assertEqual(str(browser.BrowserFailure("synthetic-secret")), "worker_failed")
 

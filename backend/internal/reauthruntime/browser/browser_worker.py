@@ -216,7 +216,14 @@ def install(worker):
         return original_claim(api, claim)
 
     worker.process_password_claim = process
-    worker.safe_worker_failure = lambda exc: exc.code if isinstance(exc, BrowserFailure) else original_failure(exc)
+    def safe_failure(exc):
+        if isinstance(exc, BrowserFailure):
+            return exc.code
+        # WorkerAPI.fail sanitizes the already-safe code a second time.
+        if isinstance(exc, worker.WorkerError) and str(exc) in FAILURES:
+            return str(exc)
+        return original_failure(exc)
+    worker.safe_worker_failure = safe_failure
 
 
 if __name__ == "__main__":

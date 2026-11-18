@@ -75,7 +75,7 @@ func TestOpenAIPassthroughModelFilterEligibility(t *testing.T) {
 					require.Equal(t, tc.want, (&GatewayService{}).isModelSupportedByAccount(account, model))
 					if accountType == AccountTypeOAuth {
 						require.Equal(t, model, account.GetMappedModel(model), "OAuth whitelist must not rewrite models")
-						require.False(t, account.IsModelSupported("qwen3.8-max"), "passthrough does not grant native OAuth another provider's models")
+						require.False(t, account.IsModelSupported("qwen3-235b-thinking"), "passthrough does not bypass the existing foreign-provider guard")
 					}
 				})
 			}

@@ -199,14 +199,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		idleCheckInterval = grokStreamIdleCheckInterval(streamInterval)
 	}
 	// 仅监控上游数据间隔超时，不被下游写入阻塞影响
-	var intervalTicker *time.Ticker
+	var intervalTimer *time.Timer
 	if idleCheckInterval > 0 {
-		intervalTicker = time.NewTicker(idleCheckInterval)
-		defer intervalTicker.Stop()
+		intervalTimer = time.NewTimer(idleCheckInterval)
+		defer intervalTimer.Stop()
 	}
 	var intervalCh <-chan time.Time
-	if intervalTicker != nil {
-		intervalCh = intervalTicker.C
+	if intervalTimer != nil {
+		intervalCh = intervalTimer.C
 	}
 
 	keepaliveInterval := time.Duration(0)
@@ -1039,13 +1039,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
 			effectiveInterval := streamInterval
 			if grokProgress != nil {
-				// Grok: measure against model progress so keepalive bytes
-				// cannot postpone the deadline indefinitely.
+				// Keep model progress separate from vendor pings, including drain mode.
 				effectiveInterval = grokStreamEffectiveIdle(streamInterval, clientDisconnected)
 				if grokProgress.SinceProgress(now) < effectiveInterval {
+					intervalTimer.Reset(idleCheckInterval)
 					continue
 				}
-			} else if now.Sub(lastRead) < streamInterval {
+			} else if remaining := streamInterval - now.Sub(lastRead); remaining > 0 {
+				intervalTimer.Reset(remaining)
 				continue
 			}
 			if codexFailureTerminal && sawBareError && !sawResponseFailed {
@@ -1066,6 +1067,20 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
 			if s.rateLimitService != nil && !account.isBPSCredential() {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+			}
+			if account != nil && account.Platform == PlatformOpenAI &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
+				_ = resp.Body.Close()
+				failoverErr := s.newOpenAIStreamFailoverErrorWithModel(
+					c, account, false, upstreamRequestID, nil,
+					"OpenAI upstream stream idle timeout before model output", mappedModel, resp.Header,
+				)
+				// Only keepalive comments can have reached the client. Joining the
+				// first-output failover budget also bounds the replay to one account
+				// switch, so one stalled request cannot walk the whole pool and apply
+				// HandleStreamTimeout to every account it touches.
+				failoverErr.SafeToFailoverAfterWrite = true
+				return resultWithUsage(), failoverErr
 			}
 			// Grok: short cool + account failover when no client-visible bytes
 			// were committed yet (pre-commit). After output started we keep the

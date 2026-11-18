@@ -112,6 +112,7 @@ type ModelPricing struct {
 	CacheReadPricePerTokenPriority     float64            // priority service tier 下缓存读取每token价格 (USD)
 	FastMultiplier                     *float64           // 渠道显式 Fast/priority 倍率；nil 时沿用模型目录行为
 	FlexMultiplier                     *float64           // 渠道显式 Flex 倍率；nil 时沿用默认行为
+	UltrafastMultiplierOverride        *float64           // 渠道显式 Ultra Fast 倍率；nil 时沿用模型默认倍率
 	ReasoningEffortMultipliers         map[string]float64 // 最终转发的推理等级对应的计费倍率；未配置的等级按 1 倍计费
 	CacheCreation5mPrice               float64            // 5分钟缓存创建每token价格 (USD)
 	CacheCreation1hPrice               float64            // 1小时缓存创建每token价格 (USD)
@@ -157,10 +158,14 @@ func serviceTierCostMultiplier(serviceTier string) float64 {
 
 func configuredServiceTierMultiplier(serviceTier string, pricing *ModelPricing) float64 {
 	if pricing != nil {
-		if normalizeBillingServiceTier(serviceTier) == OpenAIFastTierUltrafast && pricing.UltrafastMultiplier > 0 {
-			return pricing.UltrafastMultiplier
-		}
 		switch normalizeBillingServiceTier(serviceTier) {
+		case OpenAIFastTierUltrafast:
+			if pricing.UltrafastMultiplierOverride != nil {
+				return *pricing.UltrafastMultiplierOverride
+			}
+			if pricing.UltrafastMultiplier > 0 {
+				return pricing.UltrafastMultiplier
+			}
 		case "priority", "fast":
 			if pricing.FastMultiplier != nil {
 				return *pricing.FastMultiplier
@@ -1619,6 +1624,7 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 	applyChannelTokenPriceOverrides(pricing, channelPricing)
 	pricing.FastMultiplier = channelPricing.FastMultiplier
 	pricing.FlexMultiplier = channelPricing.FlexMultiplier
+	pricing.UltrafastMultiplierOverride = channelPricing.UltrafastMultiplier
 	pricing.ReasoningEffortMultipliers = maps.Clone(channelPricing.ReasoningEffortMultipliers)
 	applyChannelImagePriceOverrides(channelPricing, pricing)
 	return pricing, nil
@@ -1709,7 +1715,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 		if input.LongContextBillingEnabled != nil {
 			applyLongContextBilling = *input.LongContextBillingEnabled
 		}
-		pricing, err := s.GetModelPricing(input.Model)
+		pricing, err := s.getModelPricingAt(input.Model, input.PricingAt)
 		if err != nil {
 			return nil, err
 		}
@@ -1952,15 +1958,19 @@ func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens 
 		return cost * multiplier
 	}
 	if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
-		cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
-		if cacheCreation5mTokens == 0 && cacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
-			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
-			return float64(tokens.CacheCreationTokens) * pricing.CacheCreation5mPrice * multiplier
-		}
+		cacheCreation5mTokens, cacheCreation1hTokens := allocateCacheCreationBillingTokens(tokens)
 		return float64(cacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
 			float64(cacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
 	}
 	return float64(tokens.CacheCreationTokens) * price * multiplier
+}
+
+func allocateCacheCreationBillingTokens(tokens UsageTokens) (int, int) {
+	cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
+	if tokens.CacheCreationTokens > 0 {
+		cacheCreation5mTokens += tokens.CacheCreationTokens - cacheCreation5mTokens - cacheCreation1hTokens
+	}
+	return cacheCreation5mTokens, cacheCreation1hTokens
 }
 
 // OpenAI's two write buckets are disjoint and exhaustive. Do not add the
@@ -2047,16 +2057,6 @@ func (s *BillingService) CalculateCost(model string, tokens UsageTokens, rateMul
 
 func (s *BillingService) CalculateCostWithServiceTier(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string) (*CostBreakdown, error) {
 	return s.calculateCostInternal(model, tokens, rateMultiplier, serviceTier, nil)
-}
-
-func (s *BillingService) calculateCostWithServiceTierPolicy(
-	model string,
-	tokens UsageTokens,
-	rateMultiplier float64,
-	serviceTier string,
-	longContextBillingEnabled bool,
-) (*CostBreakdown, error) {
-	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, nil, longContextBillingEnabled)
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
@@ -2179,10 +2179,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	}
 	cloned := *pricing
 	if openAIModelSupportsUltrafast(normalized) {
-		cloned.UltrafastMultiplier = 6
-	}
-	if openai.IsGPT62ModelSpelling(normalized) {
-		cloned.UltrafastMultiplier = gpt62UltrafastMultiplierAt(pricingAt)
+		cloned.UltrafastMultiplier = openAIUltrafastMultiplier(normalized, pricingAt)
 	}
 	if needsOpus55FastMultiplier {
 		multiplier := 2.0
@@ -2845,4 +2842,16 @@ func getDefaultGrokImagineVideoPrice(model string, resolution string) (float64, 
 	default:
 		return 0, false
 	}
+}
+
+// openAIUltrafastMultiplier uses the request instant, including for delayed
+// settlement. March 1, 2027 00:00 Pacific is 08:00 UTC (before DST).
+func openAIUltrafastMultiplier(model string, at time.Time) float64 {
+	if at.IsZero() {
+		at = timezone.Now()
+	}
+	if openai.GPT62ModelID(model) != "" && at.Before(time.Date(2027, time.March, 1, 8, 0, 0, 0, time.UTC)) {
+		return 3
+	}
+	return 6
 }

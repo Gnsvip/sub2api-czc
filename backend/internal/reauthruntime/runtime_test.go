@@ -171,8 +171,8 @@ func TestExcelBPSPinnedRuntimeReleaseSelfCheck(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("Linux amd64 release")
 	}
-	const expected = "825697a600a3b7ebffa9477f5684aca06c70ba448b28e4280ec89d55611749cc"
-	m := New(t.TempDir(), "2.21.1", "http://127.0.0.1:1", strings.Repeat("test-only-", 8))
+	const expected = "9090add61ebdea7b8d15f2086293be1b3ebb9ef26bf3b3dd2d8af41df85593f7"
+	m := New(t.TempDir(), "2.22.0", "http://127.0.0.1:1", strings.Repeat("test-only-", 8))
 	// Verify the reviewed asset digest before any archive content is executed.
 	m.client = &http.Client{Timeout: 5 * time.Minute, Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 		resp, err := http.DefaultTransport.RoundTrip(req)
@@ -194,6 +194,11 @@ func TestExcelBPSPinnedRuntimeReleaseSelfCheck(t *testing.T) {
 	defer cancel()
 	dir, err := m.prepare(ctx)
 	require.NoError(t, err)
+	for _, name := range []string{"openai_codex_oauth_adapter.py", "openai_codex_diagnostics.mjs"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		require.NoError(t, err, "Codex support must be included in the pinned worker")
+		require.True(t, info.Mode().IsRegular())
+	}
 	digest, err := os.ReadFile(filepath.Join(dir, "ready"))
 	require.NoError(t, err)
 	require.Equal(t, expected, string(digest))

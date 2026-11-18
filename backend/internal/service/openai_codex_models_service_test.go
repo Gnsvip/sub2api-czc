@@ -1762,6 +1762,38 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	}
 }
 
+func TestCodexLoginVerificationDoesNotReuseCachedSuccess(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"code":"token_revoked"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-test"}]}`))
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+	s := &OpenAIGatewayService{}
+	a := newCodexModelsTestAccount()
+	_, err := s.fetchNativeCodexModelsManifest(context.Background(), a, "0.166.0", "")
+	require.NoError(t, err)
+	_, err = s.fetchNativeCodexModelsManifest(context.Background(), a, "0.166.0", "")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, calls.Load())
+	_, err = s.fetchNativeCodexModelsManifestMode(context.Background(), a, "0.166.0", "", true)
+	require.Error(t, err)
+	require.EqualValues(t, 2, calls.Load())
+	id := int64(7)
+	a.ProxyID = &id
+	_, err = s.fetchNativeCodexModelsManifestMode(context.Background(), a, "0.166.0", "", true)
+	require.Error(t, err, "missing proxy must not fall back to direct")
+	require.EqualValues(t, 2, calls.Load())
+}
+
 func TestFetchCodexModelsManifestAgentIdentityUsesAssertionWithoutOAuthToken(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	account := &Account{Extra: astraHealthyTestExtra(nil),

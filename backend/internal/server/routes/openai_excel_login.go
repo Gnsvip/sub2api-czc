@@ -15,7 +15,7 @@ func RegisterExcelLoginWorkerRoutes(v1 *gin.RouterGroup, h *handler.Handlers) {
 	worker.POST("/claim", h.Admin.OpenAIOAuth.ExcelLoginClaim)
 	worker.POST("/runtime-settings", func(c *gin.Context) { response.Success(c, gin.H{"worker_concurrency": 3}) })
 	// Upstream worker also polls these independent queues. This adapter offers
-	// only Excel grants; TOTP rotation and session exports are never enqueued.
+	// Codex and Excel login; TOTP rotation and session exports are never enqueued.
 	worker.POST("/totp-claim", func(c *gin.Context) { response.Success(c, nil) })
 	worker.POST("/session-export/claim", func(c *gin.Context) { response.Success(c, nil) })
 	worker.POST("/:task/:action", h.Admin.OpenAIOAuth.ExcelLoginWorkerUpdate)

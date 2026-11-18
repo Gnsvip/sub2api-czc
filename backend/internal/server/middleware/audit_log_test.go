@@ -178,6 +178,42 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
 
+func TestCodexLoginAuditOmitsImportedCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct{ method, route, path, body string }{
+		{http.MethodPost, "/api/v1/admin/openai/automatic-authorization", "/api/v1/admin/openai/automatic-authorization", `{"content":"example@example.com----audit-canary-password----JBSWY3DPEHPK3PXP"}`},
+		{http.MethodPut, "/api/v1/admin/openai/accounts/:id/codex-login", "/api/v1/admin/openai/accounts/7/codex-login", `{"password":"audit-canary-password","totp_secret":"JBSWY3DPEHPK3PXP"}`},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+				c.Set(string(ContextKeyUserRole), "admin")
+				c.Next()
+			})
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.Handle(tc.method, tc.route, func(c *gin.Context) {
+				var body map[string]any
+				require.NoError(t, c.ShouldBindJSON(&body), "audit must leave the handler body readable")
+				c.Status(http.StatusOK)
+			})
+			request := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			auditService.Stop()
+			repository.mu.Lock()
+			defer repository.mu.Unlock()
+			require.Len(t, repository.logs, 1)
+			require.Equal(t, "<credential-bearing body omitted>", repository.logs[0].RequestBody)
+		})
+	}
+}
+
 // MCP OAuth 是机器凭证：只读工具同样可以批量读取邮箱等数据，必须全部入审计并带上 grant。
 func TestAuditRecordsEveryMCPOAuthReadWithGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -414,16 +414,18 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
-	ProxyIDs    []int64
-	ProxyMode   string // 受限写入在验权后选择代理。
-	Name        string
-	Notes       *string
-	Platform    string
-	Type        string
-	Credentials map[string]any
-	Extra       map[string]any
-	ProxyID     *int64
-	Concurrency int
+	// Internal-only: automatic login creates an unschedulable placeholder.
+	AwaitingCodexAuthorization bool
+	ProxyIDs                   []int64
+	ProxyMode                  string // 受限写入在验权后选择代理。
+	Name                       string
+	Notes                      *string
+	Platform                   string
+	Type                       string
+	Credentials                map[string]any
+	Extra                      map[string]any
+	ProxyID                    *int64
+	Concurrency                int
 	// ConcurrencyProvided distinguishes an explicit zero (unlimited) from omission.
 	ConcurrencyProvided bool
 	Priority            int

@@ -920,6 +920,10 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
 		openai.GET("/bps-defaults", h.Admin.OpenAIOAuth.GetBPSDefaults)
+		openai.POST("/automatic-authorization", h.Admin.OpenAIOAuth.CreateCodexLoginAccounts)
+		openai.GET("/accounts/:id/codex-login", h.Admin.OpenAIOAuth.CodexLoginStatus)
+		openai.PUT("/accounts/:id/codex-login", h.Admin.OpenAIOAuth.SaveCodexLogin)
+		openai.POST("/accounts/:id/codex-login/run", h.Admin.OpenAIOAuth.QueueCodexLogin)
 		openai.PUT("/bps-defaults", h.Admin.OpenAIOAuth.SaveBPSDefaults)
 		openai.GET("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.ExcelLoginStatus)
 		openai.PUT("/accounts/:id/excel-login", h.Admin.OpenAIOAuth.SaveExcelLogin)

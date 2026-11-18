@@ -225,12 +225,13 @@ jobs:
           cp LICENSE release-output/LICENSE
           cp deploy/config.example.yaml release-output/config.example.yaml
           cp deploy/sub2api.service release-output/sub2api.service
+          cp deploy/sub2api-codex-browser.apparmor docs/codex-browser-authorization.md release-output/
           cp deploy/pelican-judge-requirements.txt deploy/pelican-judge.md release-output/
           cp backend/internal/service/pelican_worker/LICENSE release-output/auto-pelican-LICENSE
           cd release-output
-          tar -czf "sub2api_${version}_linux_amd64.tar.gz" sub2api LICENSE config.example.yaml sub2api.service pelican-judge-requirements.txt pelican-judge.md auto-pelican-LICENSE
+          tar -czf "sub2api_${version}_linux_amd64.tar.gz" sub2api LICENSE config.example.yaml sub2api.service pelican-judge-requirements.txt pelican-judge.md auto-pelican-LICENSE sub2api-codex-browser.apparmor codex-browser-authorization.md
           tar -tzf "sub2api_${version}_linux_amd64.tar.gz" > manifest.txt
-          printf 'sub2api\nLICENSE\nconfig.example.yaml\nsub2api.service\npelican-judge-requirements.txt\npelican-judge.md\nauto-pelican-LICENSE\n' | diff - manifest.txt
+          printf 'sub2api\nLICENSE\nconfig.example.yaml\nsub2api.service\npelican-judge-requirements.txt\npelican-judge.md\nauto-pelican-LICENSE\nsub2api-codex-browser.apparmor\ncodex-browser-authorization.md\n' | diff - manifest.txt
           sha256sum "sub2api_${version}_linux_amd64.tar.gz" > checksums.txt
           sha256sum -c checksums.txt
       - uses: actions/upload-artifact@v7

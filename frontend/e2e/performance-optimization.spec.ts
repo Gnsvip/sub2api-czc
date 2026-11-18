@@ -157,6 +157,54 @@ for (const modal of modalCases) {
   })
 }
 
+test('Codex automatic authorization: one page, visible footer and remembered mode', async ({ page }, testInfo) => {
+  const state = await prepare(page)
+  const submissions: Record<string, unknown>[] = []
+  await page.route('**/api/v1/admin/openai/automatic-authorization', route => {
+    submissions.push(route.request().postDataJSON())
+    return json(route, {
+      results: [{ line: 1, email: 'example@example.test', account_id: 42, task: { id: 9, account_id: 42, status: 'failed', stage: 'failed', error_code: 'security_check' } }],
+      runtime: { mode: 'managed', state: 'ready' }
+    })
+  })
+  await page.goto('/admin/accounts')
+  await page.getByRole('button', { name: 'Create Account', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'OpenAI', exact: true }).click()
+  await expect(page.getByTestId('openai-automatic-mode')).toBeInViewport()
+  await page.getByTestId('openai-automatic-mode').click()
+  const content = page.getByTestId('codex-login-content')
+  const submit = page.getByTestId('codex-login-submit')
+  await expect(content).toBeInViewport()
+  await expect(submit).toBeInViewport()
+  await expect(submit).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Next', exact: true })).toHaveCount(0)
+  await expect(dialog.locator('#account-creation-settings')).toBeHidden()
+  await page.screenshot({ path: testInfo.outputPath('codex-automatic-authorization.png') })
+  const pasted = 'example@example.test----synthetic-password----JBSWY3DPEHPK3PXP'
+  await content.fill(pasted)
+  await page.getByTestId('automatic-settings-toggle').click()
+  await expect(dialog.locator('#account-creation-settings')).toBeVisible()
+  await dialog.locator('.modal-body').evaluate(el => { el.scrollTop = el.scrollHeight })
+  await expect(submit).toBeInViewport()
+  await submit.click()
+  await expect.poll(() => submissions.length).toBe(1)
+  expect(submissions[0]).toMatchObject({ content: pasted, auto_recover: false, concurrency: 50, group_ids: [], proxy_ids: [] })
+  await expect(content).toHaveValue('')
+  await dialog.locator('.modal-body').evaluate(el => { el.scrollTop = 0 })
+  await expect(dialog).toContainText('登录被上游安全校验拦截')
+  await closeDialog(page)
+  await page.getByRole('button', { name: 'Create Account', exact: true }).click()
+  await dialog.getByRole('button', { name: 'OpenAI', exact: true }).click()
+  await expect(content).toBeInViewport()
+  await expect(content).toHaveValue('')
+  await expect(submit).toBeInViewport()
+  await expect(dialog.locator('#account-creation-settings')).toBeHidden()
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('synthetic-password')
+  expect(state.errors).toEqual([])
+  await closeDialog(page)
+})
+
 test('today stats: pure OAuth, mixed rows, columns, 304, pagination, filter, manual refresh and next day', async ({ page }) => {
   const state = await prepare(page)
   await page.clock.install({ time: new Date('2026-10-30T12:00:00Z') })

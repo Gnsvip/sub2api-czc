@@ -159,6 +159,18 @@ func TestManagedProcessGetsOnlyWorkerEnvironmentAndStops(t *testing.T) {
 	got, err = os.ReadFile(filepath.Join(dir, "concurrency"))
 	require.NoError(t, err)
 	require.Equal(t, "4", string(got))
+	overlay, err := m.prepareBrowserOverlay()
+	require.NoError(t, err)
+	for _, name := range []string{"browser_worker.py", "codex_browser.mjs"} {
+		data, err := os.ReadFile(filepath.Join(overlay, name))
+		require.NoError(t, err)
+		expected, err := browserSource.ReadFile("browser/" + name)
+		require.NoError(t, err)
+		require.Equal(t, expected, data)
+	}
+	again, err := m.prepareBrowserOverlay()
+	require.NoError(t, err)
+	require.Equal(t, overlay, again)
 	m.Stop()
 	require.Equal(t, "stopped", m.Status().State)
 }

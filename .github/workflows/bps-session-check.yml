@@ -2,6 +2,11 @@ name: BPS session proxy checks
 
 on:
   workflow_dispatch:
+    inputs:
+      frontend_only:
+        description: 'Validate frontend and embedded build only (backend code unchanged)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'backend/**'
@@ -13,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bps-session-${{ github.event.pull_request.number || github.ref }}
+  group: bps-session-${{ github.event.pull_request.number || github.ref }}${{ inputs.frontend_only && '-frontend' || '' }}
   cancel-in-progress: true
 
 env:
@@ -22,7 +27,54 @@ env:
   GOMEMLIMIT: 3GiB
 
 jobs:
+  browser-authorization:
+    if: ${{ !inputs.frontend_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/codex-cloak
+          key: codex-cloak-linux-amd64-146.0.7680.177.5-4a12bcde95fa
+      - name: Prepare pinned browser library (synthetic credentials only)
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          path = Path('backend/internal/reauthruntime/browser/browser_worker.py').resolve()
+          spec = importlib.util.spec_from_file_location('browser_worker', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('CODEX_TEST_PLAYWRIGHT=' + str(module.ensure_playwright(Path(os.environ['RUNNER_TEMP']))) + '\n')
+              output.write('CODEX_TEST_CHROME=' + str(module.ensure_cloak(Path(os.environ['RUNNER_TEMP']) / 'codex-cloak')) + '\n')
+          PY
+      - name: Permit the isolated Cloak executable to create sandbox namespaces
+        run: |
+          if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile codex-cloak-ci "%s" flags=(unconfined) {\n  userns,\n}\n' "$CODEX_TEST_CHROME" > "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+            sudo apparmor_parser -r "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+          fi
+      - name: Run sandboxed Cloak OAuth checks
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24 -nolisten tcp' env CODEX_TEST_HEADED=1 node --test tools/test_codex_browser.mjs > "$RUNNER_TEMP/codex-browser-tests.log" 2>&1
+      - name: Remove the temporary browser profile
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/codex-cloak-ci.apparmor" ]; then
+            sudo apparmor_parser -R "$RUNNER_TEMP/codex-cloak-ci.apparmor"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codex-browser-oauth-validation
+          path: ${{ runner.temp }}/codex-browser-tests.log
+          retention-days: 7
   backend:
+    if: ${{ !inputs.frontend_only }}
     services:
       postgres:
         image: postgres:16
@@ -119,6 +171,30 @@ jobs:
       - name: Frontend regressions
         working-directory: frontend
         run: pnpm exec vitest run --maxWorkers=2 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/bps-frontend-tests.json"
+      - name: Install browser for automatic authorization checks
+        working-directory: frontend
+        timeout-minutes: 5
+        run: |
+          if [ -z "$(fc-list :lang=zh)" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fi
+          pnpm exec playwright install chromium
+          if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then(b => b.close()).catch(e => { console.error(e); process.exit(1) })"; then
+            pnpm exec playwright install-deps chromium
+          fi
+      - name: Automatic authorization desktop and mobile checks (mocked login)
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/codex-login-browser-results
+          PLAYWRIGHT_PREVIEW_BUILD: '1'
+        run: pnpm exec playwright test e2e/performance-optimization.spec.ts --grep 'Codex automatic authorization:'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codex-login-browser-results
+          path: ${{ runner.temp }}/codex-login-browser-results/
+          retention-days: 7
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -133,6 +209,11 @@ jobs:
           go generate ./ent
           go generate ./cmd/server
           go build -tags embed -trimpath -o "$RUNNER_TEMP/bps-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        with:
+          name: codex-browser-validation-linux-amd64
+          path: ${{ runner.temp }}/bps-server
+          retention-days: 3
       - uses: actions/upload-artifact@v7
         if: always()
         with:

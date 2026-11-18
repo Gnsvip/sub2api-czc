@@ -1,0 +1,8 @@
+# Ubuntu 24.04: allow user namespaces for the sandboxed, pinned Codex browser.
+# If DATA_DIR differs, adapt this attachment path before installing the profile.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile sub2api-codex-browser /opt/sub2api/data/excel-login-worker/cloak-146.0.7680.177.5-linux-amd64/chrome flags=(unconfined) {
+  userns,
+}

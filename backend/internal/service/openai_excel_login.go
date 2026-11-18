@@ -305,7 +305,7 @@ func (s *OpenAIOAuthService) CompleteExcelLogin(ctx context.Context, id int64, w
 }
 func (s *OpenAIOAuthService) ProgressExcelLogin(ctx context.Context, id int64, worker, stage string) error {
 	switch stage {
-	case "starting", "protocol_connecting", "email_submitted", "password_submitted", "mfa_submitted", "waiting_callback", "exchanging_token", "applying_credentials":
+	case "starting", "browser_starting", "protocol_connecting", "email_submitted", "password_submitted", "mfa_submitted", "waiting_callback", "exchanging_token", "applying_credentials":
 	default:
 		return infraerrors.BadRequest("EXCEL_LOGIN_STAGE_INVALID", "Invalid login stage")
 	}
@@ -337,6 +337,8 @@ func safeLoginFailureCode(reason string) string {
 		return "identity_mismatch"
 	}
 	switch reason {
+	case "browser_unavailable", "browser_start_failed", "browser_dependency_failed":
+		return reason
 	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
 		return reason
 	default:

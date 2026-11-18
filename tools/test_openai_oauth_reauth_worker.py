@@ -5,10 +5,16 @@ import threading
 import time
 import unittest
 import base64
+import importlib.util
+import io
+import hashlib
+import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from tools.openai_oauth_reauth_worker import (
     OTPURLProvider,
@@ -49,6 +55,155 @@ class OTPHandler(BaseHTTPRequestHandler):
 
 
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
+    def test_managed_browser_dispatch_preserves_other_profiles_and_safe_failures(self):
+        browser = self.browser_adapter()
+        worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed", WorkerError=WorkerError)
+        original = worker.process_password_claim
+        browser.install(worker)
+        with patch.object(browser, "run_browser") as run:
+            worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "local_worker"})
+            run.assert_called_once()
+            for profile in ("excel", "siwc"):
+                worker.process_password_claim(None, {"oauth_profile": profile})
+            worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "session_studio"})
+            self.assertEqual(original.call_count, 3)
+        self.assertEqual(worker.safe_worker_failure(browser.BrowserFailure("security_check")), "security_check")
+        for code in ("browser_unavailable", "totp_rejected", "identity_mismatch"):
+            self.assertEqual(worker.safe_worker_failure(WorkerError(code)), code)
+        self.assertEqual(worker.safe_worker_failure(RuntimeError("password=synthetic-secret")), "worker_failed")
+        self.assertEqual(str(browser.BrowserFailure("synthetic-secret")), "worker_failed")
+
+    @staticmethod
+    def browser_adapter():
+        path = Path(__file__).resolve().parents[1] / "backend/internal/reauthruntime/browser/browser_worker.py"
+        spec = importlib.util.spec_from_file_location("codex_browser_adapter_tests", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_managed_browser_requires_verified_package_before_extraction(self):
+        browser = self.browser_adapter()
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                browser.unpack_playwright(b"tampered archive", Path(root))
+            self.assertEqual(list(Path(root).iterdir()), [])
+
+    @staticmethod
+    def cloak_archive(name="chrome", kind=tarfile.REGTYPE):
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            entry = tarfile.TarInfo(name)
+            entry.type = kind
+            entry.mode = 0o755
+            if kind == tarfile.REGTYPE:
+                data = b"synthetic browser executable"
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+            else:
+                entry.linkname = "../outside"
+                archive.addfile(entry)
+        return output.getvalue()
+
+    @unittest.skipUnless(os.name == "posix", "managed Cloak download targets Linux amd64")
+    def test_managed_cloak_download_is_shared_cached_and_partial_failures_are_removed(self):
+        browser = self.browser_adapter()
+        data = self.cloak_archive()
+        for broken in (False, True):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as root:
+                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()), \
+                     patch.object(browser, "CLOAK_ARCHIVE_SIZE", len(data)), \
+                     patch.object(browser.platform, "machine", return_value="x86_64"), \
+                     patch.object(browser.sys, "platform", "linux"), \
+                     patch.object(browser, "urlopen", side_effect=lambda *a, **k: io.BytesIO(data[:-1] if broken else data)) as fetch:
+                    if broken:
+                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                            browser.ensure_cloak(Path(root))
+                        self.assertEqual([p for p in Path(root).iterdir() if p.is_dir()], [])
+                    else:
+                        with ThreadPoolExecutor(max_workers=2) as pool:
+                            results = list(pool.map(browser.ensure_cloak, [Path(root), Path(root)]))
+                        self.assertEqual(results[0], results[1])
+                        self.assertEqual(results[0].read_bytes(), b"synthetic browser executable")
+                        self.assertTrue(os.access(results[0], os.X_OK))
+                        fetch.assert_called_once()
+                        (results[0].parent / ".integrity").write_text("damaged")
+                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                            browser.ensure_cloak(Path(root))
+                        fetch.assert_called_once()
+
+    def test_managed_cloak_rejects_tampering_traversal_and_archive_links(self):
+        browser = self.browser_adapter()
+        for name, kind in (("../outside", tarfile.REGTYPE), ("/outside", tarfile.REGTYPE),
+                           ("chrome", tarfile.SYMTYPE), ("chrome", tarfile.LNKTYPE)):
+            with self.subTest(name=name, kind=kind), tempfile.TemporaryDirectory() as root:
+                data = self.cloak_archive(name, kind)
+                archive = Path(root) / "browser.tar.gz"
+                archive.write_bytes(data)
+                destination = Path(root) / "package"
+                destination.mkdir()
+                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()):
+                    with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                        browser.unpack_cloak(archive, destination)
+                self.assertEqual(list(destination.iterdir()), [])
+                self.assertFalse((Path(root) / "outside").exists())
+        with tempfile.TemporaryDirectory() as root:
+            archive = Path(root) / "browser.tar.gz"
+            archive.write_bytes(self.cloak_archive())
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                browser.unpack_cloak(archive, Path(root) / "package")
+            self.assertFalse((Path(root) / "package").exists())
+
+    def test_managed_browser_submission_and_cleanup(self):
+        browser = self.browser_adapter()
+        credentials = {key: "synthetic-" + key for key in ("access_token", "refresh_token", "id_token", "client_id")}
+        for accepted, error, override in ((True, None, True), (True, None, False),
+                                         (False, None, True), (False, "security_check", True),
+                                         (False, "not-a-safe-code", True)):
+            with self.subTest(accepted=accepted, error=error), tempfile.TemporaryDirectory() as root:
+                executable = Path(root) / "chrome"
+                executable.touch()
+                events = [{"type": "stage", "stage": "mfa_submitted"}]
+                events.append({"type": "error", "code": error} if error else {"type": "result", "credentials": credentials})
+                child = MagicMock()
+                child.stdout = io.BytesIO(b"".join((json.dumps(event) + "\n").encode() for event in events))
+                child.stdin = io.BytesIO()
+                child.poll.return_value = 0
+                child.wait.return_value = 0
+                api = SimpleNamespace(credentials=MagicMock(return_value={"status": "succeeded" if accepted else "failed"}))
+                worker = SimpleNamespace(_best_effort_progress=MagicMock())
+                claim = {"task_id": 12, "account_id": 42, "login_email": "test@example.com",
+                         "password": "synthetic-password", "totp_secret": "synthetic-totp",
+                         "proxy_url": "http://user:synthetic-proxy-password@127.0.0.1:9999", "expected_workspace": "workspace"}
+                with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable) if override else "", "DATABASE_PASSWORD": "private-db"}), \
+                     patch.object(browser, "ensure_cloak", return_value=executable) as prepare_browser, \
+                     patch.object(browser, "ensure_playwright", return_value=Path(root) / "index.mjs"), \
+                     patch.object(browser.shutil, "which", return_value="/usr/bin/test-display-tool"), \
+                     patch.object(browser.subprocess, "Popen", return_value=child) as popen:
+                    if accepted:
+                        browser.run_browser(api, claim, worker)
+                    else:
+                        expected = error if error in browser.FAILURES else "worker_failed" if error else "verification_failed"
+                        with self.assertRaisesRegex(browser.BrowserFailure, expected):
+                            browser.run_browser(api, claim, worker)
+                self.assertEqual(prepare_browser.call_count, 0 if override else 1)
+                kwargs = popen.call_args.kwargs
+                self.assertFalse(Path(kwargs["cwd"]).exists(), "temporary browser profile must be removed")
+                for secret in ("synthetic-password", "synthetic-totp", "synthetic-proxy-password", "private-db"):
+                    self.assertNotIn(secret, repr(popen.call_args))
+                self.assertNotIn("OPENAI_REAUTH_WORKER_TOKEN", kwargs["env"])
+                self.assertEqual(api.credentials.call_count, 0 if error else 1)
+                self.assertTrue(child.stdout.closed)
+
+    def test_managed_browser_missing_executable_does_not_claim_success_or_download(self):
+        browser = self.browser_adapter()
+        api = SimpleNamespace(credentials=MagicMock())
+        with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": "/missing/authorization-browser"}), \
+             patch.object(browser, "ensure_playwright") as prepare:
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_unavailable"):
+                browser.run_browser(api, {"task_id": 1, "login_email": "test@example.com", "password": "test"}, None)
+        prepare.assert_not_called()
+        api.credentials.assert_not_called()
+
     def test_siwc_failures_use_fixed_stage_and_reason_without_external_output(self):
         cases = (
             ("[1/5] Password accepted TOTP 2FA challenge reached 2FA verification accepted SIWC_INTERACTION_REQUIRED", "mfa_accepted", "browser_interaction_required"),

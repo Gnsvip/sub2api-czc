@@ -109,6 +109,13 @@ def run_browser(api, claim, worker, root=None):
     worker._best_effort_progress(api, task_id, "browser_starting")
     playwright = ensure_playwright(root)
     node = os.environ.get("NODE_EXECUTABLE", "node")
+    command = [node, str(root / "codex_browser.mjs"), str(playwright)]
+    if sys.platform.startswith("linux"):
+        if not shutil.which("xvfb-run") or not shutil.which("xauth"):
+            raise BrowserFailure("browser_unavailable")
+        # xvfb-run creates private Xauthority, selects a free display and traps
+        # exit to clean it up. No shared desktop or public display port.
+        command = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x800x24 -nolisten tcp", *command]
     payload = {key: str(claim.get(key) or "") for key in
                ("login_email", "password", "totp_secret", "proxy_url", "expected_workspace")}
     # No credentials in argv, process environment, screenshots, traces or files.
@@ -123,7 +130,7 @@ def run_browser(api, claim, worker, root=None):
         reader = None
         deadline = time.monotonic() + 240
         try:
-            child = subprocess.Popen([node, str(root / "codex_browser.mjs"), str(playwright)],
+            child = subprocess.Popen(command,
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      env=env, cwd=temp)
 

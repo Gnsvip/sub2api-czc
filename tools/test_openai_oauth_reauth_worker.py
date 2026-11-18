@@ -104,6 +104,7 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                          "proxy_url": "http://user:synthetic-proxy-password@127.0.0.1:9999", "expected_workspace": "workspace"}
                 with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable), "DATABASE_PASSWORD": "private-db"}), \
                      patch.object(browser, "ensure_playwright", return_value=Path(root) / "index.mjs"), \
+                     patch.object(browser.shutil, "which", return_value="/usr/bin/test-display-tool"), \
                      patch.object(browser.subprocess, "Popen", return_value=child) as popen:
                     if accepted:
                         browser.run_browser(api, claim, worker)

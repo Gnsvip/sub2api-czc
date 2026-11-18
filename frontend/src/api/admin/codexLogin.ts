@@ -68,7 +68,7 @@ export function codexLoginError(code?: string): string {
     account_changed: '账号状态已变更，请检查后重试',
     timeout: '本次授权超时',
     transport_error: '登录网络连接失败',
-    browser_unavailable: '服务器尚未配置授权浏览器，请先安装 Chrome',
+    browser_unavailable: '服务器授权浏览器未就绪，请检查 Chrome、Xvfb 和 xauth',
     browser_start_failed: '授权浏览器启动失败，请检查浏览器依赖和沙箱权限',
     browser_dependency_failed: '浏览器组件准备失败，请检查服务器访问 npm 的连接',
     rate_limited: '上游暂时限流，稍后重试',

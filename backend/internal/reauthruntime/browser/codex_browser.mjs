@@ -148,18 +148,30 @@ export async function authorize(chromium, input, options = {}) {
     stage('browser_starting');
     try {
       browser = await chromium.launch({ executablePath: options.executablePath,
-        headless: options.headless ?? true, chromiumSandbox: true, timeout: 30000,
+        headless: options.headless ?? false, chromiumSandbox: true, timeout: 30000,
+        ...(!proxy ? { args: ['--no-proxy-server'] } : {}),
         ...(proxy ? { proxy } : {}) });
     } catch { fail('browser_start_failed'); }
     context = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block',
       acceptDownloads: false, ...(proxy ? { proxy } : {}) });
     const page = await context.newPage();
     page.setDefaultTimeout(5000);
-    await context.route(`${REDIRECT}**`, async route => {
+    let callbackRequest;
+    const captureCallback = request => {
       try {
-        if (!route.request().isNavigationRequest() || route.request().frame() !== page.mainFrame() || callback) fail('identity_mismatch');
-        callback = callbackCode(route.request().url(), state);
+        if (!request.isNavigationRequest() || request.frame() !== page.mainFrame() ||
+            (callbackRequest && callbackRequest !== request)) fail('identity_mismatch');
+        callbackRequest = request;
+        callback = callbackCode(request.url(), state);
       } catch (error) { callbackError = error; }
+    };
+    page.on('request', request => {
+      // Redirected navigations also emit request even when a route handler is
+      // not re-entered for a redirect chain. No localhost listener is needed.
+      if (request.url().startsWith(REDIRECT)) captureCallback(request);
+    });
+    await context.route(`${REDIRECT}**`, async route => {
+      captureCallback(route.request());
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'Authorization received. You may close this page.' });
     });
     page.on('response', response => {
@@ -255,7 +267,7 @@ async function main() {
     const { chromium } = await import(pathToFileURL(process.argv[2]).href);
     const credentials = await authorize(chromium, input, {
       executablePath: process.env.OPENAI_CODEX_BROWSER_EXECUTABLE,
-      headless: process.env.OPENAI_CODEX_BROWSER_HEADLESS !== 'false', emit });
+      headless: process.env.OPENAI_CODEX_BROWSER_HEADLESS === 'true', emit });
     emit({ type: 'result', credentials });
   } catch (error) {
     emit({ type: 'error', code: error instanceof LoginFailure ? error.code : 'worker_failed' });

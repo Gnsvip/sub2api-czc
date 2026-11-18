@@ -390,7 +390,7 @@ describe('Codex automatic authorization and remembered settings', () => {
   it.each([
     ['totp_rejected', '2FA 验证失败，请检查 TOTP 密钥'],
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
-    ['browser_unavailable', '服务器尚未配置授权浏览器，请先安装 Chrome'],
+    ['browser_unavailable', '服务器授权浏览器未就绪，请检查 Chrome、Xvfb 和 xauth'],
     ['browser_start_failed', '授权浏览器启动失败，请检查浏览器依赖和沙箱权限'],
   ])('shows the specific %s failure without claiming authorization succeeded', async (code, message) => {
     createCodexLoginMock.mockResolvedValueOnce({ results: [{ line: 1, email: 'example@example.com', account_id: 42, task: { id: 9, account_id: 42, status: 'failed', stage: 'failed', error_code: code } }], runtime })

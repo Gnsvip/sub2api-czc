@@ -17,6 +17,8 @@ SHA-512。只下载库，不自动安装浏览器、系统软件或修改沙箱�
 ## Linux 部署前置条件
 
 - 安装带依赖的 Google Chrome，默认路径 `/opt/google/chrome/chrome`。
+- 安装 `xvfb` 与 `xauth`。Linux 使用普通浏览器加独立虚拟显示，避免把 headless
+  浏览器与普通浏览器的上游兼容性混为一谈；每个显示带独立 Xauthority，禁止 TCP 监听。
 - 其他位置可设置 `OPENAI_CODEX_BROWSER_EXECUTABLE` 为可信的可执行文件绝对路径。
 - 必须以非 root 用户运行，启用 Chromium 沙箱。Ubuntu 的 AppArmor 配置需要允许
   对应 Chrome 可执行文件使用 user namespace；不能使用 `--no-sandbox` 代替。

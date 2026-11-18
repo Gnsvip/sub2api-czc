@@ -95,6 +95,14 @@ var instructionsGPT55_0_163 string
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
 
+// GPT-6.2 descriptors from the 2026-11-17 Codex models response, client 0.169.0.
+//
+//go:embed codex_gpt62_sol.json
+var CodexGPT62SolMetadata []byte
+
+//go:embed codex_gpt62_astra.json
+var CodexGPT62AstraMetadata []byte
+
 // CodexGPT61SolMetadata is the complete official descriptor from openai/codex
 // b1e72963c3b71a9265a551e54beff078384efed9, codex-rs/models-manager/models.json.
 //
@@ -106,15 +114,6 @@ var CodexGPT61SolMetadata []byte
 //
 //go:embed codex_gpt61_terra.json
 var CodexGPT61TerraMetadata []byte
-
-// Official Codex descriptors from openai/codex
-// 6c0cee502d215e5df2dd9a303cf2e252229c9e12, codex-rs/models-manager/models.json.
-//
-//go:embed codex_gpt62_astra.json
-var CodexGPT62AstraMetadata []byte
-
-//go:embed codex_gpt62_sol.json
-var CodexGPT62SolMetadata []byte
 
 // codexInstructionsTemplate returns the base prompt bundled in an official
 // Codex model descriptor.
@@ -262,6 +261,25 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 	return false
 }
 
+// GPT62ModelID returns the published model ID for local effort and compact
+// spellings. Keep disabled effort suffixes identifiable for request validation.
+func GPT62ModelID(model string) string {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if canonical == base {
+			return base
+		}
+		suffix, ok := strings.CutPrefix(canonical, base+"-")
+		if ok {
+			switch suffix {
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+				return base
+			}
+		}
+	}
+	return ""
+}
+
 // IsGPT61SolModelSpelling recognizes the published model and local effort/compact
 // spellings. Invalid effort suffixes remain identifiable for request validation.
 func IsGPT61SolModelSpelling(model string) bool {
@@ -310,19 +328,7 @@ func RequiresResponsesForToolCalls(model string) bool {
 // existing local effort/compact suffixes. Ultra is a Codex orchestration mode,
 // not an inference effort or a separate model alias.
 func CanonicalGPT62Model(model string) string {
-	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
-	for _, base := range []string{"gpt-6.2-astra", "gpt-6.2-sol"} {
-		if canonical == base {
-			return base
-		}
-		if suffix, ok := strings.CutPrefix(canonical, base+"-"); ok {
-			switch suffix {
-			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
-				return base
-			}
-		}
-	}
-	return ""
+	return GPT62ModelID(model)
 }
 
 func IsGPT62ModelSpelling(model string) bool {
@@ -351,16 +357,24 @@ func ValidateGPT61TerraReasoningEffort(model, effort string) error {
 }
 
 // ValidateGPT61ReasoningEffort applies the published effort scale of each
-// GPT-6.1 model and its GPT-6.2 successors.
+// GPT-6.1 and GPT-6.2 model.
 func ValidateGPT61ReasoningEffort(model, effort string) error {
-	if base := CanonicalGPT62Model(model); base != "" {
-		switch strings.ToLower(strings.TrimSpace(effort)) {
-		case "none", "minimal":
-			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, effort)
-		}
+	if err := ValidateGPT62ReasoningEffort(model, effort); err != nil {
+		return err
 	}
 	if err := ValidateGPT61SolReasoningEffort(model, effort); err != nil {
 		return err
 	}
 	return ValidateGPT61TerraReasoningEffort(model, effort)
+}
+
+// ValidateGPT62ReasoningEffort rejects disabled and minimal reasoning on GPT-6.2.
+func ValidateGPT62ReasoningEffort(model, effort string) error {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal":
+		if base := GPT62ModelID(model); base != "" {
+			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, effort)
+		}
+	}
+	return nil
 }

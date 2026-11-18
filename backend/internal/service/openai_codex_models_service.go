@@ -571,6 +571,8 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		// The October 12, 2026 Codex/Work default increased to 500k after
 		// the bundled official snapshot. Explicit upstream metadata still wins.
 		descriptor.ContextWindow = 500_000
+		// The two 6.2 descriptors now occupy the first two slots.
+		descriptor.Priority = 3
 	}
 	if openai.IsGPT61TerraModelSpelling(modelID) {
 		// The Codex descriptor differs from the API model page: Codex offers

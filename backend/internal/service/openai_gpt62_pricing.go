@@ -52,12 +52,5 @@ func applyGPT62APIBillingRates(model string, pricing *ModelPricing) {
 }
 
 func gpt62UltrafastMultiplierAt(at time.Time) float64 {
-	if at.IsZero() {
-		at = time.Now()
-	}
-	// March 1, 2027 00:00 Pacific is still PST (UTC-8).
-	if at.Before(time.Date(2027, time.March, 1, 8, 0, 0, 0, time.UTC)) {
-		return 3
-	}
-	return 6
+	return openAIUltrafastMultiplier("gpt-6.2-sol", at)
 }

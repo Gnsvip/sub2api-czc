@@ -5,10 +5,13 @@ import threading
 import time
 import unittest
 import base64
+import importlib.util
+import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from tools.openai_oauth_reauth_worker import (
     OTPURLProvider,
@@ -49,6 +52,83 @@ class OTPHandler(BaseHTTPRequestHandler):
 
 
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
+    def test_managed_browser_dispatch_preserves_other_profiles_and_safe_failures(self):
+        browser = self.browser_adapter()
+        worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed")
+        original = worker.process_password_claim
+        browser.install(worker)
+        with patch.object(browser, "run_browser") as run:
+            worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "local_worker"})
+            run.assert_called_once()
+            for profile in ("excel", "siwc"):
+                worker.process_password_claim(None, {"oauth_profile": profile})
+            worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "session_studio"})
+            self.assertEqual(original.call_count, 3)
+        self.assertEqual(worker.safe_worker_failure(browser.BrowserFailure("security_check")), "security_check")
+        self.assertEqual(worker.safe_worker_failure(RuntimeError("password=synthetic-secret")), "worker_failed")
+        self.assertEqual(str(browser.BrowserFailure("synthetic-secret")), "worker_failed")
+
+    @staticmethod
+    def browser_adapter():
+        path = Path(__file__).resolve().parents[1] / "backend/internal/reauthruntime/browser/browser_worker.py"
+        spec = importlib.util.spec_from_file_location("codex_browser_adapter_tests", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_managed_browser_requires_verified_package_before_extraction(self):
+        browser = self.browser_adapter()
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
+                browser.unpack_playwright(b"tampered archive", Path(root))
+            self.assertEqual(list(Path(root).iterdir()), [])
+
+    def test_managed_browser_submission_and_cleanup(self):
+        browser = self.browser_adapter()
+        credentials = {key: "synthetic-" + key for key in ("access_token", "refresh_token", "id_token", "client_id")}
+        for accepted, error in ((True, None), (False, None), (False, "security_check"), (False, "not-a-safe-code")):
+            with self.subTest(accepted=accepted, error=error), tempfile.TemporaryDirectory() as root:
+                executable = Path(root) / "chrome"
+                executable.touch()
+                events = [{"type": "stage", "stage": "mfa_submitted"}]
+                events.append({"type": "error", "code": error} if error else {"type": "result", "credentials": credentials})
+                child = MagicMock()
+                child.stdout = io.BytesIO(b"".join((json.dumps(event) + "\n").encode() for event in events))
+                child.stdin = io.BytesIO()
+                child.poll.return_value = 0
+                child.wait.return_value = 0
+                api = SimpleNamespace(credentials=MagicMock(return_value={"status": "succeeded" if accepted else "failed"}))
+                worker = SimpleNamespace(_best_effort_progress=MagicMock())
+                claim = {"task_id": 12, "account_id": 42, "login_email": "test@example.com",
+                         "password": "synthetic-password", "totp_secret": "synthetic-totp",
+                         "proxy_url": "http://user:synthetic-proxy-password@127.0.0.1:9999", "expected_workspace": "workspace"}
+                with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable), "DATABASE_PASSWORD": "private-db"}), \
+                     patch.object(browser, "ensure_playwright", return_value=Path(root) / "index.mjs"), \
+                     patch.object(browser.subprocess, "Popen", return_value=child) as popen:
+                    if accepted:
+                        browser.run_browser(api, claim, worker)
+                    else:
+                        expected = error if error in browser.FAILURES else "worker_failed" if error else "verification_failed"
+                        with self.assertRaisesRegex(browser.BrowserFailure, expected):
+                            browser.run_browser(api, claim, worker)
+                kwargs = popen.call_args.kwargs
+                self.assertFalse(Path(kwargs["cwd"]).exists(), "temporary browser profile must be removed")
+                for secret in ("synthetic-password", "synthetic-totp", "synthetic-proxy-password", "private-db"):
+                    self.assertNotIn(secret, repr(popen.call_args))
+                self.assertNotIn("OPENAI_REAUTH_WORKER_TOKEN", kwargs["env"])
+                self.assertEqual(api.credentials.call_count, 0 if error else 1)
+                self.assertTrue(child.stdout.closed)
+
+    def test_managed_browser_missing_executable_does_not_claim_success_or_download(self):
+        browser = self.browser_adapter()
+        api = SimpleNamespace(credentials=MagicMock())
+        with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": "/missing/authorization-browser"}), \
+             patch.object(browser, "ensure_playwright") as prepare:
+            with self.assertRaisesRegex(browser.BrowserFailure, "browser_unavailable"):
+                browser.run_browser(api, {"task_id": 1, "login_email": "test@example.com", "password": "test"}, None)
+        prepare.assert_not_called()
+        api.credentials.assert_not_called()
+
     def test_siwc_failures_use_fixed_stage_and_reason_without_external_output(self):
         cases = (
             ("[1/5] Password accepted TOTP 2FA challenge reached 2FA verification accepted SIWC_INTERACTION_REQUIRED", "mfa_accepted", "browser_interaction_required"),

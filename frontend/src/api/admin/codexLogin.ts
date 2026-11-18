@@ -68,6 +68,9 @@ export function codexLoginError(code?: string): string {
     account_changed: '账号状态已变更，请检查后重试',
     timeout: '本次授权超时',
     transport_error: '登录网络连接失败',
+    browser_unavailable: '服务器尚未配置授权浏览器，请先安装 Chrome',
+    browser_start_failed: '授权浏览器启动失败，请检查浏览器依赖和沙箱权限',
+    browser_dependency_failed: '浏览器组件准备失败，请检查服务器访问 npm 的连接',
     rate_limited: '上游暂时限流，稍后重试',
     service_error: '上游登录服务暂不可用',
     worker_failed: '授权未完成，请检查登录资料和运行环境',
@@ -79,5 +82,18 @@ export function codexLoginError(code?: string): string {
   return code ? messages[code] || '授权未完成，请在编辑账号中检查并重试' : ''
 }
 export function codexLoginTaskLabel(task?: CodexLoginTask | null): string {
+  if (task?.status === 'running') {
+    const stages: Record<string, string> = {
+      browser_starting: '正在启动授权浏览器',
+      protocol_connecting: '正在打开登录页面',
+      email_submitted: '已提交邮箱',
+      password_submitted: '已提交密码',
+      mfa_submitted: '已提交 2FA 验证码',
+      waiting_callback: '正在确认 OAuth 授权',
+      exchanging_token: '正在交换授权令牌',
+      applying_credentials: '正在校验身份和连通性',
+    }
+    return stages[task.stage] || '授权中'
+  }
   return ({ queued: '等待授权', running: '授权中', succeeded: '已授权', failed: '授权失败', cancelled: '已取消' } as Record<string, string>)[task?.status || ''] || '尚未授权'
 }

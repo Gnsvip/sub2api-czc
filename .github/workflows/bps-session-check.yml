@@ -65,6 +65,24 @@ jobs:
           git diff --binary > "$RUNNER_TEMP/bps-format.patch"
       - name: Excel worker regressions
         run: python3 -m unittest tools.test_openai_excel_oauth_adapter tools.test_openai_oauth_reauth_worker tools.test_openai_oauth_reauth_runtime_controls tools.test_openai_oauth_reauth_engines
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Codex browser OAuth regressions (synthetic credentials only)
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          path = Path('backend/internal/reauthruntime/browser/browser_worker.py').resolve()
+          spec = importlib.util.spec_from_file_location('browser_worker', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('CODEX_TEST_PLAYWRIGHT=' + str(module.ensure_playwright(Path(os.environ['RUNNER_TEMP']))) + '\n')
+          PY
+          echo "CODEX_TEST_CHROME=$(readlink -f "$(command -v google-chrome)")" >> "$GITHUB_ENV"
+      - name: Run sandboxed browser OAuth checks
+        run: node --test tools/test_codex_browser.mjs
       - name: Protocol regressions
         working-directory: backend
         run: |

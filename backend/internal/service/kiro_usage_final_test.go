@@ -114,3 +114,37 @@ func TestMergeAnthropicUsage_CacheCreationBreakdown(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "cache_creation\"")
 }
+
+// The upstream cache billing fallback must not resurrect a cleared Kiro
+// estimate when the final event omits the optional per-TTL object.
+func TestKiroUsageFinalWithoutTTLDoesNotRebillEstimate(t *testing.T) {
+	final := `{"type":"message_delta","usage":{"input_tokens":0,"output_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"usage_final":true}}`
+	for name, parse := range map[string]func(string, *ClaudeUsage){
+		"native":      (&GatewayService{}).parseSSEUsage,
+		"passthrough": parseSSEUsagePassthrough,
+		"bridge": func(data string, dst *ClaudeUsage) {
+			var event apicompat.AnthropicStreamEvent
+			require.NoError(t, json.Unmarshal([]byte(data), &event))
+			if event.Message != nil {
+				mergeAnthropicUsage(dst, event.Message.Usage)
+			} else if event.Usage != nil {
+				mergeAnthropicUsage(dst, *event.Usage)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			usage := &ClaudeUsage{}
+			parse(kiroStart, usage)
+			usage.CacheReadInputTokens = 100
+			usage.promptTotalPresent, usage.promptTotalTokens = true, 900000
+			parse(final, usage)
+			require.Zero(t, usage.InputTokens)
+			require.Zero(t, usage.CacheReadInputTokens)
+			require.Zero(t, usage.CacheCreationInputTokens)
+			require.Zero(t, usage.CacheCreation5mTokens)
+			require.Zero(t, usage.CacheCreation1hTokens)
+			require.Zero(t, usage.billingUsageTokens().CacheCreationTokens)
+			require.Equal(t, 10, usage.OutputTokens)
+		})
+	}
+}

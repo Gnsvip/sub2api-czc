@@ -345,6 +345,7 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 	// usage_final (kiro-rs extension): the event carries the authoritative final
 	// snapshot, so zero buckets must override request-time estimates.
 	if src.UsageFinal {
+		dst.promptTotalPresent = false
 		dst.InputTokens = max(src.InputTokens, 0)
 		dst.CacheReadInputTokens = max(cacheReadTokens, 0)
 		dst.CacheCreationInputTokens = max(src.CacheCreationInputTokens, 0)
@@ -391,6 +392,13 @@ func normalizeAnthropicPromptTotal(usage *ClaudeUsage, promptTokens int, promptC
 }
 
 func mergeAnthropicCacheCreationUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
+	if src.UsageFinal && src.HasCacheCreationInputTokens() && src.CacheCreationInputTokens <= 0 {
+		dst.CacheCreationInputTokens = 0
+		dst.CacheCreation5mTokens, dst.CacheCreation1hTokens = 0, 0
+		dst.cacheCreationInputTokensPresent = true
+		dst.cacheCreationInputTokensFromDetails = false
+		return
+	}
 	if src.HasCacheCreationInputTokens() && (src.UsageFinal || src.CacheCreationInputTokens > 0 || dst.CacheCreationInputTokens <= 0) {
 		dst.CacheCreationInputTokens = max(src.CacheCreationInputTokens, 0)
 		dst.cacheCreationInputTokensPresent = true
@@ -413,7 +421,7 @@ func mergeAnthropicCacheCreationUsage(dst *ClaudeUsage, src apicompat.AnthropicU
 func mergeRawAnthropicCacheCreationUsage(node gjson.Result, dst *ClaudeUsage) {
 	aggregate := node.Get("cache_creation_input_tokens")
 	usage := apicompat.AnthropicUsage{
-		UsageFinal:                     node.Get("usage_final").Bool(),
+		UsageFinal:                      node.Get("usage_final").Bool(),
 		CacheCreationInputTokens:        int(aggregate.Int()),
 		CacheCreationInputTokensPresent: aggregate.Exists() && aggregate.Type != gjson.Null,
 		CacheCreation:                   &apicompat.AnthropicCacheCreation{},

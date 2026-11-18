@@ -788,6 +788,10 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 			}
 		}
 	}
+	if usageNode.Get("usage_final").Bool() {
+		usage.promptTotalPresent = false
+		return
+	}
 	normalizeAnthropicCompatiblePromptUsage(usageNode, usage)
 }
 

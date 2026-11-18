@@ -1381,7 +1381,9 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	if patch.hasCacheCreation1h {
 		usage.CacheCreation1hTokens = patch.cacheCreation1hTokens
 	}
-	if (!usage.cacheCreationInputTokensPresent || usage.cacheCreationInputTokensFromDetails || usage.CacheCreationInputTokens <= 0) && (patch.hasCacheCreation5m || patch.hasCacheCreation1h) {
+	if patch.usageFinal && patch.hasCacheCreationInput && patch.cacheCreationInputTokens <= 0 {
+		usage.CacheCreation5mTokens, usage.CacheCreation1hTokens = 0, 0
+	} else if (!usage.cacheCreationInputTokensPresent || usage.cacheCreationInputTokensFromDetails || usage.CacheCreationInputTokens <= 0) && (patch.hasCacheCreation5m || patch.hasCacheCreation1h) {
 		usage.CacheCreationInputTokens = max(usage.CacheCreation5mTokens, 0) + max(usage.CacheCreation1hTokens, 0)
 		usage.cacheCreationInputTokensFromDetails = true
 	}

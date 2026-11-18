@@ -64,6 +64,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
             let body;
             if (url.pathname === '/oauth/authorize') {
               state = url.searchParams.get('state'); challenge = url.searchParams.get('code_challenge');
+              assert.equal(url.searchParams.get('allowed_workspace_id'), input.expected_workspace);
               body = scenario === 'security_check' ? '<h1>Verify you are human</h1>' : form('Log in', '<input type="email" name="email">', '/password');
             } else if (url.pathname === '/password') {
               submitted.push(new URLSearchParams(route.request().postData()).get('email'));

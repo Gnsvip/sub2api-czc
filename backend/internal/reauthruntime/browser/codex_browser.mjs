@@ -125,9 +125,9 @@ async function selectWorkspace(page, expected) {
       return;
     }
   }
-  // Some consent pages show no workspace selector. The token identity check
-  // below still rejects another workspace before any credentials are submitted.
-  if (await visible(page, '[role="combobox"],[role="radio"],select,input[type="radio"]')) fail('identity_mismatch');
+  // Custom widgets may expose names but no stable IDs. Do not guess from a
+  // display name: authorize is constrained with allowed_workspace_id, and the
+  // token identity check rejects any different workspace before submission.
 }
 
 export async function authorize(chromium, input, options = {}) {
@@ -141,6 +141,7 @@ export async function authorize(chromium, input, options = {}) {
     scope: 'openid profile email offline_access', state, code_challenge_method: 'S256',
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     codex_cli_simplified_flow: 'true', id_token_add_organizations: 'true' });
+  if (input.expected_workspace) params.set('allowed_workspace_id', input.expected_workspace);
   let browser, context;
   let callback, callbackError, blocked = '', challengeAt = 0;
   const deadline = Date.now() + (options.timeoutMs || 180000);

@@ -99,7 +99,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
           } });
         } };
       } };
-      const promise = authorize(injected, input, { timeoutMs: 15000, emit: event => stages.push(event) });
+      const promise = authorize(injected, input, { timeoutMs: 30000, emit: event => stages.push(event) });
       if (scenario === 'success') {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);

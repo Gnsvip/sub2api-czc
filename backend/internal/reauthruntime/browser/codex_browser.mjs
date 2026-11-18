@@ -142,13 +142,13 @@ export async function authorize(chromium, input, options = {}) {
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     codex_cli_simplified_flow: 'true', id_token_add_organizations: 'true' });
   let browser, context;
-  let callback, callbackError, blocked = '';
+  let callback, callbackError, blocked = '', challengeAt = 0;
   const deadline = Date.now() + (options.timeoutMs || 180000);
   try {
     stage('browser_starting');
     try {
       browser = await chromium.launch({ executablePath: options.executablePath,
-        headless: true, chromiumSandbox: true, timeout: 30000,
+        headless: options.headless ?? true, chromiumSandbox: true, timeout: 30000,
         ...(proxy ? { proxy } : {}) });
     } catch { fail('browser_start_failed'); }
     context = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block',
@@ -166,7 +166,12 @@ export async function authorize(chromium, input, options = {}) {
       if (response.request().isNavigationRequest() && response.url().startsWith(AUTH + '/')) {
         if (response.status() === 429) blocked = 'rate_limited';
         if (response.status() >= 500) blocked = 'service_error';
-        if (response.headers()['cf-mitigated'] === 'challenge') blocked = 'security_check';
+        if (response.headers()['cf-mitigated'] === 'challenge') {
+          blocked = 'security_check';
+          challengeAt ||= Date.now();
+        } else if (response.status() < 400 && blocked === 'security_check') {
+          blocked = '';
+        }
       }
     });
     stage('protocol_connecting');
@@ -175,7 +180,7 @@ export async function authorize(chromium, input, options = {}) {
     let idleSince = Date.now();
     while (!callback) {
       if (callbackError) throw callbackError;
-      if (blocked) fail(blocked);
+      if (blocked && blocked !== 'security_check') fail(blocked);
       if (Date.now() > deadline) fail('timeout');
       if (page.isClosed()) fail('transport_error');
       const current = new URL(page.url());
@@ -183,8 +188,16 @@ export async function authorize(chromium, input, options = {}) {
       if (current.origin !== AUTH) fail('additional_verification');
       const text = (await page.locator('body').innerText()).slice(0, 24000);
       const reason = pageFailure(text, await page.title(), current.href);
-      if (reason) fail(reason);
       if (await visible(page, 'iframe[src*="challenges.cloudflare.com"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"]')) fail('security_check');
+      if (reason === 'security_check' || blocked === 'security_check') {
+        // A normal browser may finish an initial JavaScript interstitial by
+        // itself. Allow one bounded page load; never click/solve a challenge.
+        challengeAt ||= Date.now();
+        if (Date.now() - challengeAt >= 15000) fail('security_check');
+        await new Promise(resolve => setTimeout(resolve, 400));
+        continue;
+      }
+      if (reason) fail(reason);
       let progressed = false;
       const email = await visible(page, 'input[type="email"],input[name="email"]');
       const password = await visible(page, 'input[type="password"]');
@@ -241,7 +254,8 @@ async function main() {
     const input = JSON.parse(raw); raw = '';
     const { chromium } = await import(pathToFileURL(process.argv[2]).href);
     const credentials = await authorize(chromium, input, {
-      executablePath: process.env.OPENAI_CODEX_BROWSER_EXECUTABLE, emit });
+      executablePath: process.env.OPENAI_CODEX_BROWSER_EXECUTABLE,
+      headless: process.env.OPENAI_CODEX_BROWSER_HEADLESS !== 'false', emit });
     emit({ type: 'result', credentials });
   } catch (error) {
     emit({ type: 'error', code: error instanceof LoginFailure ? error.code : 'worker_failed' });

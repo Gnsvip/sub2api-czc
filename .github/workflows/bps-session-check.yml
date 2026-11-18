@@ -27,6 +27,36 @@ env:
   GOMEMLIMIT: 3GiB
 
 jobs:
+  browser-authorization:
+    if: ${{ !inputs.frontend_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Prepare pinned browser library (synthetic credentials only)
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          path = Path('backend/internal/reauthruntime/browser/browser_worker.py').resolve()
+          spec = importlib.util.spec_from_file_location('browser_worker', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('CODEX_TEST_PLAYWRIGHT=' + str(module.ensure_playwright(Path(os.environ['RUNNER_TEMP']))) + '\n')
+          PY
+          echo "CODEX_TEST_CHROME=$(readlink -f "$(command -v google-chrome)")" >> "$GITHUB_ENV"
+      - name: Run sandboxed browser OAuth checks
+        run: node --test tools/test_codex_browser.mjs > "$RUNNER_TEMP/codex-browser-tests.log" 2>&1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codex-browser-oauth-validation
+          path: ${{ runner.temp }}/codex-browser-tests.log
+          retention-days: 7
   backend:
     if: ${{ !inputs.frontend_only }}
     services:
@@ -65,24 +95,6 @@ jobs:
           git diff --binary > "$RUNNER_TEMP/bps-format.patch"
       - name: Excel worker regressions
         run: python3 -m unittest tools.test_openai_excel_oauth_adapter tools.test_openai_oauth_reauth_worker tools.test_openai_oauth_reauth_runtime_controls tools.test_openai_oauth_reauth_engines
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Codex browser OAuth regressions (synthetic credentials only)
-        run: |
-          python3 - <<'PY'
-          import importlib.util, os
-          from pathlib import Path
-          path = Path('backend/internal/reauthruntime/browser/browser_worker.py').resolve()
-          spec = importlib.util.spec_from_file_location('browser_worker', path)
-          module = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(module)
-          with open(os.environ['GITHUB_ENV'], 'a') as output:
-              output.write('CODEX_TEST_PLAYWRIGHT=' + str(module.ensure_playwright(Path(os.environ['RUNNER_TEMP']))) + '\n')
-          PY
-          echo "CODEX_TEST_CHROME=$(readlink -f "$(command -v google-chrome)")" >> "$GITHUB_ENV"
-      - name: Run sandboxed browser OAuth checks
-        run: node --test tools/test_codex_browser.mjs
       - name: Protocol regressions
         working-directory: backend
         run: |
@@ -181,6 +193,11 @@ jobs:
           go generate ./ent
           go generate ./cmd/server
           go build -tags embed -trimpath -o "$RUNNER_TEMP/bps-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        with:
+          name: codex-browser-validation-linux-amd64
+          path: ${{ runner.temp }}/bps-server
+          retention-days: 3
       - uses: actions/upload-artifact@v7
         if: always()
         with:

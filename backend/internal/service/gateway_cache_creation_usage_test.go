@@ -125,6 +125,12 @@ func TestAnthropicCacheCreationSnapshots(t *testing.T) {
 	}
 }
 
+// Cache boundary tests still need visible output to pass the customized empty
+// completion guard. These content events deliberately carry no usage fields.
+const anthropicCacheBoundaryVisibleContent = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+	"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+	"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+
 func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, test := range []struct {
@@ -150,6 +156,7 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 			for _, terminal := range []string{"stop", "eof"} {
 				t.Run(test.name+"/"+route+"/"+terminal, func(t *testing.T) {
 					payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"content\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2," + test.start + "}}}\n\n"
+					payload += anthropicCacheBoundaryVisibleContent
 					for range 2 {
 						payload += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + test.delta + "}\n\n"
 					}
@@ -173,7 +180,8 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 							streamed, err = service.handleStreamingResponse(context.Background(), response, ctx, &Account{ID: 701}, time.Now(), "claude-sonnet-4", "claude-sonnet-4", false)
 						} else {
 							streamed, err = service.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), response, ctx, &Account{ID: 701}, time.Now(), "claude-sonnet-4")
-							require.Equal(t, payload, recorder.Body.String())
+							// The custom EOF flusher may append an empty SSE separator.
+							require.Equal(t, strings.TrimRight(payload, "\n"), strings.TrimRight(recorder.Body.String(), "\n"))
 						}
 						require.NotNil(t, streamed)
 						result = &ForwardResult{RequestID: "cache_creation", Model: "claude-sonnet-4", Usage: *streamed.usage, Duration: time.Second}
@@ -644,6 +652,7 @@ func TestAnthropicCacheOnlyBufferedSSEUsage(t *testing.T) {
 			for _, terminal := range []string{"message_stop", "eof"} {
 				t.Run(test.name+"/"+adapter+"/"+terminal, func(t *testing.T) {
 					stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"content\":[],\"usage\":" + test.start + "}}\n\n"
+					stream += anthropicCacheBoundaryVisibleContent
 					for range 2 {
 						stream += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + test.delta + "}\n\n"
 					}

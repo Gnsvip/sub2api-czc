@@ -111,6 +111,7 @@ func cacheTTLOverrideBoundaryResponse(test cacheTTLOverrideBoundaryCase, stream 
 		return `{"id":"msg_cache","type":"message","role":"assistant","model":"k3","content":[],"usage":{` + base + `,` + cache + `}}`
 	}
 	payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"k3\",\"content\":[],\"usage\":{" + base + "," + strings.TrimPrefix(test.snapshots[0], "{") + "}}\n\n"
+	payload += anthropicCacheBoundaryVisibleContent
 	for _, snapshot := range test.snapshots {
 		for range 2 {
 			payload += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + snapshot + "}\n\n"
@@ -169,7 +170,10 @@ func TestCacheTTLOverrideForwardBillingBoundary(t *testing.T) {
 					require.Equal(t, test.aggregate, result.Usage.CacheCreationInputTokens)
 					require.Equal(t, test.present, result.Usage.cacheCreationInputTokensPresent)
 					if target == "" || route == "passthrough" {
-						if route == "nonstream" || route == "standard" || route == "passthrough" {
+						if route == "passthrough" {
+							// Compare the exact event payload, allowing the EOF separator.
+							require.Equal(t, strings.TrimRight(payload, "\n"), strings.TrimRight(recorder.Body.String(), "\n"))
+						} else if route == "nonstream" || route == "standard" {
 							require.Equal(t, payload, recorder.Body.String())
 						}
 					}

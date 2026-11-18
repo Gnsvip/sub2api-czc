@@ -210,6 +210,7 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 						inputField, wantInput = `"input_tokens":100,"prompt_tokens":100`, 50
 					}
 					payload := "event: message_start\ndata: " + `{"type":"message_start","message":{"id":"msg_total","type":"message","role":"assistant","model":"claude-sonnet-4","content":[],"usage":{` + inputField + `,"cache_creation":{"ephemeral_5m_input_tokens":20}}}}` + "\n\n"
+					payload += anthropicCacheBoundaryVisibleContent
 					for range 2 {
 						payload += "event: message_delta\ndata: " + `{"type":"message_delta","usage":{"cache_creation":{"ephemeral_1h_input_tokens":30}}}` + "\n\n"
 					}

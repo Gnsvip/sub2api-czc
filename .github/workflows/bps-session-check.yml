@@ -132,7 +132,7 @@ jobs:
         env:
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/codex-login-browser-results
           PLAYWRIGHT_PREVIEW_BUILD: '1'
-        run: pnpm exec playwright test e2e/performance-optimization.spec.ts --grep '^Codex automatic authorization:'
+        run: pnpm exec playwright test e2e/performance-optimization.spec.ts --grep 'Codex automatic authorization:'
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -633,14 +633,18 @@ func TestCodexLoginRecoveryOnlyUsesAuthenticationFailures(t *testing.T) {
 	}
 }
 
-func codexLoginTestCredentials(t *testing.T, clientID, workspace, user, email string) map[string]any {
+func codexLoginTestCredentials(t *testing.T, clientID, workspace, user, email string, plans ...string) map[string]any {
 	t.Helper()
 	jwt := func(claims map[string]any) string {
 		b, err := json.Marshal(claims)
 		require.NoError(t, err)
 		return "e30." + base64.RawURLEncoding.EncodeToString(b) + ".synthetic"
 	}
-	auth := map[string]any{"chatgpt_account_id": workspace, "chatgpt_user_id": user, "chatgpt_plan_type": "pro"}
+	plan := "pro"
+	if len(plans) > 0 {
+		plan = plans[0]
+	}
+	auth := map[string]any{"chatgpt_account_id": workspace, "chatgpt_user_id": user, "chatgpt_plan_type": plan}
 	return map[string]any{"client_id": clientID, "refresh_token": "synthetic-refresh",
 		"access_token": jwt(map[string]any{"client_id": clientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": auth}),
 		"id_token":     jwt(map[string]any{"aud": []string{clientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": email, "https://api.openai.com/auth": auth})}
@@ -661,6 +665,36 @@ func TestCodexLoginRejectsExcelAndDifferentIdentity(t *testing.T) {
 	wrongID := codexLoginTestCredentials(t, openai.ClientID, "other-workspace", "user", "one@example.com")
 	valid["id_token"] = wrongID["id_token"]
 	require.Error(t, ValidateCodexLoginIdentity(stored, valid))
+	for _, tc := range []struct {
+		name, from, workspace, user, email, plan string
+		allowed                                  bool
+	}{
+		{"same person personal fallback", "workspace", "personal", "user", "one@example.com", "free", true},
+		{"personal paid plan", "workspace", "personal", "user", "one@example.com", "pro", true},
+		{"no fallback evidence", "", "personal", "user", "one@example.com", "free", false},
+		{"wrong original", "another", "personal", "user", "one@example.com", "free", false},
+		{"another person", "workspace", "personal", "other-user", "one@example.com", "free", false},
+		{"another email", "workspace", "personal", "user", "other@example.com", "free", false},
+		{"another team", "workspace", "team", "user", "one@example.com", "business", false},
+		{"unknown plan", "workspace", "personal", "user", "one@example.com", "", false},
+		{"not a workspace change", "workspace", "workspace", "user", "one@example.com", "free", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := codexLoginTestCredentials(t, openai.ClientID, tc.workspace, tc.user, tc.email, tc.plan)
+			candidate[CodexWorkspaceFallbackFrom] = tc.from
+			candidate["plan_type"] = "free" // Unverified metadata cannot turn a team token into a personal token.
+			err := ValidateCodexLoginIdentity(stored, candidate)
+			if tc.allowed {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+	personal := codexLoginTestCredentials(t, openai.ClientID, "personal", "user", "one@example.com", "free")
+	personal[CodexWorkspaceFallbackFrom] = "workspace"
+	require.Error(t, ValidateCodexLoginIdentity(map[string]any{"email": "one@example.com", "chatgpt_account_id": "workspace"}, personal))
+	require.Equal(t, "workspace", stored["chatgpt_account_id"], "fallback validation must not modify the stored snapshot")
 }
 
 func TestCodexLoginPendingAccountCannotBeScheduled(t *testing.T) {
@@ -776,6 +810,22 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	require.Equal(t, 1, invalidated)
 	require.Equal(t, credentials["access_token"], repo.write["access_token"])
 	require.Equal(t, "old-access", reader.account.GetCredential("access_token"), "stored snapshot must not be mutated before the repository CAS")
+	personal := codexLoginTestCredentials(t, openai.ClientID, "personal", "user-1", "user@example.com", "free")
+	personal[CodexWorkspaceFallbackFrom] = "acct-1"
+	personal[CodexPersonalWorkspaceOnly] = true
+	oauth.codexLoginVerify = func(_ context.Context, candidate *Account) error {
+		require.Equal(t, "personal", candidate.GetCredential("chatgpt_account_id"))
+		require.Equal(t, "free", candidate.GetCredential("plan_type"))
+		return nil
+	}
+	result, err = oauth.CompleteCodexLogin(ctx, 9, "worker", personal)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded_personal_workspace_only", result.Stage)
+	require.Equal(t, "acct-1", repo.write[CodexWorkspaceFallbackFrom])
+	require.Equal(t, "", repo.write["organization_id"])
+	require.Equal(t, "", repo.write["subscription_expires_at"])
+	require.Nil(t, repo.write["subscription_is_delinquent"])
+	require.Equal(t, "acct-1", reader.account.GetCredential("chatgpt_account_id"))
 	for _, mode := range []string{OpenAIAuthModeAgentIdentity, OpenAIAuthModePersonalAccessToken} {
 		reader.account.Credentials["auth_mode"] = mode
 		_, err = oauth.CodexLoginStatus(ctx, 42)

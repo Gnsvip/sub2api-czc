@@ -23,8 +23,10 @@
 </template>
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
+import { useAppStore } from '@/stores/app'
 import { getCodexLoginStatus, saveCodexLogin, runCodexLogin, codexLoginError, codexLoginTaskLabel, type CodexLoginStatus } from '@/api/admin/codexLogin'
 const props = defineProps<{ accountId: number }>()
+const appStore = useAppStore()
 const emit = defineEmits<{ authorized: [] }>()
 const opened = ref(false)
 const loading = ref(false)
@@ -46,7 +48,10 @@ async function load(initial = false) {
     state.value = next
     if (initial) { email.value = next.config.login_email; enabled.value = next.config.enabled }
     if (['queued','running'].includes(next.task?.status || '')) timer = setTimeout(() => load(), 5000)
-    if (completed) emit('authorized')
+    if (completed) {
+      if (next.task?.stage.startsWith('succeeded_personal_workspace')) appStore.showWarning(codexLoginTaskLabel(next.task), 8000)
+      emit('authorized')
+    }
   } catch {
     if (current === generation && opened.value) {
       error.value = '无法读取自动授权设置，请稍后重试'

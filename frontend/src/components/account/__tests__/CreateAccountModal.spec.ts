@@ -390,7 +390,7 @@ describe('Codex automatic authorization and remembered settings', () => {
   it.each([
     ['totp_rejected', '2FA 验证失败，请检查 TOTP 密钥'],
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
-    ['workspace_unavailable', '本次登录未找到原工作区，请确认工作区权限后重新授权'],
+    ['workspace_unavailable', '无可用工作区，请手动授权'],
     ['browser_unavailable', '服务器授权浏览器未就绪，请检查 CloakBrowser、Xvfb 和 xauth'],
     ['browser_start_failed', '授权浏览器启动失败，请检查浏览器依赖和沙箱权限'],
   ])('shows the specific %s failure without claiming authorization succeeded', async (code, message) => {
@@ -402,6 +402,37 @@ describe('Codex automatic authorization and remembered settings', () => {
     expect(wrapper.text()).toContain(message)
     expect(wrapper.text()).toContain('授权失败')
     expect(wrapper.text()).not.toContain('已授权')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
+    ['succeeded_personal_workspace', '已授权 · 个人工作区'],
+  ])('shows the %s result as a successful authorization with the correct workspace notice', async (stage, label) => {
+    createCodexLoginMock.mockResolvedValueOnce({ results: [{ line: 1, email: 'example@example.com', account_id: 42, task: { id: 9, account_id: 42, status: 'succeeded', stage } }], runtime })
+    const wrapper = mount(CodexAutomaticAuthorization, { props: { options: { group_ids: [], proxy_ids: [], concurrency: 50, priority: 1 } } })
+    await wrapper.get('textarea').setValue('example@example.com----synthetic-password----')
+    await wrapper.get('[data-testid="codex-login-submit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).not.toContain('授权失败')
+    wrapper.unmount()
+  })
+
+  it('shows the personal-workspace notice before closing the completed account editor', async () => {
+    vi.useFakeTimers()
+    showWarningMock.mockClear()
+    getCodexLoginStatusMock.mockResolvedValueOnce({ config, task: { id: 9, account_id: 42, status: 'running', stage: 'exchanging_token' }, runtime })
+      .mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage: 'succeeded_personal_workspace_only' }, runtime })
+    const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
+    const details = wrapper.get('details')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(showWarningMock).toHaveBeenCalledWith('已授权 · 仅个人工作区', 8000)
+    expect(wrapper.emitted('authorized')).toHaveLength(1)
     wrapper.unmount()
   })
 

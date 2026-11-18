@@ -207,6 +207,8 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	for key, value := range candidate {
 		info[key] = value
 	}
+	delete(info, service.CodexWorkspaceFallbackFrom)
+	delete(info, service.CodexPersonalWorkspaceOnly)
 	info["_token_version"] = time.Now().UnixMilli()
 	raw, err := json.Marshal(info)
 	if err != nil {
@@ -224,7 +226,7 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage='succeeded',error_code='',updated_at=NOW() WHERE id=$1`, id)
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate))
 	if err != nil {
 		return false, err
 	}

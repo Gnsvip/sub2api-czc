@@ -50,7 +50,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'missing_radio_workspace', 'missing_select_workspace', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
@@ -94,16 +94,23 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
             } else if (url.pathname === '/consent') {
               const code = new URLSearchParams(route.request().postData()).get('code');
               assert.match(code, /^\d{6}$/); submitted.push('totp');
-              body = scenario === 'totp_rejected' ? '<p>Invalid verification code</p>' : form('Authorize Codex', '<select name="workspace"><option value="other">Other</option><option value="workspace">Default</option></select>', '/finish');
-              if (scenario === 'radio_workspace' || scenario === 'missing_radio_workspace') {
+              body = scenario === 'totp_rejected' ? '<p>Invalid verification code</p>' : form('Authorize Codex', '<select name="workspace"><option value="other">Personal account</option><option value="workspace">Business</option></select>', '/finish');
+              if (scenario === 'radio_workspace' || scenario === 'personal_radio_fallback') {
                 const target = scenario === 'radio_workspace' ? '<label><input type="radio" name="workspace" value="workspace">Business</label>' : '';
                 body = form('Select a workspace', '<label><input type="radio" name="workspace" value="other" checked>Personal account</label>' + target, '/finish');
-              } else if (scenario === 'missing_select_workspace') {
+              } else if (['personal_select_fallback', 'wrong_fallback_workspace', 'team_token_fallback'].includes(scenario)) {
                 body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option></select>', '/finish');
+              } else if (scenario === 'personal_with_other_team') {
+                body = form('Select a workspace', '<select name="workspace"><option value="team">Another team</option><option value="other">Personal account</option></select>', '/finish');
+              } else if (scenario === 'missing_workspace') {
+                body = form('Select a workspace', '<label><input type="radio" name="workspace" value="team" checked>Another team</label>', '/finish');
+              } else if (scenario === 'ambiguous_personal_workspace') {
+                body = form('Select a workspace', '<select name="workspace"><option value="one">Personal account</option><option value="two">Personal account</option></select>', '/finish');
               }
             } else if (url.pathname === '/finish') {
               consentSubmissions++;
-              assert.equal(new URLSearchParams(route.request().postData()).get('workspace'), 'workspace');
+              const expected = scenario.startsWith('personal_') || scenario === 'wrong_fallback_workspace' || scenario === 'team_token_fallback' ? 'other' : 'workspace';
+              assert.equal(new URLSearchParams(route.request().postData()).get('workspace'), expected);
               await route.fulfill({ status: 302, headers: { location: `${REDIRECT}?code=test-code&state=${scenario === 'bad_state' ? 'wrong' : state}` } });
               return;
             } else throw new Error('unexpected fixture path');
@@ -117,8 +124,14 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               assert.equal(request.form.code, 'test-code');
               const { createHash } = await import('node:crypto');
               assert.equal(createHash('sha256').update(request.form.code_verifier).digest('base64url'), challenge);
-              const payload = scenario === 'wrong_workspace' ? { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp,
+              let payload = scenario === 'wrong_workspace' ? { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp,
                 'https://api.openai.com/auth': { ...auth, chatgpt_account_id: 'other' } }) } : tokens;
+              if (scenario.startsWith('personal_') || scenario === 'wrong_fallback_workspace' || scenario === 'team_token_fallback') {
+                const selectedAuth = { ...auth, chatgpt_account_id: scenario === 'wrong_fallback_workspace' ? 'unselected' : 'other',
+                  chatgpt_plan_type: scenario === 'team_token_fallback' ? 'business' : 'free' };
+                payload = { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp, 'https://api.openai.com/auth': selectedAuth }),
+                  id_token: jwt({ aud: CLIENT_ID, exp, email: input.login_email, 'https://api.openai.com/auth': selectedAuth }) };
+              }
               return { status: () => 200, body: async () => Buffer.from(JSON.stringify(payload)) };
             } };
             const value = target[property];
@@ -127,17 +140,25 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, input, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace'].includes(scenario)) {
+      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);
         assert.equal(tokenCalls, 1);
         assert.ok(stages.some(event => event.stage === 'exchanging_token'));
+        if (scenario.startsWith('personal_')) {
+          assert.equal(result.codex_workspace_fallback_from, input.expected_workspace);
+          assert.equal(result.codex_personal_workspace_only, scenario !== 'personal_with_other_team');
+          assert.equal(result.chatgpt_account_id, 'other');
+          assert.equal(result.plan_type, 'free');
+        } else assert.equal(result.codex_workspace_fallback_from, undefined);
       } else {
-        const code = scenario.startsWith('missing_') ? 'workspace_unavailable' : ['bad_state', 'wrong_workspace'].includes(scenario) ? 'identity_mismatch' : scenario;
+        const noChoice = ['missing_workspace', 'ambiguous_personal_workspace'].includes(scenario);
+        const tokenMismatch = ['wrong_workspace', 'wrong_fallback_workspace', 'team_token_fallback'].includes(scenario);
+        const code = noChoice ? 'workspace_unavailable' : scenario === 'bad_state' || tokenMismatch ? 'identity_mismatch' : scenario;
         await assert.rejects(promise, { code });
-        if (scenario !== 'wrong_workspace') assert.equal(tokenCalls, 0);
-        if (scenario.startsWith('missing_')) assert.equal(consentSubmissions, 0);
+        if (!tokenMismatch) assert.equal(tokenCalls, 0);
+        if (noChoice) assert.equal(consentSubmissions, 0);
       }
       assert.equal(actualBrowser.isConnected(), false, 'browser must close on success and failure');
       assert.ok(stages.every(event => !JSON.stringify(event).includes('synthetic')));

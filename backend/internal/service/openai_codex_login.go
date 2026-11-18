@@ -20,6 +20,28 @@ import (
 
 const CodexAuthorizationPending = "Codex authorization pending"
 
+const CodexWorkspaceFallbackFrom = "codex_workspace_fallback_from"
+const CodexPersonalWorkspaceOnly = "codex_personal_workspace_only"
+
+func codexPersonalPlan(plan string) bool {
+	switch plan {
+	case "free", "go", "plus", "pro":
+		return true
+	default:
+		return false
+	}
+}
+
+func CodexLoginCompletionStage(credentials map[string]any) string {
+	if excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
+		if only, _ := credentials[CodexPersonalWorkspaceOnly].(bool); only {
+			return "succeeded_personal_workspace_only"
+		}
+		return "succeeded_personal_workspace"
+	}
+	return "succeeded"
+}
+
 type CodexLoginRepository interface {
 	GetCodexLoginConfig(context.Context, int64) (*ExcelLoginConfig, error)
 	SaveCodexLoginConfig(context.Context, *ExcelLoginConfig, int64) (bool, error)
@@ -423,12 +445,31 @@ func codexLoginTokenInfo(c map[string]any) (*OpenAITokenInfo, error) {
 	if user == "" || it.Email == "" || (at.Email != "" && !strings.EqualFold(at.Email, it.Email)) {
 		return nil, invalid
 	}
-	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: it.GetUserInfo().PlanType}, nil
+	userInfo := it.GetUserInfo()
+	if excelMapString(c, CodexWorkspaceFallbackFrom) != "" && (!codexPersonalPlan(at.OpenAIAuth.ChatGPTPlanType) || !codexPersonalPlan(userInfo.PlanType)) {
+		return nil, invalid
+	}
+	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: userInfo.PlanType, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
 }
 func ValidateCodexLoginIdentity(stored, candidate map[string]any) error {
 	info, err := codexLoginTokenInfo(candidate)
 	if err != nil {
 		return err
+	}
+	return validateCodexLoginIdentity(stored, candidate, info)
+}
+
+func validateCodexLoginIdentity(stored, candidate map[string]any, info *OpenAITokenInfo) error {
+	from := excelMapString(candidate, CodexWorkspaceFallbackFrom)
+	if from != "" {
+		// Only the same stored person/email may fall back to a verified personal
+		// workspace. A missing binding, another team or an unsolicited change fails.
+		if from != excelMapString(stored, "chatgpt_account_id") || from == info.ChatGPTAccountID ||
+			excelMapString(stored, "email") == "" || excelMapString(stored, "chatgpt_user_id") == "" || !codexPersonalPlan(info.PlanType) {
+			return errors.New("invalid Codex personal workspace fallback")
+		}
+		stored = maps.Clone(stored)
+		stored["chatgpt_account_id"] = info.ChatGPTAccountID
 	}
 	return validateExcelIdentity(&Account{Credentials: stored}, info)
 }
@@ -450,7 +491,7 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	}
 	info, err := codexLoginTokenInfo(c)
 	if err == nil {
-		err = validateExcelIdentity(a, info)
+		err = validateCodexLoginIdentity(a.Credentials, c, info)
 	}
 	if err != nil {
 		_ = s.FailExcelLogin(ctx, id, worker, "identity_mismatch")
@@ -468,6 +509,13 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_IDENTITY_MISMATCH", "授权邮箱与登录资料不一致")
 	}
 	safe := s.BuildAccountCredentials(info)
+	if excelMapString(c, CodexWorkspaceFallbackFrom) != "" {
+		// A new workspace must not inherit the old team's billing metadata.
+		safe["organization_id"] = info.OrganizationID
+		safe["subscription_expires_at"] = info.SubscriptionExpiresAt
+		safe["subscription_is_delinquent"] = nil
+		safe["chatgpt_account_is_fedramp"] = false
+	}
 	if s.codexLoginVerify == nil {
 		return nil, infraerrors.ServiceUnavailable("CODEX_LOGIN_VERIFIER_UNAVAILABLE", "授权验证服务未就绪")
 	}
@@ -486,6 +534,10 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		_ = s.FailExcelLogin(ctx, id, worker, "verification_failed")
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_VERIFICATION_FAILED", "授权后的连通验证未通过，请稍后重试")
 	}
+	if from := excelMapString(c, CodexWorkspaceFallbackFrom); from != "" {
+		safe[CodexWorkspaceFallbackFrom] = from
+		safe[CodexPersonalWorkspaceOnly], _ = c[CodexPersonalWorkspaceOnly].(bool)
+	}
 	changed, err := r.FinishCodexLogin(ctx, id, worker, safe)
 	if err != nil {
 		return nil, err
@@ -497,5 +549,5 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if s.codexLoginCredentialsChanged != nil {
 		s.codexLoginCredentialsChanged(ctx, a)
 	}
-	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: "succeeded"}, nil
+	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe)}, nil
 }

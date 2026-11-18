@@ -497,6 +497,37 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.Equal(t, int64(5), proxyID)
 			}
 		})
+		t.Run("personal fallback persists the new workspace and result without removing the pause", func(t *testing.T) {
+			const id int64 = 1120
+			newAccount(id, true, false)
+			queued, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.NotNil(t, queued)
+			claimed, e := repo.ClaimCodexLogin(ctx, "personal-fallback")
+			require.NoError(t, e)
+			require.Equal(t, queued.ID, claimed.ID)
+			personalAuth := map[string]any{"chatgpt_account_id": "personal", "chatgpt_user_id": "user", "chatgpt_plan_type": "free"}
+			personal := map[string]any{"client_id": openai.ClientID, "refresh_token": "personal-refresh", "email": "user@example.com", "chatgpt_account_id": "personal", "chatgpt_user_id": "user", "plan_type": "free", service.CodexWorkspaceFallbackFrom: "workspace", service.CodexPersonalWorkspaceOnly: true}
+			personal["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": personalAuth})
+			personal["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": personalAuth})
+			ok, e := repo.FinishCodexLogin(ctx, queued.ID, "personal-fallback", personal)
+			require.NoError(t, e)
+			require.True(t, ok)
+			var workspace, plan, status string
+			var schedulable, leakedMarker bool
+			var proxyID int64
+			require.NoError(t, db.QueryRow(`SELECT credentials->>'chatgpt_account_id',credentials->>'plan_type',status,schedulable,proxy_id,credentials ? 'codex_workspace_fallback_from' OR credentials ? 'codex_personal_workspace_only' FROM accounts WHERE id=$1`, id).Scan(&workspace, &plan, &status, &schedulable, &proxyID, &leakedMarker))
+			require.Equal(t, "personal", workspace)
+			require.Equal(t, "free", plan)
+			require.Equal(t, service.StatusActive, status)
+			require.False(t, schedulable)
+			require.EqualValues(t, 5, proxyID)
+			require.False(t, leakedMarker)
+			finished, e := repo.GetCodexLoginTask(ctx, id)
+			require.NoError(t, e)
+			require.Equal(t, "succeeded", finished.Status)
+			require.Equal(t, "succeeded_personal_workspace_only", finished.Stage)
+		})
 		t.Run("bounded retries and success resets failure budget", func(t *testing.T) {
 			const id int64 = 1100
 			newAccount(id, true, false)

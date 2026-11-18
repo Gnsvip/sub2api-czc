@@ -66,22 +66,29 @@ function jwt(raw) {
   } catch { fail('identity_mismatch'); }
 }
 
-export function credentialsFromTokens(tokens, input) {
+export function credentialsFromTokens(tokens, input, selection) {
   if (!tokens || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) fail('identity_mismatch');
   const access = jwt(tokens.access_token), id = jwt(tokens.id_token);
   const a = access[AUTH_CLAIM], i = id[AUTH_CLAIM];
   const email = String(id.email || '').toLowerCase();
   const user = a?.chatgpt_user_id || a?.user_id;
   const idUser = i?.chatgpt_user_id || i?.user_id;
+  const fallback = selection?.fallbackFrom && selection.fallbackFrom === input.expected_workspace &&
+    selection.workspace === a?.chatgpt_account_id && selection.workspace !== input.expected_workspace &&
+    ['free', 'go', 'plus', 'pro'].includes(a?.chatgpt_plan_type) &&
+    ['free', 'go', 'plus', 'pro'].includes(i?.chatgpt_plan_type);
   if ((access.client_id || access.azp) !== CLIENT_ID || ![id.aud].flat().includes(CLIENT_ID) ||
       !a?.chatgpt_account_id || !user || email !== input.login_email.toLowerCase() ||
       (access.email && access.email.toLowerCase() !== email) ||
       (i?.chatgpt_account_id && i.chatgpt_account_id !== a.chatgpt_account_id) ||
       (idUser && idUser !== user) ||
-      (input.expected_workspace && input.expected_workspace !== a.chatgpt_account_id)) fail('identity_mismatch');
+      (input.expected_workspace && input.expected_workspace !== a.chatgpt_account_id && !fallback) ||
+      (selection?.fallbackFrom && !fallback)) fail('identity_mismatch');
   return { access_token: tokens.access_token, refresh_token: tokens.refresh_token, id_token: tokens.id_token,
     client_id: CLIENT_ID, email: id.email, chatgpt_account_id: a.chatgpt_account_id,
-    chatgpt_user_id: user, expires_at: access.exp, plan_type: a.chatgpt_plan_type || '' };
+    chatgpt_user_id: user, expires_at: access.exp, plan_type: a.chatgpt_plan_type || '',
+    ...(fallback ? { codex_workspace_fallback_from: input.expected_workspace,
+      codex_personal_workspace_only: selection.personalOnly === true } : {}) };
 }
 
 export function pageFailure(text, title = '', url = '') {
@@ -111,26 +118,34 @@ async function advance(page) {
 
 async function selectWorkspace(page, expected) {
   if (!expected) return;
+  const choices = [];
   const select = await visible(page, 'select');
   if (select) {
-    const values = await select.locator('option').evaluateAll(options => options.map(option => option.value));
-    if (!values.includes(expected)) fail('workspace_unavailable');
-    await select.selectOption(expected);
-    return;
-  }
-  const radios = page.locator('input[type="radio"]');
-  for (let index = 0; index < await radios.count(); index++) {
-    if (await radios.nth(index).getAttribute('value') === expected) {
-      await radios.nth(index).check();
-      return;
+    const options = await select.locator('option').evaluateAll(items => items
+      .filter(option => !option.disabled && option.value)
+      .map(option => ({ value: option.value, label: option.textContent })));
+    choices.push(...options.map(option => ({ ...option, choose: () => select.selectOption(option.value) })));
+  } else {
+    const radios = page.locator('input[type="radio"]');
+    for (let index = 0; index < await radios.count(); index++) {
+      const radio = radios.nth(index);
+      if (!(await radio.isEnabled())) continue;
+      const choice = await radio.evaluate(element => ({ value: element.value,
+        label: [...(element.labels || [])].map(label => label.innerText || label.textContent).join(' ') ||
+          element.getAttribute('aria-label') || (element.getAttribute('aria-labelledby') || '')
+            .split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' ') }));
+      if (choice.value) choices.push({ ...choice, choose: () => radio.check() });
     }
   }
-  // An explicit choice list without the bound workspace must not silently
-  // authorize its default personal account. Workspace hints are not a guarantee.
-  if (await radios.count()) fail('workspace_unavailable');
-  // Custom widgets may expose names but no stable IDs. Do not guess from a
-  // display name. The final token identity check still rejects a different
-  // workspace even when the server ignores allowed_workspace_id.
+  if (!choices.length) return; // Keep the final token check for unrecognized widgets.
+  const original = choices.find(choice => choice.value === expected);
+  if (original) { await original.choose(); return { workspace: expected }; }
+  // Only an explicitly labeled personal choice may replace an unavailable
+  // original workspace. Never choose another team or merely the first option.
+  const personal = choices.filter(choice => /(?:^|\s)(?:personal(?:\s+(?:account|workspace))?|个人(?:账号|账户|工作区))(?:$|\s)/i.test(String(choice.label || '').trim()));
+  if (personal.length !== 1) fail('workspace_unavailable');
+  await personal[0].choose();
+  return { workspace: personal[0].value, fallbackFrom: expected, personalOnly: choices.length === 1 };
 }
 
 export async function authorize(chromium, input, options = {}) {
@@ -146,7 +161,7 @@ export async function authorize(chromium, input, options = {}) {
     codex_cli_simplified_flow: 'true', id_token_add_organizations: 'true' });
   if (input.expected_workspace) params.set('allowed_workspace_id', input.expected_workspace);
   let browser, context;
-  let callback, callbackError, blocked = '', challengeAt = 0;
+  let callback, callbackError, workspaceSelection, blocked = '', challengeAt = 0;
   const deadline = Date.now() + (options.timeoutMs || 180000);
   try {
     stage('browser_starting');
@@ -257,7 +272,8 @@ export async function authorize(chromium, input, options = {}) {
         await code.fill(totp(input.totp_secret));
         await advance(page); sent.add('mfa'); stage('mfa_submitted'); progressed = true;
       } else if (/consent|select.*(?:workspace|organization)|(?:workspace|organization).*select/.test(current.pathname) && !sent.has(current.pathname)) {
-        await selectWorkspace(page, input.expected_workspace);
+        const selected = await selectWorkspace(page, input.expected_workspace);
+        if (selected) workspaceSelection = selected;
         await advance(page); sent.add(current.pathname); stage('waiting_callback'); progressed = true;
       }
       if (progressed) idleSince = Date.now();
@@ -273,7 +289,7 @@ export async function authorize(chromium, input, options = {}) {
     if (response.status() !== 200) fail(response.status() === 429 ? 'rate_limited' : 'service_error');
     const body = await response.body();
     if (body.length > 1048576) fail('worker_failed');
-    return credentialsFromTokens(JSON.parse(body), input);
+    return credentialsFromTokens(JSON.parse(body), input, workspaceSelection);
   } catch (error) {
     if (error instanceof LoginFailure) throw error;
     // Never propagate Playwright errors: they can include URLs, form data and tokens.

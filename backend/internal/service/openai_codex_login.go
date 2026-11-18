@@ -273,7 +273,8 @@ func codexLoginRecoveryNeeded(a *Account) bool {
 	if m == CodexAuthorizationPending {
 		return true
 	}
-	if strings.HasPrefix(m, "Token revoked (401):") || strings.HasPrefix(m, "Unauthorized (401):") {
+	if strings.HasPrefix(m, "Token revoked (401):") || strings.HasPrefix(m, "Unauthorized (401):") ||
+		strings.HasPrefix(m, "Authentication failed (401):") {
 		return true
 	}
 	if strings.HasPrefix(m, "Token refresh failed (non-retryable):") {

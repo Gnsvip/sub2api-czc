@@ -179,7 +179,8 @@ export async function authorize(chromium, input, options = {}) {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'Authorization received. You may close this page.' });
     });
     page.on('response', response => {
-      if (response.request().isNavigationRequest() && response.url().startsWith(AUTH + '/')) {
+      if (response.request().isNavigationRequest() && response.request().frame() === page.mainFrame() &&
+          response.url().startsWith(AUTH + '/')) {
         if (response.status() === 429) blocked = 'rate_limited';
         if (response.status() >= 500) blocked = 'service_error';
         if (response.headers()['cf-mitigated'] === 'challenge') {
@@ -212,20 +213,26 @@ export async function authorize(chromium, input, options = {}) {
         }
       }
       const reason = pageFailure(text, await page.title(), current.href);
-      if (await visible(page, 'iframe[src*="challenges.cloudflare.com"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"]')) fail('security_check');
-      if (reason === 'security_check' || blocked === 'security_check') {
-        // A normal browser may finish an initial JavaScript interstitial by
-        // itself. Allow one bounded page load; never click/solve a challenge.
-        challengeAt ||= Date.now();
-        if (Date.now() - challengeAt >= 15000) fail('security_check');
-        await new Promise(resolve => setTimeout(resolve, 400));
-        continue;
-      }
-      if (reason) fail(reason);
-      let progressed = false;
+      const challengeVisible = await visible(page, 'iframe[src*="challenges.cloudflare.com"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"]');
       const email = await visible(page, 'input[type="email"],input[name="email"]');
       const password = await visible(page, 'input[type="password"]');
       const code = await visible(page, 'input[autocomplete="one-time-code"],input[name="code"],input[name="otp"]');
+      // An interstitial may replace its DOM without another navigation/200.
+      // Only an actual login form with no remaining challenge clears its latch.
+      if (blocked === 'security_check' && !reason && !challengeVisible && (email || password || code)) blocked = '';
+      if (reason === 'security_check' || blocked === 'security_check' || challengeVisible) {
+        // A normal browser may finish an initial JavaScript interstitial by
+        // itself, including its iframe. Never click/solve a challenge, submit
+        // credentials through it, or extend the overall authorization budget.
+        challengeAt ||= Date.now();
+        if (Date.now() - challengeAt >= 15000) fail('security_check');
+        idleSince = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 400));
+        continue;
+      }
+      challengeAt = 0;
+      if (reason) fail(reason);
+      let progressed = false;
       if (email && !sent.has('email')) {
         await email.fill(input.login_email);
         await advance(page); sent.add('email'); stage('email_submitted'); progressed = true;

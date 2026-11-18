@@ -19,7 +19,7 @@ const codexLoginAccountSQL = `a.deleted_at IS NULL AND a.platform='openai' AND a
 
 const codexLoginRecoverableSQL = `a.status='error'
  AND LOWER(COALESCE(a.error_message,'')) !~ '(account_deactivated|account_deleted|account_retired|cyber_policy)'
- AND (a.error_message='Codex authorization pending' OR a.error_message LIKE 'Token revoked (401):%' OR a.error_message LIKE 'Unauthorized (401):%'
+ AND (a.error_message='Codex authorization pending' OR a.error_message LIKE 'Token revoked (401):%' OR a.error_message LIKE 'Unauthorized (401):%' OR a.error_message LIKE 'Authentication failed (401):%'
  OR (a.error_message LIKE 'Token refresh failed (non-retryable):%' AND a.error_message ~ '(refresh_token_reused|refresh_token_invalidated|invalid_grant|invalid_refresh_token)'))`
 
 const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',COALESCE(a.error_message,''),'schedulable',a.schedulable,'proxy_id',a.proxy_id)`

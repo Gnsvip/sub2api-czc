@@ -77,7 +77,10 @@ func (h *OpenAIOAuthHandler) ExcelLoginClaim(c *gin.Context) {
 		response.BadRequest(c, "Invalid worker request")
 		return
 	}
-	claim, err := h.openaiOAuthService.ClaimExcelLogin(c.Request.Context(), input.WorkerID)
+	claim, err := h.openaiOAuthService.ClaimCodexLogin(c.Request.Context(), input.WorkerID)
+	if err == nil && claim == nil {
+		claim, err = h.openaiOAuthService.ClaimExcelLogin(c.Request.Context(), input.WorkerID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -97,7 +100,17 @@ func (h *OpenAIOAuthHandler) ExcelLoginWorkerUpdate(c *gin.Context) {
 	}
 	switch c.Param("action") {
 	case "credentials":
-		result, e := h.openaiOAuthService.CompleteExcelLogin(c.Request.Context(), id, input.WorkerID, input.Credentials)
+		codex, e := h.openaiOAuthService.IsCodexLoginTask(c.Request.Context(), id)
+		if e != nil {
+			response.ErrorFrom(c, e)
+			return
+		}
+		var result *service.ExcelLoginTask
+		if codex {
+			result, e = h.openaiOAuthService.CompleteCodexLogin(c.Request.Context(), id, input.WorkerID, input.Credentials)
+		} else {
+			result, e = h.openaiOAuthService.CompleteExcelLogin(c.Request.Context(), id, input.WorkerID, input.Credentials)
+		}
 		if e != nil {
 			response.ErrorFrom(c, e)
 			return

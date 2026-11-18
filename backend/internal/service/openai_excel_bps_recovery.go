@@ -149,14 +149,23 @@ func (s *OpenAIGatewayService) StopBPS403Recovery() {
 }
 
 func (s *OpenAIGatewayService) syncExcelBPS403Recovery(ctx context.Context) {
-	if !s.excelBPSGloballyEnabled(ctx) {
-		return
-	}
 	defer func() {
 		if recover() != nil {
 			logger.FromContext(ctx).Error("excel_bps.recovery_scan_panicked")
 		}
 	}()
+	// Ordinary Codex authorization must also run when BPS is disabled.
+	if g := s.excelGrants(); g != nil {
+		queueCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+		err := g.oauth.SyncCodexLogins(queueCtx)
+		stop()
+		if err != nil {
+			logger.FromContext(ctx).Warn("codex.authorization_queue_failed")
+		}
+	}
+	if !s.excelBPSGloballyEnabled(ctx) {
+		return
+	}
 	if g := s.excelGrants(); g != nil {
 		queueCtx, stop := context.WithTimeout(ctx, 10*time.Second)
 		err := g.oauth.SyncMissingExcelLogins(queueCtx)

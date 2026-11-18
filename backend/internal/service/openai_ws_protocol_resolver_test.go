@@ -117,19 +117,19 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 	t.Run("OAuth账号不会读取API Key专用开关", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = map[string]any{
-			"openai_apikey_responses_websockets_v2_enabled": false,
+			"openai_apikey_responses_websockets_v2_enabled": true,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_enabled", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "account_disabled", decision.Reason)
 	})
 
-	t.Run("OAuth账号未设置时默认走WSv2", func(t *testing.T) {
+	t.Run("OAuth账号未设置时默认走HTTP", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = nil
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_enabled", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "account_disabled", decision.Reason)
 	})
 
 	t.Run("兼容旧键openai_ws_enabled", func(t *testing.T) {
@@ -196,6 +196,19 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool,
 		},
 	}
+
+	t.Run("unset mode stays on HTTP unless the global default explicitly enables WS", func(t *testing.T) {
+		unset := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+		for _, mode := range []string{"", OpenAIWSIngressModeOff} {
+			defaultCfg := *cfg
+			defaultCfg.Gateway.OpenAIWS.IngressModeDefault = mode
+			decision := NewOpenAIWSProtocolResolver(&defaultCfg).Resolve(unset)
+			require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+			require.Equal(t, "account_mode_off", decision.Reason)
+		}
+		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(unset)
+		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+	})
 
 	t.Run("ctx_pool mode routes to ws v2", func(t *testing.T) {
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(account)

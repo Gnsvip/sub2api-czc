@@ -18,6 +18,11 @@ const {
   exchangeCodeMock,
   refreshOpenAITokenMock,
   authIsSimpleMode,
+  authUser,
+  createCodexLoginMock,
+  getCodexLoginStatusMock,
+  saveCodexLoginMock,
+  runCodexLoginMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -29,6 +34,11 @@ const {
   exchangeCodeMock: vi.fn(),
   refreshOpenAITokenMock: vi.fn(),
   authIsSimpleMode: { value: true },
+  authUser: { value: undefined as { id: number } | undefined },
+  createCodexLoginMock: vi.fn(),
+  getCodexLoginStatusMock: vi.fn(),
+  saveCodexLoginMock: vi.fn(),
+  runCodexLoginMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -41,10 +51,19 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    get user() { return authUser.value },
     get isSimpleMode() {
       return authIsSimpleMode.value
     },
   }),
+}))
+
+vi.mock('@/api/admin/codexLogin', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/admin/codexLogin')>(),
+  createCodexLoginAccounts: createCodexLoginMock,
+  getCodexLoginStatus: getCodexLoginStatusMock,
+  saveCodexLogin: saveCodexLoginMock,
+  runCodexLogin: runCodexLoginMock,
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -79,6 +98,9 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import CodexAutomaticAuthorization from '../CodexAutomaticAuthorization.vue'
+import CodexLoginSettings from '../CodexLoginSettings.vue'
+import { readAccountCreationDefaults, writeAccountCreationDefaults } from '../accountCreationDefaults'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -143,9 +165,9 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
-function mountModal(groups: any[] = []) {
+function mountModal(groups: any[] = [], proxies: any[] = []) {
   return mount(CreateAccountModal, {
-    props: { show: true, proxies: [], groups },
+    props: { show: true, proxies, groups },
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
@@ -229,6 +251,117 @@ async function submitOpenAIOAuthMethod(wrapper: ReturnType<typeof mountModal>, m
   return mock.mock.calls[0]?.[0]
 }
 
+describe('Codex automatic authorization and remembered settings', () => {
+  const runtime = { mode: 'managed', state: 'running' }
+  const config = { enabled: false, login_email: 'example@example.com', password_configured: true, totp_configured: true, revision: 1 }
+  beforeEach(() => {
+    authUser.value = { id: 7 }
+    authIsSimpleMode.value = false
+    localStorage.clear()
+    createAccountMock.mockReset()
+    createCodexLoginMock.mockReset().mockResolvedValue({ results: [{ line: 1, email: 'example@example.com', account_id: 42, task: { id: 9, account_id: 42, status: 'queued', stage: 'queued' } }], runtime })
+    getCodexLoginStatusMock.mockReset().mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage: 'succeeded' }, runtime })
+    saveCodexLoginMock.mockReset().mockResolvedValue({ config, task: null, runtime })
+    runCodexLoginMock.mockReset().mockResolvedValue({ id: 9, account_id: 42, status: 'queued', stage: 'queued' })
+  })
+  afterEach(() => { authUser.value = undefined; localStorage.clear(); vi.useRealTimers() })
+
+  it('keeps only non-secret defaults, separated by administrator and platform', () => {
+    const value = { group_ids: [1, 2, 2, -1], proxy_ids: [8], concurrency: 25, priority: 3, password: 'never-store-password', totp_secret: 'never-store-totp' }
+    writeAccountCreationDefaults(7, 'openai', 'oauth', true, value)
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth').settings).toEqual({ group_ids: [1, 2], proxy_ids: [8], concurrency: 25, priority: 3 })
+    expect(readAccountCreationDefaults(8, 'openai', 'oauth').settings).toBeUndefined()
+    expect(readAccountCreationDefaults(7, 'anthropic', 'oauth').settings).toBeUndefined()
+    expect(readAccountCreationDefaults(7, 'openai', 'apikey').settings).toBeUndefined()
+    expect(localStorage.getItem('sub2api.account-create.v1.7.openai.oauth')).not.toContain('never-store')
+    writeAccountCreationDefaults(7, 'openai', 'oauth', false, value)
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth')).toEqual({ remember: false })
+    expect(localStorage.getItem('sub2api.account-create.v1.7.openai.oauth')).toBe('{"remember":false}')
+    localStorage.setItem('sub2api.account-create.v1.7.openai.oauth', '{invalid json')
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth')).toEqual({ remember: true })
+  })
+
+  it('restores available groups after asynchronous loading and honors clearing', async () => {
+    writeAccountCreationDefaults(7, 'openai', 'oauth', true, { group_ids: [1, 2, 3, 404], proxy_ids: [8, 9], concurrency: 27, priority: 4 })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.setProps({
+      groups: [{ id: 1, name: 'GPT', platform: 'openai', status: 'active' }, { id: 2, name: 'Disabled', platform: 'openai', status: 'inactive' }, { id: 3, name: 'Claude', platform: 'anthropic', status: 'active' }] as any,
+      proxies: [{ id: 8, name: 'Proxy', status: 'active' }, { id: 9, name: 'Disabled', status: 'inactive' }] as any,
+    })
+    expect(wrapper.getComponent(GroupSelectorStub).props('modelValue')).toEqual([1])
+    await wrapper.get('[data-testid="openai-automatic-mode"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const automatic = wrapper.getComponent(CodexAutomaticAuthorization)
+    expect(automatic.props('options')).toMatchObject({ group_ids: [1], proxy_ids: [8], concurrency: 27, priority: 4 })
+    wrapper.unmount()
+
+    const reopened = mountModal([{ id: 1, name: 'GPT', platform: 'openai', status: 'active' }])
+    await selectButtonByText(reopened, 'OpenAI')
+    expect(reopened.getComponent(GroupSelectorStub).props('modelValue')).toEqual([1])
+    await selectButtonByText(reopened, '清除已记住设置')
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth')).toEqual({ remember: false })
+    reopened.unmount()
+  })
+
+  it('queues automatic login with selected settings, clears pasted secrets and stops polling when closed', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountModal([{ id: 1, name: 'GPT', platform: 'openai', status: 'active' }, { id: 2, name: 'Other GPT', platform: 'openai', status: 'active' }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="select-pricing-groups"]').trigger('click')
+    await wrapper.get('[data-testid="openai-automatic-mode"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const pasted = 'example@example.com----synthetic-password----JBSWY3DPEHPK3PXP'
+    await wrapper.get('[data-testid="codex-login-content"]').setValue(pasted)
+    await wrapper.get('[data-testid="codex-login-submit"]').trigger('click')
+    await flushPromises()
+    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.objectContaining({ group_ids: [1, 2], concurrency: 50 }), pasted, false)
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect((wrapper.get('[data-testid="codex-login-content"]').element as HTMLTextAreaElement).value).toBe('')
+    expect(localStorage.getItem('sub2api.account-create.v1.7.openai.oauth')).not.toContain('synthetic-password')
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth').settings?.group_ids).toEqual([1, 2])
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(wrapper.text()).toContain('已授权')
+    wrapper.unmount()
+    const calls = getCodexLoginStatusMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(getCodexLoginStatusMock).toHaveBeenCalledTimes(calls)
+  })
+
+  it('clears pasted secrets even when account creation fails', async () => {
+    createCodexLoginMock.mockRejectedValueOnce(new Error('network'))
+    const wrapper = mount(CodexAutomaticAuthorization, { props: { options: { group_ids: [], proxy_ids: [], concurrency: 50, priority: 1 } } })
+    await wrapper.get('textarea').setValue('example@example.com----synthetic-password----')
+    await wrapper.get('[data-testid="codex-login-submit"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    expect(wrapper.emitted('created')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not run or expose old secrets after the edit panel changes account', async () => {
+    const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
+    const details = wrapper.get('details')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+    const passwords = wrapper.findAll('input[type="password"]')
+    expect((passwords[0]!.element as HTMLInputElement).value).toBe('')
+    await passwords[0]!.setValue('synthetic-new-password')
+    let resolveSave!: (value: unknown) => void
+    saveCodexLoginMock.mockReturnValueOnce(new Promise(resolve => { resolveSave = resolve }))
+    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.setProps({ accountId: 43 })
+    resolveSave({ config, task: null, runtime })
+    await flushPromises()
+    expect(runCodexLoginMock).not.toHaveBeenCalled()
+    expect((wrapper.findAll('input[type="password"]')[0]!.element as HTMLInputElement).value).toBe('')
+    wrapper.unmount()
+  })
+})
+
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
@@ -261,6 +394,8 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       const wrapper = await openCodexImportStep()
       const payload = await submitOpenAIOAuthMethod(wrapper, method)
       expect(payload.concurrency).toBe(50)
+      expect(payload.extra.openai_oauth_responses_websockets_v2_mode).toBe('off')
+      expect(payload.extra.openai_oauth_responses_websockets_v2_enabled).toBe(false)
       expect(payload.extra.codex_image_generation_bridge).toBe(true)
       expect(payload.extra).not.toHaveProperty('codex_image_generation_bridge_enabled')
       expect(payload.extra).not.toHaveProperty('codex_image_generation_explicit_tool_policy')
@@ -1076,14 +1211,14 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 
-  it('defaults new OpenAI OAuth accounts to the ctx_pool WS v2 mode', async () => {
+  it('defaults new OpenAI OAuth accounts to the off WS v2 mode', async () => {
     const wrapper = await openCodexImportStep()
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
 
     const extra = importCodexSessionMock.mock.calls[0]?.[0]?.extra
-    expect(extra?.openai_oauth_responses_websockets_v2_mode).toBe('ctx_pool')
-    expect(extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
+    expect(extra?.openai_oauth_responses_websockets_v2_mode).toBe('off')
+    expect(extra?.openai_oauth_responses_websockets_v2_enabled).toBe(false)
   })
 
   it('keeps new OpenAI API key accounts on the off WS v2 mode', async () => {

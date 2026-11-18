@@ -95,13 +95,23 @@ func NewOpenAITokenProvider(
 	tokenCache OpenAITokenCache,
 	openAIOAuthService *OpenAIOAuthService,
 ) *OpenAITokenProvider {
-	return &OpenAITokenProvider{
+	p := &OpenAITokenProvider{
 		accountRepo:        accountRepo,
 		tokenCache:         tokenCache,
 		openAIOAuthService: openAIOAuthService,
 		metrics:            &openAITokenRuntimeMetricsStore{},
 		refreshPolicy:      OpenAIProviderRefreshPolicy(),
 	}
+	if openAIOAuthService != nil {
+		openAIOAuthService.codexLoginCredentialsChanged = func(ctx context.Context, account *Account) {
+			if p.tokenCache != nil {
+				_ = p.tokenCache.DeleteAccessToken(ctx, OpenAITokenCacheKey(account))
+			}
+			// Existing runtime rate-limit/policy blocks expire independently. A
+			// successful login must not clear a newer non-authentication block.
+		}
+	}
+	return p
 }
 
 // SetRefreshAPI injects unified OAuth refresh API and executor.

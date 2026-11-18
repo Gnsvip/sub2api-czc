@@ -149,6 +149,8 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/auth/passkey/login/finish":                    {},
 	"POST /api/v1/user/passkeys/register/finish":                {},
 	"POST /api/v1/admin/accounts/import/codex-session":          {},
+	"POST /api/v1/admin/openai/automatic-authorization":         {},
+	"PUT /api/v1/admin/openai/accounts/:id/codex-login":         {},
 	"PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session": {},
 }
 

@@ -114,9 +114,9 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	ctx := context.Background()
-	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
+	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',error_message TEXT,schedulable BOOLEAN DEFAULT TRUE,proxy_id BIGINT,credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
-	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql"} {
+	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql"} {
 		raw, e := os.ReadFile("../../migrations/" + migration)
 		require.NoError(t, e)
 		_, e = db.Exec(string(raw))
@@ -357,6 +357,178 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			require.Equal(t, scenario == "missing", pending, scenario)
 			require.Equal(t, "value", keep)
 		}
+	})
+
+	t.Run("Codex queue credential and administrator guards", func(t *testing.T) {
+		_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE status IN ('queued','running')`)
+		require.NoError(t, e)
+		codexCandidate := map[string]any{"client_id": openai.ClientID, "refresh_token": "codex-refresh", "email": "user@example.com", "chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}
+		auth := map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}
+		codexCandidate["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": auth})
+		codexCandidate["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": auth})
+		newAccount := func(id int64, enabled bool, pending bool) *service.ExcelLoginConfig {
+			t.Helper()
+			message := "Unauthorized (401): expired credentials"
+			if pending {
+				message = service.CodexAuthorizationPending
+			}
+			_, err := db.Exec(`INSERT INTO accounts(id,credentials,extra,status,error_message,schedulable,proxy_id) VALUES($1,$2::jsonb,jsonb_build_object('keep','custom','openai_codex_authorization_pending',$3::boolean),'error',$4,FALSE,5)`, id, string(primaryJSON), pending, message)
+			require.NoError(t, err)
+			config := &service.ExcelLoginConfig{AccountID: id, Enabled: enabled, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted-password"}
+			ok, err := repo.SaveCodexLoginConfig(ctx, config, 0)
+			require.NoError(t, err)
+			require.True(t, ok)
+			return config
+		}
+		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "admin pause", "proxy change", "disabled", "expired task"} {
+			t.Run(scenario, func(t *testing.T) {
+				id := int64(1000 + i)
+				config := newAccount(id, false, scenario == "initial success")
+				if scenario == "admin pause" {
+					_, e = db.Exec(`UPDATE accounts SET schedulable=TRUE WHERE id=$1`, id)
+					require.NoError(t, e)
+				}
+				auto, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				require.Nil(t, auto, "disabled auto recovery must not queue")
+				queued, e := repo.QueueCodexLogin(ctx, id, true)
+				require.NoError(t, e)
+				require.NotNil(t, queued)
+				defer func() {
+					_, _ = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE account_id=$1 AND status IN ('queued','running')`, id)
+				}()
+				excel, e := repo.ClaimExcelLogin(ctx, "excel-worker")
+				require.NoError(t, e)
+				require.Nil(t, excel, "Excel must not claim Codex tasks")
+				claimed, e := repo.ClaimCodexLogin(ctx, "worker-a")
+				require.NoError(t, e)
+				require.NotNil(t, claimed)
+				require.Equal(t, queued.ID, claimed.ID)
+				_, e = db.Exec(`INSERT INTO openai_excel_oauth_credentials(account_id,credentials_ciphertext) VALUES($1,'preserve-excel')`, id)
+				require.NoError(t, e)
+				worker := "worker-a"
+				switch scenario {
+				case "other worker":
+					worker = "worker-b"
+				case "new credentials":
+					_, e = db.Exec(`UPDATE accounts SET credentials=credentials||'{"access_token":"new-admin-token"}'::jsonb WHERE id=$1`, id)
+				case "new config":
+					_, e = repo.SaveCodexLoginConfig(ctx, config, 1)
+				case "admin pause":
+					_, e = db.Exec(`UPDATE accounts SET schedulable=FALSE WHERE id=$1`, id)
+				case "proxy change":
+					_, e = db.Exec(`UPDATE accounts SET proxy_id=6 WHERE id=$1`, id)
+				case "disabled":
+					_, e = db.Exec(`UPDATE accounts SET status='disabled' WHERE id=$1`, id)
+				case "expired task":
+					_, e = db.Exec(`UPDATE openai_excel_login_tasks SET created_at=NOW()-INTERVAL '31 minutes' WHERE id=$1`, queued.ID)
+				}
+				require.NoError(t, e)
+				ok, e := repo.FinishCodexLogin(ctx, queued.ID, worker, codexCandidate)
+				require.NoError(t, e)
+				success := scenario == "initial success" || scenario == "paused recovery"
+				require.Equal(t, success, ok)
+				var token, status, keep string
+				var schedulable bool
+				require.NoError(t, db.QueryRow(`SELECT credentials->>'access_token',status,schedulable,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&token, &status, &schedulable, &keep))
+				require.Equal(t, "custom", keep)
+				if success {
+					require.Equal(t, codexCandidate["access_token"], token)
+					require.Equal(t, "active", status)
+					require.Equal(t, scenario == "initial success", schedulable)
+				} else if scenario == "new credentials" {
+					require.Equal(t, "new-admin-token", token)
+				} else {
+					require.Equal(t, "native-primary", token)
+				}
+				grant, e := repo.GetExcelCredentials(ctx, id)
+				require.NoError(t, e)
+				require.Equal(t, "preserve-excel", grant)
+			})
+		}
+		t.Run("bounded retries and success resets failure budget", func(t *testing.T) {
+			const id int64 = 1100
+			newAccount(id, true, false)
+			for attempt := 0; attempt < 3; attempt++ {
+				queued, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				require.NotNil(t, queued)
+				claimed, e := repo.ClaimCodexLogin(ctx, "worker")
+				require.NoError(t, e)
+				require.Equal(t, queued.ID, claimed.ID)
+				ok, e := repo.FailExcelLogin(ctx, queued.ID, "worker", "transport_error")
+				require.NoError(t, e)
+				require.True(t, ok)
+				cooldown, e := repo.QueueCodexLogin(ctx, id, true)
+				require.NoError(t, e)
+				require.Nil(t, cooldown)
+				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '16 minutes' WHERE id=$1`, queued.ID)
+				require.NoError(t, e)
+			}
+			ids, e := repo.ListCodexLoginCandidates(ctx)
+			require.NoError(t, e)
+			require.NotContains(t, ids, id)
+			stopped, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.Nil(t, stopped)
+			manual, e := repo.QueueCodexLogin(ctx, id, true)
+			require.NoError(t, e)
+			require.NotNil(t, manual)
+			_, e = repo.ClaimCodexLogin(ctx, "worker")
+			require.NoError(t, e)
+			ok, e := repo.FinishCodexLogin(ctx, manual.ID, "worker", codexCandidate)
+			require.NoError(t, e)
+			require.True(t, ok)
+			_, e = db.Exec(`UPDATE accounts SET status='error',error_message='Token revoked (401): expired' WHERE id=$1`, id)
+			require.NoError(t, e)
+			again, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.NotNil(t, again)
+			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE id=$1`, again.ID)
+			require.NoError(t, e)
+		})
+		t.Run("password rejection needs manual intervention", func(t *testing.T) {
+			const id int64 = 1101
+			newAccount(id, true, false)
+			queued, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.NotNil(t, queued)
+			_, e = repo.ClaimCodexLogin(ctx, "worker")
+			require.NoError(t, e)
+			_, e = repo.FailExcelLogin(ctx, queued.ID, "worker", "password_rejected")
+			require.NoError(t, e)
+			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '16 minutes' WHERE id=$1`, queued.ID)
+			require.NoError(t, e)
+			again, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.Nil(t, again)
+			ids, e := repo.ListCodexLoginCandidates(ctx)
+			require.NoError(t, e)
+			require.NotContains(t, ids, id)
+		})
+		t.Run("concurrent queue only admits one task", func(t *testing.T) {
+			const id int64 = 1200
+			newAccount(id, true, false)
+			type result struct {
+				task *service.ExcelLoginTask
+				err  error
+			}
+			results := make(chan result, 8)
+			for i := 0; i < 8; i++ {
+				go func() { task, e := repo.QueueCodexLogin(ctx, id, false); results <- result{task, e} }()
+			}
+			count := 0
+			for i := 0; i < 8; i++ {
+				r := <-results
+				require.NoError(t, r.err)
+				if r.task != nil {
+					count++
+				}
+			}
+			require.Equal(t, 1, count)
+			_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE account_id=$1`, id)
+			require.NoError(t, e)
+		})
 	})
 
 }

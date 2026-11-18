@@ -17,7 +17,7 @@ import (
 
 // Keep the runtime aligned with the reviewed upstream sources, independently
 // of this fork's four-part version. Its GitHub release digest is verified.
-const excelLoginRuntimeVersion = "2.21.1"
+const excelLoginRuntimeVersion = "2.22.0"
 
 func (s *OpenAIOAuthService) configureExcelLoginWorker(cfg *config.Config) {
 	grant := s.excelGrants

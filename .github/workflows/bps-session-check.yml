@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'tools/**'
       - '.github/workflows/bps-session-check.yml'
 
 permissions:
@@ -62,7 +63,7 @@ jobs:
         working-directory: backend
         run: |
           go test -race ./internal/service/basispoints ./internal/mihomo ./internal/reauthruntime ./internal/util/transportdiag -count=1 -json > "$RUNNER_TEMP/bps-protocol-tests.jsonl"
-      - name: Pinned Excel runtime self-check (no login)
+      - name: Pinned Codex and Excel runtime self-check (no login)
         working-directory: backend
         env:
           BPS_RUNTIME_SMOKE: '1'
@@ -71,7 +72,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: backend
         run: |
-          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|TestOpenAIBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
+          go test -race -gcflags="github.com/Wei-Shaw/sub2api/internal/service=-e" -tags=unit ./internal/service ./internal/pkg/openai ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes ./internal/server/middleware -run '^(TestBPS|TestExcelOAuth|TestExcelLogin|TestExcelBPS|TestCodexLogin|TestOpenAIBPS|Test.*ExcelBPS|Test.*Mihomo|TestOpenAIOAuthService_|TestOpenAIOAuth|TestIsModelSupported_|Test.*Bulk.*OpenAI|TestBulkUpdateAccounts|TestAdminService.*Account.*OpenAI|Test.*OpenAIWSProtocol|TestOpenAIWSHTTPUpstream|Test.*FilterScheduler|Test.*SchedulerExtra|TestAccountIsSchedulable|TestWithHTTPUpstream)' -count=1 -json > "$RUNNER_TEMP/bps-integration-tests.jsonl"
       - name: Admin API key state and authentication regressions
         working-directory: backend
         run: |

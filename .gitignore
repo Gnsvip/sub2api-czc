@@ -157,6 +157,7 @@ docs/*
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/codex-credits.md
+!docs/codex-automatic-authorization.md
 !docs/tibo-oauth-auto-groups.md
 !docs/user-cache-diagnostics.md
 !docs/native-reasoning-replay.md

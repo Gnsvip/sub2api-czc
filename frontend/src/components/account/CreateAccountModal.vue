@@ -50,7 +50,7 @@
         <input
           v-model="form.name"
           type="text"
-          :required="!isGrokSSOInputMethod"
+          :required="!isGrokSSOInputMethod && !(isOpenAIOAuth && openaiCreationMode === 'automatic')"
           class="input"
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
@@ -3773,11 +3773,21 @@
           data-tour="account-form-groups"
         />
       </div>
-
+      <div v-if="isOpenAIOAuth" class="flex gap-2" aria-label="授权方式">
+        <button type="button" class="btn" :class="openaiCreationMode === 'manual' ? 'btn-primary' : 'btn-secondary'" @click="openaiCreationMode = 'manual'">手动授权</button>
+        <button type="button" class="btn" :class="openaiCreationMode === 'automatic' ? 'btn-primary' : 'btn-secondary'" data-testid="openai-automatic-mode" @click="openaiCreationMode = 'automatic'">自动授权</button>
+      </div>
+      <p v-if="isOpenAIOAuth && openaiCreationMode === 'automatic'" class="text-xs text-gray-500">下一步粘贴登录资料。账号名称可留空，自动使用邮箱。</p>
+      <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-400">
+        <label class="flex items-center gap-2"><input v-model="rememberCreationSettings" type="checkbox" data-testid="remember-account-settings" @change="saveCreationSettings" /> 记住添加设置（分组、代理、并发、优先级）</label>
+        <button type="button" class="text-xs hover:underline" @click="clearCreationSettings">清除已记住设置</button>
+      </div>
     </form>
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <CodexAutomaticAuthorization v-if="form.platform === 'openai' && openaiCreationMode === 'automatic'" :options="automaticAuthorizationOptions" @created="notifyAccountCreated" />
+      <template v-else>
       <BPSAccountSettings v-if="form.platform === 'openai'" v-model="bpsSettings" :groups="groups" />
       <label v-if="form.platform === 'openai'" class="block">
         <span class="input-label">{{ t('admin.accounts.openai.bpsAuthFlow') }}</span>
@@ -3821,7 +3831,7 @@
         @import-sso="handleGrokImportSSO"
         @authorize-password="handleGrokAuthorizePassword"
       />
-
+      </template>
     </div>
 
     <template #footer>
@@ -3870,7 +3880,7 @@
           {{ t('common.back') }}
         </button>
         <button
-          v-if="isManualInputMethod"
+          v-if="isManualInputMethod && !(form.platform === 'openai' && openaiCreationMode === 'automatic')"
           type="button"
           :disabled="!canExchangeCode"
           class="btn btn-primary"
@@ -4138,6 +4148,9 @@
 
 <script setup lang="ts">
 import BPSAccountSettings from './BPSAccountSettings.vue'
+import CodexAutomaticAuthorization from './CodexAutomaticAuthorization.vue'
+import { useAuthStore } from '@/stores/auth'
+import { readAccountCreationDefaults, writeAccountCreationDefaults } from './accountCreationDefaults'
 import { readBPSSettings, writeBPSSettings } from './bpsSettings'
 
 import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
@@ -4361,6 +4374,9 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const creationAuthStore = useAuthStore()
+const rememberCreationSettings = ref(true)
+const openaiCreationMode = ref<'manual' | 'automatic'>('manual')
 
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
@@ -4753,7 +4769,7 @@ const isOpenAICompatibleProviderManaged = computed(
     accountCategory.value === 'apikey' &&
     openAICompatibleProviderSelection.value !== 'custom'
 )
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_CTX_POOL)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
@@ -5256,7 +5272,7 @@ watch(
       openaiPassthroughModelFilterEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
-      openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_CTX_POOL
+      openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
@@ -5633,7 +5649,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    emit('created')
+    notifyAccountCreated()
     handleClose()
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
@@ -5654,6 +5670,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  openaiCreationMode.value = 'manual'
   openaiOAuthFlow.value = 'openai'
   step.value = 1
   form.name = ''
@@ -5726,7 +5743,7 @@ const resetForm = () => {
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompatibleProviderSelection.value = 'custom'
-  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_CTX_POOL
+  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
@@ -6019,7 +6036,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
-    if (!isGrokSSOInputMethod.value && !form.name.trim()) {
+    if (!isGrokSSOInputMethod.value && !(isOpenAIOAuth.value && openaiCreationMode.value === 'automatic') && !form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
@@ -6493,12 +6510,12 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      notifyAccountCreated()
       handleClose()
     } else if (successCount > 0) {
       appStore.showWarning(t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount }))
       grokOAuth.error.value = errors.join('\n')
-      emit('created')
+      notifyAccountCreated()
     } else {
       grokOAuth.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -6556,7 +6573,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      notifyAccountCreated()
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       // Same as OpenAI/Grok RT: keep input, show failures, refresh list.
@@ -6566,7 +6583,7 @@ const handleGrokImportSSO = async (ssoInput: string) => {
       grokOAuth.error.value = (result.failed || [])
         .map((item) => `#${item.index}: ${item.error || 'Unknown error'}`)
         .join('\n')
-      emit('created')
+      notifyAccountCreated()
     } else {
       grokOAuth.error.value = (result.failed || [])
         .map((item) => `#${item.index}: ${item.error || 'Unknown error'}`)
@@ -6672,7 +6689,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      notifyAccountCreated()
       handleClose()
     } else if (successCount > 0) {
       appStore.showWarning(
@@ -6682,7 +6699,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
         })
       )
       grokOAuth.error.value = errors.join('\n')
-      emit('created')
+      notifyAccountCreated()
     } else {
       grokOAuth.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -6754,7 +6771,7 @@ const handleOpenAIExchange = async (authCode: string) => {
       appStore.showSuccess(t('admin.accounts.accountCreated'))
     }
 
-    emit('created')
+    notifyAccountCreated()
     handleClose()
   } catch (error: any) {
     oauthClient.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -6859,7 +6876,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
     if (successCount > 0 && result.failed === 0) {
       appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
-      emit('created')
+      notifyAccountCreated()
       handleClose()
       return
     }
@@ -6875,7 +6892,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
     if (successCount > 0) {
       appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportPartial', params))
-      emit('created')
+      notifyAccountCreated()
       return
     }
 
@@ -6928,7 +6945,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
     })
 
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    emit('created')
+    notifyAccountCreated()
     handleClose()
   } catch (error: any) {
     oauthClient.error.value =
@@ -7028,14 +7045,14 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      notifyAccountCreated()
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       appStore.showWarning(
         t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount })
       )
       oauthClient.error.value = errors.join('\n')
-      emit('created')
+      notifyAccountCreated()
     } else {
       oauthClient.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -7127,14 +7144,14 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           ? t('admin.accounts.oauth.batchSuccess', { count: successCount })
           : t('admin.accounts.accountCreated')
       )
-      emit('created')
+      notifyAccountCreated()
       handleClose()
     } else if (successCount > 0 && failedCount > 0) {
       appStore.showWarning(
         t('admin.accounts.oauth.batchPartialSuccess', { success: successCount, failed: failedCount })
       )
       antigravityOAuth.error.value = errors.join('\n')
-      emit('created')
+      notifyAccountCreated()
     } else {
       antigravityOAuth.error.value = errors.join('\n')
       appStore.showError(t('admin.accounts.oauth.batchFailed'))
@@ -7509,10 +7526,10 @@ const handleCookieAuth = async (sessionKey: string) => {
     if (successCount > 0) {
       appStore.showSuccess(t('admin.accounts.oauth.successCreated', { count: successCount }))
       if (failedCount === 0) {
-        emit('created')
+        notifyAccountCreated()
         handleClose()
       } else {
-        emit('created')
+        notifyAccountCreated()
       }
     }
 
@@ -7526,11 +7543,66 @@ const handleCookieAuth = async (sessionKey: string) => {
   }
 }
 
+const automaticAuthorizationOptions = computed(() => ({
+  name: form.name, notes: form.notes, group_ids: [...form.group_ids], proxy_ids: [...form.proxy_ids],
+  concurrency: form.concurrency, priority: form.priority, rate_multiplier: form.rate_multiplier,
+  load_factor: form.load_factor, expires_at: form.expires_at, auto_pause_on_expired: autoPauseOnExpired.value,
+  extra: withUpstreamRequestIdHeader(buildOpenAIExtra()), credential_extras: buildOpenAICodexImportCredentialExtras() || undefined
+}))
+function saveCreationSettings() {
+  writeAccountCreationDefaults(creationAuthStore.user?.id, form.platform, form.type, rememberCreationSettings.value, {
+    group_ids: form.group_ids, proxy_ids: form.proxy_ids, concurrency: form.concurrency, priority: form.priority
+  })
+}
+let pendingCreationGroups: number[] | undefined
+let pendingCreationProxies: number[] | undefined
+function clearCreationSettings() {
+  pendingCreationGroups = undefined; pendingCreationProxies = undefined
+  rememberCreationSettings.value = false; saveCreationSettings()
+}
+function applySavedCreationGroups(ids: number[]) {
+  form.group_ids = ids.filter(id => props.groups.some(group => group.id === id && group.status === 'active'
+    && (group.platform === form.platform || (!creationAuthStore.isSimpleMode && group.platform === 'composite')
+      || (form.platform === 'antigravity' && mixedScheduling.value && ['anthropic', 'gemini'].includes(group.platform)))))
+}
+function applySavedCreationProxies(ids: number[]) {
+  selectedProxyIDs.value = ids.filter(id => props.proxies.some(proxy => proxy.id === id && proxy.status === 'active'))
+}
+function restoreCreationSettings() {
+  pendingCreationGroups = undefined; pendingCreationProxies = undefined
+  const saved = readAccountCreationDefaults(creationAuthStore.user?.id, form.platform, form.type)
+  rememberCreationSettings.value = saved.remember
+  form.group_ids = []; selectedProxyIDs.value = []
+  if (!saved.settings) return
+  applySavedCreationGroups(saved.settings.group_ids)
+  applySavedCreationProxies(saved.settings.proxy_ids)
+  if (!props.groups.length) pendingCreationGroups = saved.settings.group_ids
+  if (!props.proxies.length) pendingCreationProxies = saved.settings.proxy_ids
+  form.concurrency = saved.settings.concurrency
+  concurrencyEdited.value = true
+  form.priority = saved.settings.priority
+}
+function notifyAccountCreated() { saveCreationSettings(); emit('created') }
+watch([() => form.platform, () => form.type], () => { if (props.show) restoreCreationSettings() }, { flush: 'post' })
+watch(() => props.groups, () => {
+  if (props.show && pendingCreationGroups && props.groups.length) {
+    if (!form.group_ids.length && rememberCreationSettings.value) applySavedCreationGroups(pendingCreationGroups)
+    pendingCreationGroups = undefined
+  }
+})
+watch(() => props.proxies, () => {
+  if (props.show && pendingCreationProxies && props.proxies.length) {
+    if (!form.proxy_ids.length && rememberCreationSettings.value) applySavedCreationProxies(pendingCreationProxies)
+    pendingCreationProxies = undefined
+  }
+})
+
 // Register after the helpers above: the first lazy mount already has show=true.
 watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
+      restoreCreationSettings()
       // Load TLS fingerprint profiles
       adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })

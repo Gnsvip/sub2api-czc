@@ -17,11 +17,13 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
-	excelGrants          *OpenAIExcelOAuthService
-	sessionStore         *openai.SessionStore
-	proxyRepo            ProxyRepository
-	oauthClient          OpenAIOAuthClient
-	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
+	codexLoginCredentialsChanged func(context.Context, *Account)
+	codexLoginVerify             func(context.Context, *Account) error
+	excelGrants                  *OpenAIExcelOAuthService
+	sessionStore                 *openai.SessionStore
+	proxyRepo                    ProxyRepository
+	oauthClient                  OpenAIOAuthClient
+	privacyClientFactory         PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service

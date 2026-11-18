@@ -115,6 +115,17 @@ func TestImagePolicyRejectsFakeCompact(t *testing.T) {
 	}
 }
 
+type delayedImagePolicyClose struct {
+	*io.PipeReader
+	release <-chan struct{}
+}
+
+func (r delayedImagePolicyClose) Close() error {
+	err := r.PipeReader.Close()
+	<-r.release
+	return err
+}
+
 func TestImagePolicyProgressiveUsageAndCancellation(t *testing.T) {
 	for _, terminal := range []string{"response.completed", "response.failed", "response.incomplete"} {
 		t.Run(terminal, func(t *testing.T) {
@@ -132,13 +143,18 @@ func TestImagePolicyProgressiveUsageAndCancellation(t *testing.T) {
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	r, w := io.Pipe()
-	stream := WithCompactedWindow(ctx, r, nil, nil)
+	// Closing the upstream unblocks its read before Close returns. Even with
+	// slow cleanup, downstream must observe cancellation, not the pipe error.
+	release := make(chan struct{})
+	stream := WithCompactedWindow(ctx, delayedImagePolicyClose{r, release}, nil, nil)
 	cancel()
 	_, err := io.ReadAll(stream)
+	close(release)
+	t.Cleanup(func() { _ = w.Close(); _ = stream.Close() })
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoError(t, stream.Close())
-	_ = w.Close()
 }
 func TestImagePolicyCompactionReadFailuresAndUsage(t *testing.T) {
 	prefix := "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":7}}}\n\n"

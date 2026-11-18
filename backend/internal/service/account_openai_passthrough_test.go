@@ -163,15 +163,19 @@ func TestAccount_IsOpenAIResponsesWebSocketV2Enabled(t *testing.T) {
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeOAuth,
 			Extra: map[string]any{
-				"openai_apikey_responses_websockets_v2_enabled": false,
+				"openai_apikey_responses_websockets_v2_enabled": true,
 			},
 		}
-		require.True(t, account.IsOpenAIResponsesWebSocketV2Enabled())
+		require.False(t, account.IsOpenAIResponsesWebSocketV2Enabled())
 	})
 
-	t.Run("OAuth账号未设置时默认开启", func(t *testing.T) {
-		require.True(t, (&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}).IsOpenAIResponsesWebSocketV2Enabled())
-		require.True(t, (&Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken, Extra: map[string]any{}}).IsOpenAIResponsesWebSocketV2Enabled())
+	t.Run("OAuth账号未设置时默认关闭", func(t *testing.T) {
+		for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+			for _, extra := range []map[string]any{nil, {}, {"unrelated": true}, {"openai_oauth_responses_websockets_v2_mode": "invalid"}} {
+				account := &Account{Platform: PlatformOpenAI, Type: accountType, Extra: extra}
+				require.False(t, account.IsOpenAIResponsesWebSocketV2Enabled(), "type=%s extra=%v", accountType, extra)
+			}
+		}
 	})
 
 	t.Run("OAuth账号显式关闭保持关闭", func(t *testing.T) {
@@ -190,8 +194,10 @@ func TestAccount_IsOpenAIResponsesWebSocketV2Enabled(t *testing.T) {
 			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": mode}}
 			require.False(t, account.IsOpenAIResponsesWebSocketV2Enabled(), mode)
 		}
-		ctxPool := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool}}
-		require.True(t, ctxPool.IsOpenAIResponsesWebSocketV2Enabled())
+		for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated} {
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": mode}}
+			require.True(t, account.IsOpenAIResponsesWebSocketV2Enabled(), mode)
+		}
 	})
 
 	t.Run("API Key账号未设置时默认关闭", func(t *testing.T) {
@@ -235,14 +241,17 @@ func TestAccount_IsOpenAIResponsesWebSocketV2Enabled(t *testing.T) {
 }
 
 func TestAccount_ResolveOpenAIResponsesWebSocketV2Mode(t *testing.T) {
-	t.Run("default fallback to ctx_pool", func(t *testing.T) {
+	t.Run("default fallback to off preserves explicit global default", func(t *testing.T) {
 		account := &Account{
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeOAuth,
 			Extra:    map[string]any{},
 		}
-		require.Equal(t, OpenAIWSIngressModeCtxPool, account.ResolveOpenAIResponsesWebSocketV2Mode(""))
-		require.Equal(t, OpenAIWSIngressModeCtxPool, account.ResolveOpenAIResponsesWebSocketV2Mode("invalid"))
+		require.Equal(t, OpenAIWSIngressModeOff, account.ResolveOpenAIResponsesWebSocketV2Mode(""))
+		require.Equal(t, OpenAIWSIngressModeOff, account.ResolveOpenAIResponsesWebSocketV2Mode("invalid"))
+		require.Equal(t, OpenAIWSIngressModeCtxPool, account.ResolveOpenAIResponsesWebSocketV2Mode(OpenAIWSIngressModeCtxPool))
+		account.Extra = nil
+		require.Equal(t, OpenAIWSIngressModeOff, account.ResolveOpenAIResponsesWebSocketV2Mode(""))
 	})
 
 	t.Run("oauth mode field has highest priority", func(t *testing.T) {

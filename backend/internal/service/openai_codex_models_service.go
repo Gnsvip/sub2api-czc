@@ -1746,6 +1746,12 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 }
 
 func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	return s.fetchNativeCodexModelsManifestMode(ctx, account, clientVersion, ifNoneMatch, false)
+}
+
+// Fresh verification neither consumes cached success nor mutates the stored
+// account on rejection: the credentials being checked have not been committed.
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifestMode(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, fresh bool) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1835,6 +1841,9 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 	headers.Set("Version", headerVersion)
 
 	proxyURL := ""
+	if fresh && account.ProxyID != nil && (account.Proxy == nil || account.Proxy.Status != StatusActive) {
+		return nil, errors.New("Codex authorization proxy is unavailable")
+	}
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
@@ -1847,6 +1856,9 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 		credentialAccount:  account,
 		accountConcurrency: account.Concurrency,
 		useAPIKeyUpstream:  useAPIKeyUpstream,
+	}
+	if fresh {
+		return s.fetchCodexModelsManifestUpstream(ctx, request, "")
 	}
 	if useAPIKeyUpstream {
 		return s.fetchCachedOpenAIModels(ctx, request, s.fetchCodexModelsManifestUpstreamForRequest(request), ifNoneMatch)

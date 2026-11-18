@@ -452,6 +452,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		return nil, err
 	}
 	applyOpenAIOAuthCreateDefaults(account, input.ConcurrencyProvided)
+	if input.AwaitingCodexAuthorization {
+		if !account.IsOpenAIOAuth() || account.GetCredential("access_token") != "" {
+			return nil, errors.New("invalid pending Codex authorization account")
+		}
+		account.Status = StatusError
+		account.ErrorMessage = CodexAuthorizationPending
+		account.Schedulable = false
+		if account.Extra == nil {
+			account.Extra = map[string]any{}
+		}
+		account.Extra["openai_codex_authorization_pending"] = true
+	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -587,7 +599,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	AfterAccountCommit(ctx, func(_ context.Context) {
 		// OAuth 账号：创建后异步设置隐私。
 		// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。
-		if account.Type == AccountTypeOAuth {
+		if account.Type == AccountTypeOAuth && !input.AwaitingCodexAuthorization {
 			switch account.Platform {
 			case PlatformOpenAI:
 				go func() {

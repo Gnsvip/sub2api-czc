@@ -681,6 +681,12 @@ func NewOpenAIGatewayService(
 	svc.initNativeReasoningReplay()
 	if openAITokenProvider != nil {
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
+		if oauth := openAITokenProvider.openAIOAuthService; oauth != nil {
+			oauth.codexLoginVerify = func(ctx context.Context, account *Account) error {
+				_, err := svc.fetchNativeCodexModelsManifestMode(ctx, account, CodexCanonicalClientVersion(), "", true)
+				return err
+			}
+		}
 	}
 	svc.logOpenAIWSModeBootstrap()
 	svc.StartOpenAICodexTicketHarvester()

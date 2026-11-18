@@ -2244,13 +2244,13 @@ func (a *Account) IsOpenAIPassthroughModelFilterEnabled() bool {
 // 优先级：
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
-// 3. 全部缺失时：OAuth/SetupToken 默认开启，API Key 默认关闭
+// 3. 全部缺失时默认关闭；OAuth/SetupToken 显式 WS 模式仍可开启
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
 	if a == nil || !a.IsOpenAI() {
 		return false
 	}
 	if a.Extra == nil {
-		return a.IsOpenAIOAuthLike()
+		return false
 	}
 	if a.IsOpenAIOAuthLike() {
 		if enabled, ok := a.Extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
@@ -2268,18 +2268,18 @@ func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
 	if enabled, ok := a.Extra["openai_ws_enabled"].(bool); ok {
 		return enabled
 	}
-	// OAuth accounts default to the WS v2 upstream; an explicit false above, or an
-	// explicit non-WS mode string, still opts out.
+	// Preserve explicitly selected OAuth WS modes; missing or invalid settings
+	// must not opt an account into the WS upstream.
 	if !a.IsOpenAIOAuthLike() {
 		return false
 	}
 	if raw, ok := a.Extra["openai_oauth_responses_websockets_v2_mode"].(string); ok {
 		switch normalizeOpenAIWSIngressMode(raw) {
-		case OpenAIWSIngressModeOff, OpenAIWSIngressModeHTTPBridge:
-			return false
+		case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 const (
@@ -2317,7 +2317,7 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 		}
 		return normalized
 	}
-	return OpenAIWSIngressModeCtxPool
+	return OpenAIWSIngressModeOff
 }
 
 // ResolveOpenAIResponsesWebSocketV2Mode 返回账号在 WSv2 ingress 下的有效模式（off/ctx_pool/passthrough）。
@@ -2326,7 +2326,7 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 1. 分类型 mode 新字段（string）
 // 2. 分类型 enabled 旧字段（bool）
 // 3. 兼容 enabled 旧字段（bool）
-// 4. defaultMode（非法时回退 ctx_pool）
+// 4. defaultMode（缺失或非法时回退 off）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {

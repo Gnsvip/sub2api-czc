@@ -659,10 +659,12 @@ func (s *IntelligentTestService) runScheduledPelicanAt(ctx context.Context, now 
 	if picked < 1 {
 		return
 	}
+	// Enqueue snapshots the saved settings inside its transaction. Do not
+	// override the model here: scheduled runs and retries must honor that
+	// selection, with the runner supplying a default only when it is empty.
 	req := IntelligentTestEnqueue{
 		AccountIDs:       []int64{picked},
 		TestTypes:        []string{"pelican"},
-		Models:           map[string]string{"pelican": intelligentTestDefaultCodexModel},
 		Prompts:          map[string]string{"pelican": intelligentAnimalHTMLPrompt(animal)},
 		IdempotencyKey:   pelicanAttemptKey(now, len(attempts)),
 		Source:           IntelligentTestSourcePelicanSchedule,

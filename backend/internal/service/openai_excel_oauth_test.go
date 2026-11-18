@@ -577,3 +577,217 @@ func TestExcelBPSActivationWaitsForIndependentGrant(t *testing.T) {
 	reader.account.Extra["openai_excel_bps"] = false
 	require.NoError(t, gateway.PrepareExcelBPSActivation(context.Background(), reader.account))
 }
+
+func TestCodexLoginImportPreservesPasswordAndRejectsBadRowsWithoutSecrets(t *testing.T) {
+	const secret = "JBSWY3DPEHPK3PXP"
+	entries, err := ParseCodexLoginEntries("one@example.com----space $ pass----part!----" + secret + "\r\n\r\ntwo@example.com----second-pass----")
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.Equal(t, "space $ pass----part!", entries[0].Password)
+	require.Equal(t, secret, entries[0].TOTPSecret)
+	require.Empty(t, entries[1].TOTPSecret)
+	raw, err := json.Marshal(entries)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "space $ pass")
+	require.NotContains(t, string(raw), secret)
+	for _, invalid := range []string{
+		"one@example.com----sensitive-password----123456",
+		"not-an-email----sensitive-password----" + secret,
+		"one@example.com--------" + secret,
+		"one@example.com----sensitive-password----\nONE@example.com----another-password----",
+		strings.Repeat("x", (256<<10)+1),
+	} {
+		_, err := ParseCodexLoginEntries(invalid)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "sensitive-password")
+		require.NotContains(t, err.Error(), secret)
+	}
+}
+
+func TestCodexLoginRecoveryOnlyUsesAuthenticationFailures(t *testing.T) {
+	for _, tc := range []struct {
+		message  string
+		expected bool
+	}{
+		{CodexAuthorizationPending, true},
+		{"Token revoked (401): account authentication permanently revoked", true},
+		{"Unauthorized (401): account authentication failed permanently", true},
+		{"Token refresh failed (non-retryable): refresh_token_reused", true},
+		{"Token refresh failed (non-retryable): invalid_grant", true},
+		{"Token refresh failed (non-retryable): invalid_client", false},
+		{"Cyber policy blocked (403)", false},
+		{"account_deactivated", false},
+		{"rate limit 429", false},
+		{"network timeout", false},
+		{"untrusted text: refresh_token_reused", false},
+	} {
+		require.Equal(t, tc.expected, CodexLoginCanRecoverState(StatusError, tc.message), tc.message)
+		require.False(t, CodexLoginCanRecoverState(StatusDisabled, tc.message))
+	}
+}
+
+func codexLoginTestCredentials(t *testing.T, clientID, workspace, user, email string) map[string]any {
+	t.Helper()
+	jwt := func(claims map[string]any) string {
+		b, err := json.Marshal(claims)
+		require.NoError(t, err)
+		return "e30." + base64.RawURLEncoding.EncodeToString(b) + ".synthetic"
+	}
+	auth := map[string]any{"chatgpt_account_id": workspace, "chatgpt_user_id": user, "chatgpt_plan_type": "pro"}
+	return map[string]any{"client_id": clientID, "refresh_token": "synthetic-refresh",
+		"access_token": jwt(map[string]any{"client_id": clientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": auth}),
+		"id_token":     jwt(map[string]any{"aud": []string{clientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": email, "https://api.openai.com/auth": auth})}
+}
+func TestCodexLoginRejectsExcelAndDifferentIdentity(t *testing.T) {
+	stored := map[string]any{"email": "one@example.com", "chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}
+	valid := codexLoginTestCredentials(t, openai.ClientID, "workspace", "user", "one@example.com")
+	require.NoError(t, ValidateCodexLoginIdentity(stored, valid))
+	require.NoError(t, ValidateCodexLoginIdentity(map[string]any{"email": "one@example.com"}, valid), "initial authorization binds the imported email")
+	for _, args := range [][4]string{
+		{openai.ExcelClientID, "workspace", "user", "one@example.com"},
+		{openai.ClientID, "other-workspace", "user", "one@example.com"},
+		{openai.ClientID, "workspace", "other-user", "one@example.com"},
+		{openai.ClientID, "workspace", "user", "other@example.com"},
+	} {
+		require.Error(t, ValidateCodexLoginIdentity(stored, codexLoginTestCredentials(t, args[0], args[1], args[2], args[3])))
+	}
+	wrongID := codexLoginTestCredentials(t, openai.ClientID, "other-workspace", "user", "one@example.com")
+	valid["id_token"] = wrongID["id_token"]
+	require.Error(t, ValidateCodexLoginIdentity(stored, valid))
+}
+
+func TestCodexLoginPendingAccountCannotBeScheduled(t *testing.T) {
+	a, err := buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"email": "one@example.com"}, AwaitingCodexAuthorization: true}, nil)
+	require.NoError(t, err)
+	require.Equal(t, StatusError, a.Status)
+	require.Equal(t, CodexAuthorizationPending, a.ErrorMessage)
+	require.False(t, a.Schedulable)
+	require.False(t, a.IsSchedulable())
+}
+
+type codexLoginTestRepo struct {
+	*excelLoginTestRepo
+	CodexLoginRepository
+	finished    int
+	scans       int
+	allowFinish bool
+	write       map[string]any
+}
+
+func (r *codexLoginTestRepo) GetCodexLoginConfig(ctx context.Context, id int64) (*ExcelLoginConfig, error) {
+	return r.GetExcelLoginConfig(ctx, id)
+}
+func (r *codexLoginTestRepo) SaveCodexLoginConfig(ctx context.Context, c *ExcelLoginConfig, revision int64) (bool, error) {
+	return r.SaveExcelLoginConfig(ctx, c, revision)
+}
+func (r *codexLoginTestRepo) GetCodexLoginTask(context.Context, int64) (*ExcelLoginTask, error) {
+	return r.task, nil
+}
+func (r *codexLoginTestRepo) GetLoginTaskByID(context.Context, int64) (*ExcelLoginTask, error) {
+	return r.task, nil
+}
+func (r *codexLoginTestRepo) ClaimCodexLogin(context.Context, string) (*ExcelLoginTask, error) {
+	r.claimed++
+	return r.task, nil
+}
+func (r *codexLoginTestRepo) HasActiveCodexLogins(context.Context) (bool, error) {
+	r.scans++
+	return false, nil
+}
+func (r *codexLoginTestRepo) ListCodexLoginCandidates(context.Context) ([]int64, error) {
+	return nil, nil
+}
+func (r *codexLoginTestRepo) FinishCodexLogin(_ context.Context, _ int64, _ string, c map[string]any) (bool, error) {
+	r.finished++
+	r.write = c
+	return r.allowFinish, nil
+}
+
+func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
+	grant, reader, base := newExcelGrantTestService(t)
+	repo := &codexLoginTestRepo{excelLoginTestRepo: &excelLoginTestRepo{excelReauthTestRepo: base}, allowFinish: true}
+	grant.repo = repo
+	grant.settings = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "false"}}
+	oauth := grant.oauth
+	ctx := context.Background()
+	input := ExcelLoginInput{Enabled: false, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
+	state, err := oauth.SaveCodexLogin(ctx, 42, input)
+	require.NoError(t, err)
+	require.False(t, state.Config.Enabled)
+	require.True(t, state.Config.PasswordConfigured)
+	raw, err := json.Marshal(state)
+	require.NoError(t, err)
+	for _, secret := range []string{input.Password, input.TOTPSecret, "encrypted:"} {
+		require.NotContains(t, string(raw), secret)
+	}
+	repo.task = &ExcelLoginTask{ID: 9, AccountID: 42, OAuthProfile: "codex", Status: "running", WorkerID: "worker", ConfigRevision: 1}
+	claim, err := oauth.ClaimCodexLogin(ctx, "worker")
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+	require.Equal(t, "codex", claim.OAuthProfile)
+	require.Equal(t, input.Password, claim.Password)
+	require.Equal(t, "acct-1", claim.ExpectedWorkspace)
+	excel, err := oauth.ClaimExcelLogin(ctx, "worker")
+	require.NoError(t, err)
+	require.Nil(t, excel)
+	input.Password = ""
+	input.TOTPSecret = ""
+	input.Revision = 1
+	state, err = oauth.SaveCodexLogin(ctx, 42, input)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, state.Config.Revision, "unchanged settings must not cancel work or reset the failure budget")
+	svc := &OpenAIGatewayService{openAITokenProvider: &OpenAITokenProvider{openAIOAuthService: oauth}}
+	svc.syncExcelBPS403Recovery(ctx)
+	require.Equal(t, 1, repo.scans, "Codex queue must scan even with BPS disabled")
+	verified, invalidated := 0, 0
+	oauth.codexLoginVerify = func(_ context.Context, a *Account) error {
+		verified++
+		require.Equal(t, reader.account.ID, a.ID)
+		return errors.New("temporary failure")
+	}
+	oauth.codexLoginCredentialsChanged = func(context.Context, *Account) { invalidated++ }
+	credentials := codexLoginTestCredentials(t, openai.ClientID, "acct-1", "user-1", "user@example.com")
+	_, err = oauth.CompleteCodexLogin(ctx, 9, "other-worker", credentials)
+	require.Error(t, err)
+	require.Zero(t, verified)
+	require.Zero(t, repo.finished)
+	_, err = oauth.CompleteCodexLogin(ctx, 9, "worker", credentials)
+	require.Error(t, err)
+	require.Equal(t, 1, verified)
+	require.Zero(t, repo.finished)
+	require.Zero(t, invalidated)
+	require.Contains(t, repo.failures, "verification_failed")
+	oauth.codexLoginVerify = func(context.Context, *Account) error { verified++; return nil }
+	repo.allowFinish = false
+	_, err = oauth.CompleteCodexLogin(ctx, 9, "worker", credentials)
+	require.Error(t, err)
+	require.Zero(t, invalidated)
+	repo.allowFinish = true
+	result, err := oauth.CompleteCodexLogin(ctx, 9, "worker", credentials)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", result.Status)
+	require.Equal(t, 1, invalidated)
+	require.Equal(t, credentials["access_token"], repo.write["access_token"])
+	require.Equal(t, "old-access", reader.account.GetCredential("access_token"), "stored snapshot must not be mutated before the repository CAS")
+	for _, mode := range []string{OpenAIAuthModeAgentIdentity, OpenAIAuthModePersonalAccessToken} {
+		reader.account.Credentials["auth_mode"] = mode
+		_, err = oauth.CodexLoginStatus(ctx, 42)
+		require.Error(t, err)
+	}
+}
+
+func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"local_protocol_failed stage=web_login reason=password_rejected elapsed_ms=10 exit=1", "password_rejected"},
+		{"local_protocol_failed stage=mfa_challenge reason=totp_rejected elapsed_ms=20 exit=1", "totp_rejected"},
+		{"local_protocol_failed stage=workspace_select reason=workspace_mismatch elapsed_ms=20 exit=1", "identity_mismatch"},
+		{"local_protocol_failed stage=web_login reason=account_deactivated elapsed_ms=20 exit=1", "account_blocked"},
+		{"local_protocol_failed stage=web_login reason=transport_error elapsed_ms=20 exit=1", "transport_error"},
+		{"local_protocol_failed stage=web_login reason=password_rejected elapsed_ms=10 exit=1 private-secret", "worker_failed"},
+		{"password_rejected private-secret", "worker_failed"},
+	} {
+		require.Equal(t, tc.want, safeLoginFailureCode(tc.input))
+	}
+	require.False(t, CodexLoginCanRecoverState(StatusError, "Unauthorized (401): account_deactivated"))
+	require.False(t, CodexLoginCanRecoverState(StatusError, "Unauthorized (401): cyber_policy"))
+}

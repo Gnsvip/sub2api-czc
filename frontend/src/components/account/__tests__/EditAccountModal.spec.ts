@@ -7,8 +7,9 @@ import {
   resetPlatformCatalog,
   setPlatformCatalog
 } from '@/constants/platformCatalog'
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, getAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
+  getAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
@@ -33,6 +34,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
+      getById: getAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock,
     },
     settings: {
@@ -56,6 +58,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import CodexLoginSettings from '../CodexLoginSettings.vue'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -265,6 +268,35 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('refreshes the authorized account before updating the list and closing', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: {} }
+    const refreshed = { ...account, status: 'active', credentials: { email: 'fixture@example.com' } }
+    getAccountMock.mockReset().mockResolvedValue(refreshed)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    wrapper.getComponent(CodexLoginSettings).vm.$emit('authorized')
+    await flushPromises()
+    expect(getAccountMock).toHaveBeenCalledWith(account.id)
+    expect(wrapper.emitted('updated')).toEqual([[refreshed]])
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('ignores authorization refresh after switching to another account', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: {} }
+    let resolveRefresh!: (value: typeof account) => void
+    getAccountMock.mockReset().mockReturnValue(new Promise(resolve => { resolveRefresh = resolve }))
+    const wrapper = mountModal(account)
+    await flushPromises()
+    wrapper.getComponent(CodexLoginSettings).vm.$emit('authorized')
+    await wrapper.setProps({ account: { ...account, id: 2 } })
+    resolveRefresh(account)
+    await flushPromises()
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('keeps dormant OAuth model settings unchanged when saving ordinary fields', async () => {
     const account = buildAccount()
     account.type = 'oauth'

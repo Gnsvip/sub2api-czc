@@ -66,7 +66,7 @@ func TestRunScheduledPelicanEnqueuesRandomAnimalPrompt(t *testing.T) {
 	require.Len(t, repo.enqueued[0].AccountIDs, 1)
 	require.Contains(t, []int64{11, 12}, repo.enqueued[0].AccountIDs[0])
 	require.Equal(t, []string{"pelican"}, repo.enqueued[0].TestTypes)
-	require.Equal(t, "gpt-6-astra", repo.enqueued[0].Models["pelican"])
+	require.Empty(t, repo.enqueued[0].Models, "scheduled tests must use the saved model")
 	prompt := repo.enqueued[0].Prompts["pelican"]
 	require.Contains(t, prompt, "骑自行车的2D动画")
 	require.Contains(t, prompt, "不要使用任何skill")
@@ -75,6 +75,36 @@ func TestRunScheduledPelicanEnqueuesRandomAnimalPrompt(t *testing.T) {
 	require.Equal(t, IntelligentTestSourcePelicanSchedule, repo.enqueued[0].Source)
 	require.EqualValues(t, 42, repo.candidateGroupID)
 	require.EqualValues(t, 42, repo.enqueued[0].ScheduledGroupID)
+}
+
+func TestRunScheduledPelicanLeavesModelToSavedSettings(t *testing.T) {
+	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "custom-model", "", "  "} {
+		for _, retry := range []bool{false, true} {
+			name := model + "/initial"
+			if retry {
+				name = model + "/retry"
+			}
+			t.Run(name, func(t *testing.T) {
+				repo := &hourlyPelicanRepo{
+					setting: &IntelligentTestSetting{
+						TestType: "pelican", Enabled: true,
+						Config: IntelligentTestConfig{ScheduleEnabled: true, GroupID: 42, Model: model},
+					},
+					adminID: 3, accountIDs: []int64{11, 12},
+				}
+				if retry {
+					repo.attempts = []PelicanSlotAttempt{{AccountID: 11, Status: "failed"}}
+				}
+				(&IntelligentTestService{repo: repo}).runScheduledPelicanAt(context.Background(), pelicanNoonBeijing(t))
+				require.Len(t, repo.enqueued, 1)
+				require.Empty(t, repo.enqueued[0].Models, "Enqueue must read the current saved model in its transaction")
+				require.Equal(t, model, repo.setting.Config.Model)
+				if retry {
+					require.Equal(t, []int64{12}, repo.enqueued[0].AccountIDs)
+				}
+			})
+		}
+	}
 }
 
 func TestScheduledPelicanRequiresExplicitSwitchAndGroup(t *testing.T) {

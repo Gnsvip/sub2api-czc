@@ -46,25 +46,25 @@ func (r *openAIExcelOAuthRepository) SaveExcelLoginConfig(ctx context.Context, c
 	if err != nil || n == 0 {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='cancelled',stage='cancelled',error_code='config_changed',updated_at=NOW() WHERE account_id=$1 AND status IN ('queued','running')`, c.AccountID)
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='cancelled',stage='cancelled',error_code='config_changed',updated_at=NOW() WHERE account_id=$1 AND oauth_profile='excel' AND status IN ('queued','running')`, c.AccountID)
 	if err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
 }
 
-const excelLoginTaskColumns = `id,account_id,status,stage,error_code,worker_id,config_revision,updated_at`
+const excelLoginTaskColumns = `id,account_id,status,stage,error_code,worker_id,config_revision,updated_at,oauth_profile`
 
 func scanExcelLoginTask(row interface{ Scan(...any) error }) (*service.ExcelLoginTask, error) {
 	t := &service.ExcelLoginTask{}
-	err := row.Scan(&t.ID, &t.AccountID, &t.Status, &t.Stage, &t.ErrorCode, &t.WorkerID, &t.ConfigRevision, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.AccountID, &t.Status, &t.Stage, &t.ErrorCode, &t.WorkerID, &t.ConfigRevision, &t.UpdatedAt, &t.OAuthProfile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return t, err
 }
 func (r *openAIExcelOAuthRepository) GetExcelLoginTask(ctx context.Context, id int64) (*service.ExcelLoginTask, error) {
-	return scanExcelLoginTask(r.db.QueryRowContext(ctx, `SELECT `+excelLoginTaskColumns+` FROM openai_excel_login_tasks WHERE account_id=$1 ORDER BY id DESC LIMIT 1`, id))
+	return scanExcelLoginTask(r.db.QueryRowContext(ctx, `SELECT `+excelLoginTaskColumns+` FROM openai_excel_login_tasks WHERE account_id=$1 AND oauth_profile='excel' ORDER BY id DESC LIMIT 1`, id))
 }
 func (r *openAIExcelOAuthRepository) QueueExcelLogin(ctx context.Context, id int64, manual bool) (*service.ExcelLoginTask, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -80,7 +80,7 @@ func (r *openAIExcelOAuthRepository) QueueExcelLogin(ctx context.Context, id int
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code='timeout',updated_at=NOW() WHERE account_id=$1 AND status IN ('queued','running') AND created_at<NOW()-INTERVAL '30 minutes'`, id)
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code='timeout',updated_at=NOW() WHERE account_id=$1 AND oauth_profile='excel' AND status IN ('queued','running') AND created_at<NOW()-INTERVAL '30 minutes'`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +91,8 @@ func (r *openAIExcelOAuthRepository) QueueExcelLogin(ctx context.Context, id int
  WHERE a.id=$1 AND c.enabled AND c.password_ciphertext<>''
  AND ($2 OR (COALESCE(a.extra->>'openai_excel_bps','false')='true' AND g.account_id IS NULL))
  AND NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND
-  (t.status IN ('queued','running') OR (t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '15 minutes')))
- AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.config_revision=c.revision AND t.status='failed')<3)
+  (t.status IN ('queued','running') OR (t.oauth_profile='excel' AND t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '15 minutes')))
+ AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.config_revision=c.revision AND t.oauth_profile='excel' AND t.status='failed')<3)
  ON CONFLICT DO NOTHING RETURNING `+excelLoginTaskColumns, id, manual))
 	if err != nil {
 		return nil, err
@@ -109,8 +109,8 @@ func (r *openAIExcelOAuthRepository) ListMissingExcelLogins(ctx context.Context)
  AND COALESCE(a.credentials->>'plan_type','') NOT ILIKE 'free'
  AND c.enabled AND c.password_ciphertext<>'' AND COALESCE(a.extra->>'openai_excel_bps','false')='true' AND g.account_id IS NULL
  AND NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND
- (t.status IN ('queued','running') OR (t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '15 minutes')))
- AND (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.config_revision=c.revision AND t.status='failed')<3
+ (t.status IN ('queued','running') OR (t.oauth_profile='excel' AND t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '15 minutes')))
+ AND (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.config_revision=c.revision AND t.oauth_profile='excel' AND t.status='failed')<3
  ORDER BY a.id LIMIT 50`)
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (r *openAIExcelOAuthRepository) ListMissingExcelLogins(ctx context.Context)
 func (r *openAIExcelOAuthRepository) ClaimExcelLogin(ctx context.Context, worker string) (*service.ExcelLoginTask, error) {
 	return scanExcelLoginTask(r.db.QueryRowContext(ctx, `WITH candidate AS (
  SELECT t.id FROM openai_excel_login_tasks t JOIN accounts a ON a.id=t.account_id JOIN openai_excel_login_configs c ON c.account_id=a.id
- WHERE t.status='queued' AND t.created_at>NOW()-INTERVAL '30 minutes' AND a.deleted_at IS NULL AND a.status='active' AND c.enabled AND c.revision=t.config_revision
+ WHERE t.oauth_profile='excel' AND t.status='queued' AND t.created_at>NOW()-INTERVAL '30 minutes' AND a.deleted_at IS NULL AND a.status='active' AND c.enabled AND c.revision=t.config_revision
  ORDER BY t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1)
  UPDATE openai_excel_login_tasks SET status='running',stage='starting',worker_id=$1,updated_at=NOW() WHERE id=(SELECT id FROM candidate) RETURNING `+excelLoginTaskColumns, worker))
 }
@@ -175,7 +175,7 @@ func (r *openAIExcelOAuthRepository) FinishExcelLogin(ctx context.Context, id in
 	}
 	var active int64
 	err = tx.QueryRowContext(ctx, `SELECT t.id FROM openai_excel_login_tasks t JOIN openai_excel_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id LEFT JOIN openai_excel_oauth_credentials g ON g.account_id=a.id
- WHERE t.id=$1 AND t.worker_id=$2 AND t.status='running' AND t.created_at>NOW()-INTERVAL '30 minutes' AND c.enabled AND c.revision=t.config_revision
+ WHERE t.id=$1 AND t.oauth_profile='excel' AND t.worker_id=$2 AND t.status='running' AND t.created_at>NOW()-INTERVAL '30 minutes' AND c.enabled AND c.revision=t.config_revision
  AND MD5(a.credentials::text)=t.expected_credentials_hash AND MD5(COALESCE(g.credentials_ciphertext,''))=t.expected_grant_hash FOR UPDATE OF c,t`, id, worker).Scan(&active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -203,12 +203,12 @@ func (r *openAIExcelOAuthRepository) FinishExcelLogin(ctx context.Context, id in
 
 // Resume an explicit reauthorization after restart even when an old grant still exists.
 func (r *openAIExcelOAuthRepository) HasActiveExcelLogins(ctx context.Context) (bool, error) {
-	_, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code='timeout',updated_at=NOW() WHERE status IN ('queued','running') AND created_at<NOW()-INTERVAL '30 minutes'`)
+	_, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code='timeout',updated_at=NOW() WHERE oauth_profile='excel' AND status IN ('queued','running') AND created_at<NOW()-INTERVAL '30 minutes'`)
 	if err != nil {
 		return false, err
 	}
 	var active bool
-	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM openai_excel_login_tasks t JOIN openai_excel_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id WHERE t.status IN ('queued','running') AND c.enabled AND c.revision=t.config_revision AND a.deleted_at IS NULL AND a.status='active')`).Scan(&active)
+	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM openai_excel_login_tasks t JOIN openai_excel_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id WHERE t.oauth_profile='excel' AND t.status IN ('queued','running') AND c.enabled AND c.revision=t.config_revision AND a.deleted_at IS NULL AND a.status='active')`).Scan(&active)
 	return active, err
 }
 

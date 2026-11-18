@@ -686,8 +686,8 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 		t.Fatalf("Gateway.OpenAIWS.ModeRouterV2Enabled = true, want false")
 	}
-	if cfg.Gateway.OpenAIWS.IngressModeDefault != "ctx_pool" {
-		t.Fatalf("Gateway.OpenAIWS.IngressModeDefault = %q, want %q", cfg.Gateway.OpenAIWS.IngressModeDefault, "ctx_pool")
+	if cfg.Gateway.OpenAIWS.IngressModeDefault != "off" {
+		t.Fatalf("Gateway.OpenAIWS.IngressModeDefault = %q, want %q", cfg.Gateway.OpenAIWS.IngressModeDefault, "off")
 	}
 	if cfg.Gateway.OpenAIWS.ClientFirstMessageTimeoutSeconds != DefaultOpenAIWSClientFirstMessageTimeoutSeconds {
 		t.Fatalf(

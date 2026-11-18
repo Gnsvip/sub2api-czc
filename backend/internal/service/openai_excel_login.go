@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type ExcelLoginInput struct {
 	Revision   int64  `json:"revision"`
 }
 type ExcelLoginTask struct {
+	OAuthProfile   string    `json:"oauth_profile"`
 	ID             int64     `json:"id"`
 	AccountID      int64     `json:"account_id"`
 	Status         string    `json:"status"`
@@ -317,12 +319,33 @@ func (s *OpenAIOAuthService) ProgressExcelLogin(ctx context.Context, id int64, w
 	}
 	return err
 }
-func (s *OpenAIOAuthService) FailExcelLogin(ctx context.Context, id int64, worker, reason string) error {
-	switch reason {
-	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "security_check", "additional_verification":
-	default:
-		reason = "worker_failed"
+
+// The worker's diagnostic contains only enumerations. Extract a fixed public
+// code instead of persisting runner output (which may contain login secrets).
+var codexLoginFailureDiagnostic = regexp.MustCompile(`^local_protocol_failed stage=[a-z_]{1,32} reason=([a-z_]{1,40}) elapsed_ms=[0-9]{1,7} exit=-?[0-9]{1,3}$`)
+
+func safeLoginFailureCode(reason string) string {
+	if match := codexLoginFailureDiagnostic.FindStringSubmatch(reason); match != nil {
+		reason = match[1]
 	}
+	switch reason {
+	case "interaction_required", "phone_verification_required", "mfa_required":
+		return "additional_verification"
+	case "account_deactivated", "account_deleted", "account_retired", "authorization_denied":
+		return "account_blocked"
+	case "workspace_mismatch", "callback_state_mismatch", "pkce_invalid":
+		return "identity_mismatch"
+	}
+	switch reason {
+	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
+		return reason
+	default:
+		return "worker_failed"
+	}
+}
+
+func (s *OpenAIOAuthService) FailExcelLogin(ctx context.Context, id int64, worker, reason string) error {
+	reason = safeLoginFailureCode(reason)
 	r, err := s.excelLoginRepo()
 	if err != nil {
 		return err

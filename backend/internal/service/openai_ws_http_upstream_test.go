@@ -101,14 +101,16 @@ func TestOpenAIWSHTTPUpstream_OAuthHTTPClientDecisionMatrix(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":true,"instructions":"test","input":[{"type":"input_text","text":"hi"}]}`)
 
 	cases := []struct {
-		name       string
-		modeRouter bool
-		extra      map[string]any
-		wantWS     bool
-		wantReason string
+		name        string
+		modeRouter  bool
+		defaultMode string
+		extra       map[string]any
+		wantWS      bool
+		wantReason  string
 	}{
-		{name: "unset_default_router", modeRouter: false, extra: nil, wantWS: true, wantReason: "ws_v2_enabled"},
-		{name: "unset_mode_router", modeRouter: true, extra: nil, wantWS: true, wantReason: "ws_v2_mode_ctx_pool"},
+		{name: "unset_default_router", modeRouter: false, extra: nil, wantWS: false, wantReason: "account_disabled"},
+		{name: "unset_mode_router_default_off", modeRouter: true, defaultMode: OpenAIWSIngressModeOff, extra: nil, wantWS: false, wantReason: "account_mode_off"},
+		{name: "unset_mode_router_explicit_global_ctx_pool", modeRouter: true, extra: nil, wantWS: true, wantReason: "ws_v2_mode_ctx_pool"},
 		{name: "explicit_ctx_pool", modeRouter: true, extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool}, wantWS: true, wantReason: "ws_v2_mode_ctx_pool"},
 		{name: "explicit_mode_off_router", modeRouter: true, extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff}, wantWS: false, wantReason: "account_mode_off"},
 		{name: "explicit_mode_off_default_router", modeRouter: false, extra: map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff}, wantWS: false, wantReason: "account_disabled"},
@@ -117,7 +119,11 @@ func TestOpenAIWSHTTPUpstream_OAuthHTTPClientDecisionMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newOpenAIWSHTTPUpstreamHarness(newOpenAIWSHTTPUpstreamTestConfig(tc.modeRouter), openAIWSHTTPUpstreamCompleted)
+			cfg := newOpenAIWSHTTPUpstreamTestConfig(tc.modeRouter)
+			if tc.defaultMode != "" {
+				cfg.Gateway.OpenAIWS.IngressModeDefault = tc.defaultMode
+			}
+			h := newOpenAIWSHTTPUpstreamHarness(cfg, openAIWSHTTPUpstreamCompleted)
 			c, rec := newOpenAIWSHTTPUpstreamContext("/openai/v1/responses")
 			result, err := h.svc.Forward(context.Background(), c, newOpenAIWSHTTPUpstreamOAuthAccount(tc.extra), body)
 			require.NoError(t, err)

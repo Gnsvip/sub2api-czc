@@ -788,6 +788,8 @@ func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 		{"browser_unavailable", "browser_unavailable"},
 		{"browser_start_failed", "browser_start_failed"},
 		{"browser_dependency_failed", "browser_dependency_failed"},
+		{"workspace_unavailable", "workspace_unavailable"},
+		{"workspace_unavailable private-secret", "worker_failed"},
 		{"browser_start_failed private-secret", "worker_failed"},
 		{"local_protocol_failed stage=web_login reason=password_rejected elapsed_ms=10 exit=1", "password_rejected"},
 		{"local_protocol_failed stage=mfa_challenge reason=totp_rejected elapsed_ms=20 exit=1", "totp_rejected"},

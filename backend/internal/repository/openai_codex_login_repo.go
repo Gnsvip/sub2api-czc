@@ -88,7 +88,7 @@ const codexLoginBudgetSQL = `NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t
  AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex'
  AND t.config_revision=c.revision AND t.status='failed' AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0))<3)
  AND ($2 OR NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex' AND t.config_revision=c.revision
- AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
+ AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
  AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0)))`
 
 func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int64, manual bool) (*service.ExcelLoginTask, error) {

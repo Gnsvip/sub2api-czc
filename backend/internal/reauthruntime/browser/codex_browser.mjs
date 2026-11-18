@@ -7,7 +7,7 @@ export const REDIRECT = 'http://localhost:1455/auth/callback';
 const AUTH = 'https://auth.openai.com';
 const AUTH_CLAIM = 'https://api.openai.com/auth';
 const failures = new Set(['browser_start_failed', 'security_check', 'additional_verification',
-  'password_rejected', 'totp_rejected', 'identity_mismatch', 'proxy_unavailable', 'timeout',
+  'password_rejected', 'totp_rejected', 'identity_mismatch', 'workspace_unavailable', 'proxy_unavailable', 'timeout',
   'transport_error', 'account_blocked', 'rate_limited', 'service_error', 'worker_failed']);
 
 export class LoginFailure extends Error {
@@ -114,7 +114,7 @@ async function selectWorkspace(page, expected) {
   const select = await visible(page, 'select');
   if (select) {
     const values = await select.locator('option').evaluateAll(options => options.map(option => option.value));
-    if (!values.includes(expected)) fail('identity_mismatch');
+    if (!values.includes(expected)) fail('workspace_unavailable');
     await select.selectOption(expected);
     return;
   }
@@ -125,9 +125,12 @@ async function selectWorkspace(page, expected) {
       return;
     }
   }
+  // An explicit choice list without the bound workspace must not silently
+  // authorize its default personal account. Workspace hints are not a guarantee.
+  if (await radios.count()) fail('workspace_unavailable');
   // Custom widgets may expose names but no stable IDs. Do not guess from a
-  // display name: authorize is constrained with allowed_workspace_id, and the
-  // token identity check rejects any different workspace before submission.
+  // display name. The final token identity check still rejects a different
+  // workspace even when the server ignores allowed_workspace_id.
 }
 
 export async function authorize(chromium, input, options = {}) {

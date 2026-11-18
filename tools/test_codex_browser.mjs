@@ -27,6 +27,7 @@ test('TOTP uses RFC 6238 and token output preserves Codex client and actual work
   assert.equal(credentials.client_id, CLIENT_ID);
   assert.equal(credentials.chatgpt_account_id, 'workspace');
   assert.equal(credentials.refresh_token, 'synthetic-refresh');
+  assert.equal(credentialsFromTokens(tokens, { ...input, expected_workspace: '' }).chatgpt_account_id, 'workspace');
   assert.throws(() => credentialsFromTokens(tokens, { ...input, expected_workspace: 'other' }), { code: 'identity_mismatch' });
   assert.throws(() => credentialsFromTokens(tokens, { ...input, login_email: 'other@example.com' }), { code: 'identity_mismatch' });
   assert.throws(() => credentialsFromTokens({ ...tokens, access_token: jwt({ exp, client_id: 'wrong' }) }, input), { code: 'identity_mismatch' });
@@ -49,9 +50,9 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'missing_radio_workspace', 'missing_select_workspace', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
     await t.test(scenario, async () => {
-      let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0;
+      let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
       const injected = { launch: async options => {
         assert.equal(options.chromiumSandbox, true);
@@ -94,7 +95,14 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               const code = new URLSearchParams(route.request().postData()).get('code');
               assert.match(code, /^\d{6}$/); submitted.push('totp');
               body = scenario === 'totp_rejected' ? '<p>Invalid verification code</p>' : form('Authorize Codex', '<select name="workspace"><option value="other">Other</option><option value="workspace">Default</option></select>', '/finish');
+              if (scenario === 'radio_workspace' || scenario === 'missing_radio_workspace') {
+                const target = scenario === 'radio_workspace' ? '<label><input type="radio" name="workspace" value="workspace">Business</label>' : '';
+                body = form('Select a workspace', '<label><input type="radio" name="workspace" value="other" checked>Personal account</label>' + target, '/finish');
+              } else if (scenario === 'missing_select_workspace') {
+                body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option></select>', '/finish');
+              }
             } else if (url.pathname === '/finish') {
+              consentSubmissions++;
               assert.equal(new URLSearchParams(route.request().postData()).get('workspace'), 'workspace');
               await route.fulfill({ status: 302, headers: { location: `${REDIRECT}?code=test-code&state=${scenario === 'bad_state' ? 'wrong' : state}` } });
               return;
@@ -119,16 +127,17 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, input, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice'].includes(scenario)) {
+      if (['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);
         assert.equal(tokenCalls, 1);
         assert.ok(stages.some(event => event.stage === 'exchanging_token'));
       } else {
-        const code = ['bad_state', 'wrong_workspace'].includes(scenario) ? 'identity_mismatch' : scenario;
+        const code = scenario.startsWith('missing_') ? 'workspace_unavailable' : ['bad_state', 'wrong_workspace'].includes(scenario) ? 'identity_mismatch' : scenario;
         await assert.rejects(promise, { code });
         if (scenario !== 'wrong_workspace') assert.equal(tokenCalls, 0);
+        if (scenario.startsWith('missing_')) assert.equal(consentSubmissions, 0);
       }
       assert.equal(actualBrowser.isConnected(), false, 'browser must close on success and failure');
       assert.ok(stages.every(event => !JSON.stringify(event).includes('synthetic')));

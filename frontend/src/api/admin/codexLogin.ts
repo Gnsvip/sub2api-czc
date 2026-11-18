@@ -59,6 +59,7 @@ export function codexLoginError(code?: string): string {
     password_rejected: '密码不正确，请修改登录资料',
     totp_rejected: '2FA 验证失败，请检查 TOTP 密钥',
     identity_mismatch: '授权身份或工作区与原账号不一致',
+    workspace_unavailable: '本次登录未找到原工作区，请确认工作区权限后重新授权',
     security_check: '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证',
     account_blocked: '上游账号已停用或拒绝授权，需要人工处理',
     additional_verification: '需要人工完成额外验证',

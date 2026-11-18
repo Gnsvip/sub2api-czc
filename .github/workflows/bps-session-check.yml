@@ -2,6 +2,11 @@ name: BPS session proxy checks
 
 on:
   workflow_dispatch:
+    inputs:
+      frontend_only:
+        description: 'Validate frontend and embedded build only (backend code unchanged)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'backend/**'
@@ -13,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bps-session-${{ github.event.pull_request.number || github.ref }}
+  group: bps-session-${{ github.event.pull_request.number || github.ref }}${{ inputs.frontend_only && '-frontend' || '' }}
   cancel-in-progress: true
 
 env:
@@ -23,6 +28,7 @@ env:
 
 jobs:
   backend:
+    if: ${{ !inputs.frontend_only }}
     services:
       postgres:
         image: postgres:16

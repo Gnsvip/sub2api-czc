@@ -655,10 +655,13 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			require.Equal(t, "succeeded", finished.Status)
 			require.Equal(t, "succeeded_personal_workspace_only", finished.Stage)
 		})
-		t.Run("bounded retries and success resets failure budget", func(t *testing.T) {
+		t.Run("initial attempt plus three retries after 60 seconds and success resets budget", func(t *testing.T) {
 			const id int64 = 1100
 			newAccount(id, true, false)
-			for attempt := 0; attempt < 3; attempt++ {
+			for attempt := 0; attempt < 4; attempt++ {
+				ids, e := repo.ListCodexLoginCandidates(ctx)
+				require.NoError(t, e)
+				require.Contains(t, ids, id, "initial attempt and all three retries must be discoverable")
 				queued, e := repo.QueueCodexLogin(ctx, id, false)
 				require.NoError(t, e)
 				require.NotNil(t, queued)
@@ -671,10 +674,19 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				var count int
 				require.NoError(t, db.QueryRow(`SELECT COALESCE((extra->>'openai_codex_reauthorization_count')::int,0) FROM accounts WHERE id=$1`, id).Scan(&count))
 				require.Zero(t, count, "failed attempts must not increase the successful reauthorization count")
-				cooldown, e := repo.QueueCodexLogin(ctx, id, true)
+				// Still inside the cooldown, both the scanner and direct queue calls
+				// must refuse another task. Age rows instead of sleeping in tests.
+				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '30 seconds' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
-				require.Nil(t, cooldown)
-				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '16 minutes' WHERE id=$1`, queued.ID)
+				ids, e = repo.ListCodexLoginCandidates(ctx)
+				require.NoError(t, e)
+				require.NotContains(t, ids, id)
+				for _, manual := range []bool{false, true} {
+					cooldown, e := repo.QueueCodexLogin(ctx, id, manual)
+					require.NoError(t, e)
+					require.Nil(t, cooldown, "automatic and manual attempts must respect the cooldown")
+				}
+				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
 			}
 			ids, e := repo.ListCodexLoginCandidates(ctx)
@@ -699,7 +711,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE id=$1`, again.ID)
 			require.NoError(t, e)
 		})
-		for index, reason := range []string{"password_rejected", "workspace_unavailable", "workspace_selection_required", "security_check"} {
+		for index, reason := range []string{"password_rejected", "totp_rejected", "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "security_check", "additional_verification", "account_blocked"} {
 			t.Run(reason+" needs manual intervention", func(t *testing.T) {
 				id := int64(1101 + index)
 				newAccount(id, true, false)
@@ -720,7 +732,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.NotNil(t, failed.Diagnostic)
 				require.Equal(t, 403, failed.Diagnostic.HTTPStatus)
 				require.Equal(t, "security_check", failed.Diagnostic.Action)
-				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '16 minutes' WHERE id=$1`, queued.ID)
+				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
 				again, e := repo.QueueCodexLogin(ctx, id, false)
 				require.NoError(t, e)
@@ -730,29 +742,45 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.NotContains(t, ids, id)
 			})
 		}
-		t.Run("concurrent queue only admits one task", func(t *testing.T) {
-			const id int64 = 1200
-			newAccount(id, true, false)
-			type result struct {
-				task *service.ExcelLoginTask
-				err  error
-			}
-			results := make(chan result, 8)
-			for i := 0; i < 8; i++ {
-				go func() { task, e := repo.QueueCodexLogin(ctx, id, false); results <- result{task, e} }()
-			}
-			count := 0
-			for i := 0; i < 8; i++ {
-				r := <-results
-				require.NoError(t, r.err)
-				if r.task != nil {
-					count++
+		for index, scenario := range []string{"initial attempt", "retry after cooldown"} {
+			t.Run("concurrent queue only admits one task for "+scenario, func(t *testing.T) {
+				id := int64(1200 + index)
+				newAccount(id, true, false)
+				if index > 0 {
+					queued, e := repo.QueueCodexLogin(ctx, id, false)
+					require.NoError(t, e)
+					require.NotNil(t, queued)
+					claimed, e := repo.ClaimCodexLogin(ctx, "retry-worker")
+					require.NoError(t, e)
+					require.NotNil(t, claimed)
+					require.Equal(t, queued.ID, claimed.ID)
+					ok, e := repo.FailExcelLogin(ctx, queued.ID, "retry-worker", "transport_error")
+					require.NoError(t, e)
+					require.True(t, ok)
+					_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
+					require.NoError(t, e)
 				}
-			}
-			require.Equal(t, 1, count)
-			_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE account_id=$1`, id)
-			require.NoError(t, e)
-		})
+				type result struct {
+					task *service.ExcelLoginTask
+					err  error
+				}
+				results := make(chan result, 8)
+				for i := 0; i < 8; i++ {
+					go func() { task, e := repo.QueueCodexLogin(ctx, id, false); results <- result{task, e} }()
+				}
+				count := 0
+				for i := 0; i < 8; i++ {
+					r := <-results
+					require.NoError(t, r.err)
+					if r.task != nil {
+						count++
+					}
+				}
+				require.Equal(t, 1, count)
+				_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE account_id=$1`, id)
+				require.NoError(t, e)
+			})
+		}
 	})
 
 }

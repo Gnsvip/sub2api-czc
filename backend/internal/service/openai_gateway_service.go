@@ -690,6 +690,7 @@ func NewOpenAIGatewayService(
 				_, err := svc.fetchNativeCodexModelsManifestMode(ctx, account, CodexCanonicalClientVersion(), "", true)
 				return err
 			}
+			oauth.codexLoginAstraProbe = svc.probeCodexLoginAstra
 		}
 	}
 	svc.logOpenAIWSModeBootstrap()

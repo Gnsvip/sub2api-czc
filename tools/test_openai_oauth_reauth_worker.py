@@ -55,6 +55,18 @@ class OTPHandler(BaseHTTPRequestHandler):
 
 
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
+    def test_codex_completion_allows_manifest_and_astra_without_changing_other_calls(self):
+        from tools import openai_oauth_reauth_worker as worker
+        browser = self.browser_adapter()
+        for original, expected in ((30.0, 60.0), (90.0, 90.0)):
+            api = worker.WorkerAPI(WorkerConfig("http://127.0.0.1", "synthetic-token", "probe", None, request_timeout=original))
+            completion = browser.completion_api(api, worker)
+            self.assertIsNot(completion, api)
+            self.assertEqual(completion.config.request_timeout, expected)
+            self.assertEqual(api.config.request_timeout, original)
+            self.assertEqual(completion.config.worker_id, api.config.worker_id)
+            self.assertEqual(completion.config.worker_token, api.config.worker_token)
+
     def test_managed_browser_dispatch_preserves_other_profiles_and_safe_failures(self):
         browser = self.browser_adapter()
         worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed", WorkerError=WorkerError)

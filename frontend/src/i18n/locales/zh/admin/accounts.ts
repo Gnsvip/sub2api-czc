@@ -437,6 +437,8 @@ export default {
       accountSchedulingThresholdOverrideDisabledHint:
         '1-100，达到该用量百分比后临时不可调度；100 表示禁用当前账号自动停调。',
       status: {
+        codexReauthorizationCount: '重新授权 {count} 次',
+        codexReauthorizationCountHint: '更新后 Codex 浏览器重新授权成功次数，首次授权和失败尝试不计入。',
         active: '正常',
         inactive: '停用',
         expired: '已过期',

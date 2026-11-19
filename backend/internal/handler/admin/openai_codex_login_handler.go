@@ -48,7 +48,7 @@ func (h *OpenAIOAuthHandler) SaveCodexLogin(c *gin.Context) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
-	var input service.ExcelLoginInput
+	var input service.CodexLoginInput
 	if c.ShouldBindJSON(&input) != nil {
 		response.BadRequest(c, "登录资料格式不正确")
 		return
@@ -78,7 +78,7 @@ func (h *OpenAIOAuthHandler) QueueCodexLogin(c *gin.Context) {
 
 type codexLoginCreateRequest struct {
 	Content                 string         `json:"content"`
-	AutoRecover             bool           `json:"auto_recover"`
+	AutoRecover             *bool          `json:"auto_recover"`
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
 	GroupIDs                []int64        `json:"group_ids"`
@@ -163,7 +163,7 @@ func (h *OpenAIOAuthHandler) CreateCodexLoginAccounts(c *gin.Context) {
 		})
 		if e == nil {
 			result.AccountID = account.ID
-			_, e = h.openaiOAuthService.SaveCodexLogin(ctx, account.ID, service.ExcelLoginInput{Enabled: req.AutoRecover, LoginEmail: entry.Email, Password: entry.Password, TOTPSecret: entry.TOTPSecret})
+			_, e = h.openaiOAuthService.SaveCodexLogin(ctx, account.ID, service.CodexLoginInput{Enabled: req.AutoRecover, LoginEmail: entry.Email, Password: entry.Password, TOTPSecret: entry.TOTPSecret})
 			if e == nil {
 				result.Task, e = h.openaiOAuthService.QueueCodexLogin(ctx, account.ID)
 			}

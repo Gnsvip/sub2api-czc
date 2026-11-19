@@ -8,7 +8,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, values?: { count?: number }) => values?.count === undefined ? key : `${key}: ${values.count}`
     })
   }
 })
@@ -51,6 +51,27 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows the persisted reauthorization count without replacing account status', async () => {
+    const account = makeAccount({ platform: 'openai', schedulable: false, extra: { openai_codex_reauthorization_count: 1 } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="codex-reauthorization-count"]').text()).toBe('admin.accounts.status.codexReauthorizationCount: 1')
+    expect(wrapper.text()).toContain('admin.accounts.status.paused')
+    await wrapper.setProps({ account: { ...account, extra: { openai_codex_reauthorization_count: 2 } } })
+    expect(wrapper.get('[data-testid="codex-reauthorization-count"]').text()).toBe('admin.accounts.status.codexReauthorizationCount: 2')
+    await wrapper.setProps({ account: { ...account, platform: 'anthropic' } })
+    expect(wrapper.find('[data-testid="codex-reauthorization-count"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([undefined, 0, -1, 1.5, '2', true])('does not show an absent or invalid reauthorization count: %s', (count) => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: { account: makeAccount({ platform: 'openai', extra: { openai_codex_reauthorization_count: count } }) },
+      global: { stubs: { Icon: true } }
+    })
+    expect(wrapper.find('[data-testid="codex-reauthorization-count"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps the paused badge after a healthy Tibo result arrives', async () => {
     const account = makeAccount({ platform: 'openai', type: 'oauth', schedulable: false })
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })

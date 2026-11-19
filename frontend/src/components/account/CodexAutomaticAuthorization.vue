@@ -34,7 +34,7 @@ import { createCodexLoginAccounts, getCodexLoginStatus, codexLoginTaskLabel, cod
 const props = defineProps<{ options: CodexLoginCreateOptions; hideSubmit?: boolean }>()
 const emit = defineEmits<{ created: [] }>()
 const content = ref('')
-const autoRecover = ref(false)
+const autoRecover = ref(true)
 const submitting = ref(false)
 const canSubmit = computed(() => !submitting.value && !!content.value.trim())
 const error = ref('')

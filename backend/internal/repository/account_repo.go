@@ -100,16 +100,18 @@ func ensureCodexFingerprintSeedSQL(extraExpr string) string {
 		"ELSE " + extraExpr + " END"
 }
 
-func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]any {
+func stripCodexManagedExtraFromUpdate(extra map[string]any) map[string]any {
 	if extra == nil {
 		return nil
 	}
-	if _, exists := extra["codex_fingerprint_seed"]; !exists {
+	_, seedExists := extra["codex_fingerprint_seed"]
+	_, countExists := extra[service.CodexReauthorizationCountExtraKey]
+	if !seedExists && !countExists {
 		return extra
 	}
 	stripped := make(map[string]any, len(extra)-1)
 	for key, value := range extra {
-		if key == "codex_fingerprint_seed" {
+		if key == "codex_fingerprint_seed" || key == service.CodexReauthorizationCountExtraKey {
 			continue
 		}
 		stripped[key] = value
@@ -775,7 +777,7 @@ func lockAndMergeAccountProbeExtra(
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
 	// Preserve independently managed state under the row lock. A stale edit
 	// must not erase reset reservations or undo the account's probe switch.
-	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey} {
+	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey, service.CodexReauthorizationCountExtraKey} {
 		delete(extra, key)
 		if state, ok := currentExtra[key]; ok {
 			if extra == nil {
@@ -2933,7 +2935,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.UpdateExtra(ctx, id, updates)
 	}
-	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
+	updates = stripCodexManagedExtraFromUpdate(updates)
 	if len(updates) == 0 {
 		return nil
 	}
@@ -3235,7 +3237,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	updates.Extra = stripCodexManagedExtraFromUpdate(updates.Extra)
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)

@@ -600,6 +600,16 @@ func (s *OpenAIGatewayService) probeOpenAITiboHTTP(ctx context.Context, account 
 	if err != nil || token == "" {
 		return unknown
 	}
+	return s.probeOpenAITiboHTTPWithToken(ctx, account, token)
+}
+
+// The login gate supplies its verified candidate token directly. It must not
+// retrieve or refresh the previous token from the live account/cache.
+func (s *OpenAIGatewayService) probeOpenAITiboHTTPWithToken(ctx context.Context, account *Account, token string) openAITiboProbeSample {
+	unknown := openAITiboProbeSample{verdict: openAITiboUnknown}
+	if s == nil || s.httpUpstream == nil || account == nil || token == "" {
+		return unknown
+	}
 	body, err := json.Marshal(openAITiboProbePayload())
 	if err != nil {
 		return unknown

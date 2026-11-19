@@ -19,6 +19,7 @@ import (
 type OpenAIOAuthService struct {
 	codexLoginCredentialsChanged func(context.Context, *Account)
 	codexLoginVerify             func(context.Context, *Account) error
+	codexLoginAstraProbe         func(context.Context, *Account) CodexLoginAstraResult
 	excelGrants                  *OpenAIExcelOAuthService
 	sessionStore                 *openai.SessionStore
 	proxyRepo                    ProxyRepository

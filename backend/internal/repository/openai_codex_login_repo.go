@@ -167,16 +167,16 @@ func (r *openAIExcelOAuthRepository) ClaimCodexLogin(ctx context.Context, worker
  ORDER BY t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1)
  UPDATE openai_excel_login_tasks SET status='running',stage='starting',worker_id=$1,updated_at=NOW() WHERE id=(SELECT id FROM candidate) RETURNING `+excelLoginTaskColumns, worker))
 }
-func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id int64, worker string, candidate map[string]any) (bool, error) {
+func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id int64, worker string, candidate map[string]any, astra *service.CodexLoginAstraResult) (bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var accountID int64
-	var primary []byte
+	var primary, extraJSON []byte
 	var status, message string
-	err = tx.QueryRowContext(ctx, `SELECT a.id,a.credentials,a.status,COALESCE(a.error_message,'') FROM accounts a JOIN openai_excel_login_tasks t ON t.account_id=a.id WHERE t.id=$1 AND t.oauth_profile='codex' AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.status IN ('active','error') FOR UPDATE OF a`, id).Scan(&accountID, &primary, &status, &message)
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.credentials,a.status,COALESCE(a.error_message,''),COALESCE(a.extra,'{}'::jsonb) FROM accounts a JOIN openai_excel_login_tasks t ON t.account_id=a.id WHERE t.id=$1 AND t.oauth_profile='codex' AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.status IN ('active','error') FOR UPDATE OF a`, id).Scan(&accountID, &primary, &status, &message, &extraJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -215,18 +215,48 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 		return false, err
 	}
 	recoverState := service.CodexLoginCanRecoverState(status, message)
+	// Count only successful browser reauthorization of an already bound account.
+	// The row/task locks and state checks above make repeated callbacks a no-op.
+	reauthorization := service.CodexLoginIsReauthorization(stored, message)
+	if !reauthorization {
+		astra = nil
+	} else if astra == nil {
+		astra = &service.CodexLoginAstraResult{Verdict: "unknown"}
+	}
+	probeExtra := map[string]any{}
+	if astra != nil {
+		var extra map[string]any
+		if err := json.Unmarshal(extraJSON, &extra); err != nil {
+			return false, err
+		}
+		if history := astra.History(extra[service.OpenAIAstraPolicyExtraKey]); history != nil {
+			probeExtra[service.OpenAIAstraPolicyExtraKey] = history
+		}
+	}
+	probeJSON, err := json.Marshal(probeExtra)
+	if err != nil {
+		return false, err
+	}
+	// Do not expose the new token to routing until its fresh Astra result is
+	// known. Failed/unknown probes keep valid credentials but pause scheduling;
+	// healthy probes never undo an administrator's existing pause.
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||$2::jsonb,
  status=CASE WHEN $3 THEN 'active' ELSE status END,
  error_message=CASE WHEN $3 THEN NULL ELSE error_message END,
- schedulable=CASE WHEN error_message=$4 AND extra->'openai_codex_authorization_pending'='true'::jsonb THEN TRUE ELSE schedulable END,
- extra=COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending',updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending)
+ schedulable=CASE WHEN $6 THEN FALSE WHEN error_message=$4 AND extra->'openai_codex_authorization_pending'='true'::jsonb THEN TRUE ELSE schedulable END,
+	 extra=(COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending') || CASE WHEN $5 THEN
+	 jsonb_build_object('openai_codex_reauthorization_count', CASE
+	 WHEN jsonb_typeof(extra->'openai_codex_reauthorization_count')='number'
+	 AND (extra->>'openai_codex_reauthorization_count') ~ '^[0-9]{1,15}$'
+	 THEN (extra->>'openai_codex_reauthorization_count')::bigint ELSE 0 END + 1)
+	 ELSE '{}'::jsonb END || $7::jsonb,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization, astra != nil && !astra.Healthy(), string(probeJSON))
 	if err != nil {
 		return false, err
 	}
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate))
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate, astra))
 	if err != nil {
 		return false, err
 	}

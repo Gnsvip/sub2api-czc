@@ -84,8 +84,11 @@ export function codexLoginError(code?: string): string {
 }
 export function codexLoginTaskLabel(task?: CodexLoginTask | null): string {
   if (task?.status === 'succeeded') {
-    if (task.stage === 'succeeded_personal_workspace_only') return '已授权 · 仅个人工作区'
-    if (task.stage === 'succeeded_personal_workspace') return '已授权 · 个人工作区'
+    const workspace = task.stage.startsWith('succeeded_personal_workspace_only') ? ' · 仅个人工作区'
+      : task.stage.startsWith('succeeded_personal_workspace') ? ' · 个人工作区' : ''
+    if (task.stage.endsWith('_astra_degraded')) return `已授权${workspace} · 降智，未恢复调度`
+    if (task.stage.endsWith('_astra_unknown')) return `已授权${workspace} · 检测未完成，未恢复调度`
+    return `已授权${workspace}`
   }
   if (task?.status === 'running') {
     const stages: Record<string, string> = {

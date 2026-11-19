@@ -100,6 +100,7 @@ vi.mock('vue-i18n', async () => {
 import CreateAccountModal from '../CreateAccountModal.vue'
 import CodexAutomaticAuthorization from '../CodexAutomaticAuthorization.vue'
 import CodexLoginSettings from '../CodexLoginSettings.vue'
+import { codexLoginTaskLabel } from '@/api/admin/codexLogin'
 import { readAccountCreationDefaults, writeAccountCreationDefaults } from '../accountCreationDefaults'
 
 const BaseDialogStub = defineComponent({
@@ -253,6 +254,16 @@ async function submitOpenAIOAuthMethod(wrapper: ReturnType<typeof mountModal>, m
 }
 
 describe('Codex automatic authorization and remembered settings', () => {
+  it.each([
+    ['succeeded', '已授权'],
+    ['succeeded_astra_degraded', '已授权 · 降智，未恢复调度'],
+    ['succeeded_astra_unknown', '已授权 · 检测未完成，未恢复调度'],
+    ['succeeded_personal_workspace_only_astra_degraded', '已授权 · 仅个人工作区 · 降智，未恢复调度'],
+    ['succeeded_personal_workspace_astra_unknown', '已授权 · 个人工作区 · 检测未完成，未恢复调度'],
+  ])('shows the authorization and scheduling outcome for %s', (stage, label) => {
+    expect(codexLoginTaskLabel({ id: 9, account_id: 42, status: 'succeeded', stage })).toBe(label)
+  })
+
   const runtime = { mode: 'managed', state: 'running' }
   const config = { enabled: false, login_email: 'example@example.com', password_configured: true, totp_configured: true, revision: 1 }
   beforeEach(() => {

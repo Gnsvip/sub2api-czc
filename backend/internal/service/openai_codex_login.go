@@ -44,14 +44,34 @@ func codexPersonalPlan(plan string) bool {
 	}
 }
 
-func CodexLoginCompletionStage(credentials map[string]any) string {
+func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult) string {
+	stage := "succeeded"
 	if excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
 		if only, _ := credentials[CodexPersonalWorkspaceOnly].(bool); only {
-			return "succeeded_personal_workspace_only"
+			stage = "succeeded_personal_workspace_only"
+		} else {
+			stage = "succeeded_personal_workspace"
 		}
-		return "succeeded_personal_workspace"
 	}
-	return "succeeded"
+	if astra != nil && !astra.Healthy() {
+		if astra.Verdict == string(openAITiboDegraded) {
+			return stage + "_astra_degraded"
+		}
+		return stage + "_astra_unknown"
+	}
+	return stage
+}
+
+func CodexLoginIsReauthorization(credentials map[string]any, message string) bool {
+	if message == CodexAuthorizationPending {
+		return false
+	}
+	for _, key := range []string{"access_token", "refresh_token", "chatgpt_account_id"} {
+		if excelMapString(credentials, key) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 type CodexLoginRepository interface {
@@ -64,7 +84,7 @@ type CodexLoginRepository interface {
 	ListCodexLoginCandidates(context.Context) ([]int64, error)
 	HasActiveCodexLogins(context.Context) (bool, error)
 	ClaimCodexLogin(context.Context, string) (*ExcelLoginTask, error)
-	FinishCodexLogin(context.Context, int64, string, map[string]any) (bool, error)
+	FinishCodexLogin(context.Context, int64, string, map[string]any, *CodexLoginAstraResult) (bool, error)
 }
 
 // No credential fields may be serialized into progress, error messages or logs.
@@ -548,11 +568,23 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		_ = s.FailExcelLogin(ctx, id, worker, "verification_failed")
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_VERIFICATION_FAILED", "授权后的连通验证未通过，请稍后重试")
 	}
+	var astra *CodexLoginAstraResult
+	if CodexLoginIsReauthorization(a.Credentials, a.ErrorMessage) {
+		// A failed quality probe must not discard valid new tokens or cause a
+		// second browser login. Only a fresh healthy result may resume routing.
+		result := CodexLoginAstraResult{Verdict: string(openAITiboUnknown)}
+		if s.codexLoginAstraProbe != nil {
+			probeCtx, probeCancel := context.WithTimeout(ctx, openAITiboProbeTimeout)
+			result = s.codexLoginAstraProbe(probeCtx, &probe)
+			probeCancel()
+		}
+		astra = &result
+	}
 	if from := excelMapString(c, CodexWorkspaceFallbackFrom); from != "" {
 		safe[CodexWorkspaceFallbackFrom] = from
 		safe[CodexPersonalWorkspaceOnly], _ = c[CodexPersonalWorkspaceOnly].(bool)
 	}
-	changed, err := r.FinishCodexLogin(ctx, id, worker, safe)
+	changed, err := r.FinishCodexLogin(ctx, id, worker, safe, astra)
 	if err != nil {
 		return nil, err
 	}
@@ -563,5 +595,5 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if s.codexLoginCredentialsChanged != nil {
 		s.codexLoginCredentialsChanged(ctx, a)
 	}
-	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe)}, nil
+	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe, astra)}, nil
 }

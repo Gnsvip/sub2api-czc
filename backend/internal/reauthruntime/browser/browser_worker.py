@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import hashlib
 import importlib
 import io
@@ -187,6 +188,15 @@ def stop_child(child):
             child.wait(timeout=5)
 
 
+def completion_api(api, worker):
+    # The managed overlay owns the Codex-only change; the pinned Excel worker
+    # and normal claim/progress calls retain their original request timeout.
+    if not hasattr(api, "config"):
+        return api
+    config = replace(api.config, request_timeout=max(api.config.request_timeout, 60.0))
+    return worker.WorkerAPI(config)
+
+
 def run_browser(api, claim, worker, root=None):
     task_id = int(claim.get("task_id") or 0)
     if task_id <= 0 or not claim.get("login_email") or not claim.get("password"):
@@ -287,7 +297,7 @@ def run_browser(api, claim, worker, root=None):
         raise BrowserFailure("worker_failed")
     worker._best_effort_progress(api, task_id, "applying_credentials")
     try:
-        result = api.credentials(task_id, credentials, {})
+        result = completion_api(api, worker).credentials(task_id, credentials, {})
     except Exception:
         raise BrowserFailure("verification_failed") from None
     finally:

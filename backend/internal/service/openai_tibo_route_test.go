@@ -203,6 +203,49 @@ func TestTiboRouteAppliesForOpenAIAPIKey(t *testing.T) {
 	require.Equal(t, "http", got[0].TiboRoutes[0].Route)
 }
 
+func TestTiboCodexReauthorizationUsesFreshTokenAndExistingProbe(t *testing.T) {
+	for _, answer := range []string{"True", "False"} {
+		t.Run(answer, func(t *testing.T) {
+			tc := newTiboRouteCase(t, false, false, cookieWSHTTPResponse(answer))
+			// An intentionally unusable token provider proves the candidate probe
+			// does not consult old cached credentials or refresh the live account.
+			tc.svc.openAITokenProvider = &OpenAITokenProvider{}
+			tc.account.Credentials["access_token"] = "fresh-reauthorized-token"
+			tc.account.Credentials["chatgpt_account_id"] = "fresh-workspace"
+			proxyID := int64(31)
+			tc.account.ProxyID = &proxyID
+			tc.account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: "127.0.0.1", Port: 18081, Status: StatusActive}
+			tc.account.Status = StatusError
+			tc.account.Extra[OpenAIAstraProbeEnabledExtraKey] = false
+			result := tc.svc.probeCodexLoginAstra(context.Background(), tc.account)
+			require.Equal(t, answer == "True", result.Healthy())
+			require.Len(t, tc.upstream.requests, 1)
+			req := tc.upstream.requests[0]
+			require.Equal(t, "Bearer fresh-reauthorized-token", req.Header.Get("Authorization"))
+			require.Equal(t, "fresh-workspace", req.Header.Get("chatgpt-account-id"))
+			require.Equal(t, chatgptCodexURL, req.URL.String())
+			require.Equal(t, tc.account.Proxy.URL(), tc.upstream.lastProxyURL)
+			require.Equal(t, StatusError, tc.account.Status)
+			require.Equal(t, false, tc.account.Extra[OpenAIAstraProbeEnabledExtraKey])
+			_, wrote := tc.svc.accountRepo.(*tiboAccountRepo).updateFor(tc.account.ID)
+			require.False(t, wrote, "uncommitted credentials must not publish a probe point or move groups")
+		})
+	}
+	tc := newTiboRouteCase(t, false, false, tiboRouteStatusResponse(429))
+	require.Equal(t, "unknown", tc.svc.probeCodexLoginAstra(context.Background(), tc.account).Verdict)
+	sem := tc.svc.openAITiboProbeSem()
+	for len(sem) < cap(sem) {
+		sem <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.False(t, tc.svc.probeCodexLoginAstra(ctx, tc.account).Healthy())
+	require.Len(t, tc.upstream.requests, 1, "cancelled semaphore wait must not send a request")
+	for len(sem) > 0 {
+		<-sem
+	}
+}
+
 func TestTiboProbeAPIKeyUsesResponsesBaseURL(t *testing.T) {
 	tc := newTiboRouteCase(t, false, false, cookieWSHTTPResponse("True"))
 	tc.account.Type = AccountTypeAPIKey

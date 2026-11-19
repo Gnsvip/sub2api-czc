@@ -713,6 +713,7 @@ type codexLoginTestRepo struct {
 	scans       int
 	allowFinish bool
 	write       map[string]any
+	astra       *CodexLoginAstraResult
 }
 
 func (r *codexLoginTestRepo) GetCodexLoginConfig(ctx context.Context, id int64) (*ExcelLoginConfig, error) {
@@ -738,9 +739,10 @@ func (r *codexLoginTestRepo) HasActiveCodexLogins(context.Context) (bool, error)
 func (r *codexLoginTestRepo) ListCodexLoginCandidates(context.Context) ([]int64, error) {
 	return nil, nil
 }
-func (r *codexLoginTestRepo) FinishCodexLogin(_ context.Context, _ int64, _ string, c map[string]any) (bool, error) {
+func (r *codexLoginTestRepo) FinishCodexLogin(_ context.Context, _ int64, _ string, c map[string]any, astra *CodexLoginAstraResult) (bool, error) {
 	r.finished++
 	r.write = c
+	r.astra = astra
 	return r.allowFinish, nil
 }
 
@@ -750,6 +752,9 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	grant.repo = repo
 	grant.settings = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "false"}}
 	oauth := grant.oauth
+	oauth.codexLoginAstraProbe = func(context.Context, *Account) CodexLoginAstraResult {
+		return CodexLoginAstraResult{Verdict: "healthy", SampledAt: time.Now()}
+	}
 	ctx := context.Background()
 	disabled := false
 	input := CodexLoginInput{Enabled: &disabled, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
@@ -831,6 +836,59 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 		reader.account.Credentials["auth_mode"] = mode
 		_, err = oauth.CodexLoginStatus(ctx, 42)
 		require.Error(t, err)
+	}
+}
+
+func TestCodexLoginAstraGateBeforeCredentialCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name, verdict, stage string
+		initial, unavailable bool
+	}{
+		{"healthy recovery", "healthy", "succeeded", false, false},
+		{"degraded recovery", "degraded", "succeeded_astra_degraded", false, false},
+		{"unknown recovery", "unknown", "succeeded_astra_unknown", false, false},
+		{"verifier unavailable", "unknown", "succeeded_astra_unknown", false, true},
+		{"first authorization unchanged", "", "succeeded", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grant, reader, base := newExcelGrantTestService(t)
+			repo := &codexLoginTestRepo{excelLoginTestRepo: &excelLoginTestRepo{excelReauthTestRepo: base}, allowFinish: true}
+			grant.repo = repo
+			if tc.initial {
+				reader.account.Credentials = map[string]any{"email": "user@example.com"}
+				reader.account.ErrorMessage = CodexAuthorizationPending
+			}
+			repo.config = &ExcelLoginConfig{AccountID: 42, LoginEmail: "user@example.com", Revision: 1}
+			repo.task = &ExcelLoginTask{ID: 9, AccountID: 42, OAuthProfile: "codex", Status: "running", WorkerID: "worker", ConfigRevision: 1}
+			verified, probed := false, false
+			grant.oauth.codexLoginVerify = func(context.Context, *Account) error { verified = true; return nil }
+			credentials := codexLoginTestCredentials(t, openai.ClientID, "acct-1", "user-1", "user@example.com")
+			if !tc.unavailable {
+				grant.oauth.codexLoginAstraProbe = func(ctx context.Context, candidate *Account) CodexLoginAstraResult {
+					probed = true
+					require.True(t, verified)
+					require.Zero(t, repo.finished, "no new token or routing state is committed before the probe")
+					require.Equal(t, credentials["access_token"], candidate.GetCredential("access_token"))
+					_, bounded := ctx.Deadline()
+					require.True(t, bounded)
+					return CodexLoginAstraResult{Verdict: tc.verdict, SampledAt: time.Now()}
+				}
+			}
+			result, err := grant.oauth.CompleteCodexLogin(context.Background(), 9, "worker", credentials)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", result.Status)
+			require.Equal(t, tc.stage, result.Stage)
+			require.Equal(t, !tc.initial && !tc.unavailable, probed)
+			require.Equal(t, 1, repo.finished)
+			require.Equal(t, credentials["access_token"], repo.write["access_token"])
+			require.Empty(t, repo.failures, "a quality failure must not schedule another browser login")
+			if tc.initial {
+				require.Nil(t, repo.astra)
+			} else {
+				require.NotNil(t, repo.astra)
+				require.Equal(t, tc.verdict == "healthy", repo.astra.Healthy())
+			}
+		})
 	}
 }
 

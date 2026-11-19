@@ -49,7 +49,7 @@ async function load(initial = false) {
     if (initial) { email.value = next.config.login_email; enabled.value = next.config.enabled }
     if (['queued','running'].includes(next.task?.status || '')) timer = setTimeout(() => load(), 5000)
     if (completed) {
-      if (next.task?.stage.startsWith('succeeded_personal_workspace')) appStore.showWarning(codexLoginTaskLabel(next.task), 8000)
+      if (next.task?.stage.startsWith('succeeded_personal_workspace') || next.task?.stage.includes('_astra_')) appStore.showWarning(codexLoginTaskLabel(next.task), 8000)
       emit('authorized')
     }
   } catch {

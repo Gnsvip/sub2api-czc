@@ -11,6 +11,59 @@ import (
 
 const OpenAIAstraProbeIntervalExtraKey = "openai_astra_probe_interval_minutes"
 
+// Produced only by the server's post-login probe, never by the worker payload.
+type CodexLoginAstraResult struct {
+	Verdict   string
+	SampledAt time.Time
+}
+
+func (r *CodexLoginAstraResult) Healthy() bool {
+	return r != nil && r.Verdict == string(openAITiboHealthy) && !r.SampledAt.IsZero() && !r.SampledAt.After(time.Now())
+}
+
+// Merge the fresh point under the account row lock with the token write. Keep
+// the normal confirmed verdict/voting policy; this gate uses the new point only.
+func (r *CodexLoginAstraResult) History(current any) map[string]any {
+	now := time.Now()
+	if r == nil || !openAITiboVerdict(r.Verdict).definitive() || r.SampledAt.IsZero() || r.SampledAt.After(now) {
+		return nil
+	}
+	samples := validOpenAIAstraSamples(current, now)
+	if len(samples) > 0 && !r.SampledAt.After(samples[len(samples)-1].At) {
+		return nil
+	}
+	samples = append(samples, openAITiboRecentSample{Verdict: openAITiboVerdict(r.Verdict), At: r.SampledAt})
+	if len(samples) > openAITiboRecentSampleLimit {
+		samples = samples[len(samples)-openAITiboRecentSampleLimit:]
+	}
+	value := map[string]any{"model": openAICodexTicketDefaultModel, "recent_samples": encodeOpenAITiboRecentSamples(samples)}
+	for _, key := range []string{"verdict", "checked_at", "flipped_at"} {
+		if field := openAITiboExtraField(current, key); field != nil {
+			value[key] = field
+		}
+	}
+	return value
+}
+
+// A one-off login gate shares the process probe concurrency limit and the same
+// prompt/HTTP transport. It does not change the account's periodic probe toggle,
+// move groups, or publish candidate credentials before the repository CAS.
+func (s *OpenAIGatewayService) probeCodexLoginAstra(ctx context.Context, account *Account) CodexLoginAstraResult {
+	result := CodexLoginAstraResult{Verdict: string(openAITiboUnknown)}
+	if s == nil || s.httpUpstream == nil || account == nil || !account.IsOpenAIOAuth() {
+		return result
+	}
+	select {
+	case s.openAITiboProbeSem() <- struct{}{}:
+		defer func() { <-s.openAITiboProbeSem() }()
+	case <-ctx.Done():
+		return result
+	}
+	sample := s.probeOpenAITiboHTTPWithToken(ctx, account, account.GetOpenAIAccessToken())
+	result.Verdict, result.SampledAt = string(sample.verdict), time.Now()
+	return result
+}
+
 // Zero inherits the deployment's cadence. Overrides retain the existing probe
 // budget, confirmation spacing, quota holds and rejection backoff.
 func (a *Account) OpenAIAstraProbeIntervalMinutes() int {

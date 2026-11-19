@@ -295,12 +295,23 @@ func (s *AccountRepoSuite) TestUpdateCredentials_SyncsSnapshotAndDurableOutbox()
 
 func (s *AccountRepoSuite) TestDelete() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "to-delete"})
+	for _, table := range []string{"openai_codex_login_configs", "openai_excel_login_configs"} {
+		_, err := s.repo.sql.ExecContext(s.ctx, "INSERT INTO "+table+" (account_id,enabled,login_email,password_ciphertext,totp_ciphertext) VALUES($1,true,'delete@example.invalid','synthetic-password','synthetic-totp')", account.ID)
+		s.Require().NoError(err)
+	}
+	_, err := s.repo.sql.ExecContext(s.ctx, "INSERT INTO openai_excel_login_tasks(account_id,config_revision,expected_credentials_hash,expected_grant_hash,oauth_profile) VALUES($1,1,'synthetic','','codex')", account.ID)
+	s.Require().NoError(err)
 
-	err := s.repo.Delete(s.ctx, account.ID)
+	err = s.repo.Delete(s.ctx, account.ID)
 	s.Require().NoError(err, "Delete")
 
 	_, err = s.repo.GetByID(s.ctx, account.ID)
 	s.Require().Error(err, "expected error after delete")
+	var count int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT (SELECT count(*) FROM openai_codex_login_configs WHERE account_id=$1)+(SELECT count(*) FROM openai_excel_login_configs WHERE account_id=$1)", []any{account.ID}, &count))
+	s.Require().Zero(count, "repository soft deletion also removes saved login secrets")
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT count(*) FROM openai_excel_login_tasks WHERE account_id=$1 AND status='cancelled'", []any{account.ID}, &count))
+	s.Require().Equal(1, count)
 }
 
 func (s *AccountRepoSuite) TestDelete_RemovesSchedulerAccountSnapshot() {

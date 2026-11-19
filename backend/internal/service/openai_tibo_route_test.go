@@ -239,7 +239,8 @@ func TestTiboCodexReauthorizationUsesFreshTokenAndExistingProbe(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	require.False(t, tc.svc.probeCodexLoginAstra(ctx, tc.account).Healthy())
+	result := tc.svc.probeCodexLoginAstra(ctx, tc.account)
+	require.False(t, result.Healthy())
 	require.Len(t, tc.upstream.requests, 1, "cancelled semaphore wait must not send a request")
 	for len(sem) > 0 {
 		<-sem

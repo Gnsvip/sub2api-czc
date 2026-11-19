@@ -448,6 +448,7 @@ describe('Codex automatic authorization and remembered settings', () => {
 
   it.each([
     ['totp_rejected', '2FA 验证失败，请检查 TOTP 密钥'],
+    ['identity_mismatch', '登录身份或所选工作区校验失败'],
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
     ['workspace_unavailable', '未找到可用或指定的工作区，请检查设置或手动授权'],
     ['workspace_selection_required', '有多个工作区，请填写工作区 ID 后重试'],

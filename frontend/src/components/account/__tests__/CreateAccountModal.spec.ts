@@ -452,8 +452,8 @@ describe('Codex automatic authorization and remembered settings', () => {
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
     ['workspace_unavailable', '未找到可用或指定的工作区，请检查设置或手动授权'],
     ['workspace_selection_required', '有多个工作区，请填写工作区 ID 后重试'],
-    ['browser_unavailable', '服务器授权浏览器未就绪，请检查 CloakBrowser、Xvfb 和 xauth'],
-    ['browser_start_failed', '授权浏览器启动失败，请检查浏览器依赖和沙箱权限'],
+    ['browser_unavailable', '旧版浏览器授权失败，请重新发起授权'],
+    ['browser_start_failed', '旧版浏览器授权失败，请重新发起授权'],
   ])('shows the specific %s failure without claiming authorization succeeded', async (code, message) => {
     createCodexLoginMock.mockResolvedValueOnce({ results: [{ line: 1, email: 'example@example.com', account_id: 42, task: { id: 9, account_id: 42, status: 'failed', stage: 'failed', error_code: code } }], runtime })
     const wrapper = mount(CodexAutomaticAuthorization, { props: { options: { group_ids: [], proxy_ids: [], concurrency: 50, priority: 1 } } })

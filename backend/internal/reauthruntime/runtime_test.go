@@ -160,16 +160,16 @@ func TestManagedProcessGetsOnlyWorkerEnvironmentAndStops(t *testing.T) {
 	got, err = os.ReadFile(filepath.Join(dir, "concurrency"))
 	require.NoError(t, err)
 	require.Equal(t, "4", string(got))
-	overlay, err := m.prepareBrowserOverlay()
+	overlay, err := m.prepareProtocolOverlay()
 	require.NoError(t, err)
-	for _, name := range []string{"browser_worker.py", "codex_browser.mjs"} {
+	for _, name := range protocolFiles {
 		data, err := os.ReadFile(filepath.Join(overlay, name))
 		require.NoError(t, err)
-		expected, err := browserSource.ReadFile("browser/" + name)
+		expected, err := protocolSource.ReadFile("protocol/" + name)
 		require.NoError(t, err)
 		require.Equal(t, expected, data)
 	}
-	again, err := m.prepareBrowserOverlay()
+	again, err := m.prepareProtocolOverlay()
 	require.NoError(t, err)
 	require.Equal(t, overlay, again)
 	m.Stop()
@@ -217,34 +217,31 @@ func TestExcelBPSPinnedRuntimeReleaseSelfCheck(t *testing.T) {
 	require.Equal(t, expected, string(digest))
 	require.Equal(t, "idle", m.Status().State, "self-check must not start a live worker")
 
-	// Exercise the embedded adapter with the real pinned Python distribution.
-	// A bare sys.executable can import host libpython and fail before launching
-	// Xvfb, although the ordinary system-Python lifecycle tests pass.
-	overlay, err := m.prepareBrowserOverlay()
+	// Exercise imports and task supervision with the real pinned Python/curl-cffi
+	// distribution; the child emits a synthetic failure without any network call.
+	overlay, err := m.prepareProtocolOverlay()
 	require.NoError(t, err)
-	runner := filepath.Join(m.root, "synthetic-browser")
-	require.NoError(t, os.WriteFile(runner, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"error\",\"code\":\"security_check\"}'\n"), 0700))
+	synthetic := filepath.Join(m.root, "synthetic-protocol")
+	require.NoError(t, os.Mkdir(synthetic, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(synthetic, "codex_protocol.py"), []byte("import sys\nsys.stdin.read()\nprint('{\"type\":\"error\",\"code\":\"security_check\"}',flush=True)\n"), 0600))
 	script := `import importlib.util,sys
 from pathlib import Path
 from types import SimpleNamespace
-path=Path(sys.argv[1])/'browser_worker.py'
-spec=importlib.util.spec_from_file_location('adapter',path)
-adapter=importlib.util.module_from_spec(spec)
-spec.loader.exec_module(adapter)
-adapter.ensure_playwright=lambda root: root/'unused-library'
+sys.path.insert(0,sys.argv[1])
+import codex_protocol, protocol_worker as adapter
+assert codex_protocol.OAUTH_CLIENT_ID
 try:
-    adapter.run_browser(None,{'task_id':1,'login_email':'test@example.invalid','password':'synthetic'},
-                        SimpleNamespace(_best_effort_progress=lambda *args:None),root=path)
-except adapter.BrowserFailure as error:
+    adapter.run_protocol(None,{'task_id':1,'login_email':'test@example.invalid','password':'synthetic'},
+                         SimpleNamespace(_best_effort_progress=lambda *args:None),root=Path(sys.argv[2])/'worker.py')
+except adapter.ProtocolFailure as error:
     assert error.code=='security_check',error.code
 else:
-    raise AssertionError('synthetic browser failure was not returned')
+    raise AssertionError('synthetic protocol failure was not returned')
 `
-	check := exec.CommandContext(ctx, filepath.Join(dir, "python"), "-c", script, overlay)
+	check := exec.CommandContext(ctx, filepath.Join(dir, "python"), "-c", script, overlay, synthetic)
 	check.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1",
-		"TOSUB2_PYTHON=" + filepath.Join(dir, "python"), "NODE_EXECUTABLE=" + runner,
-		"OPENAI_CODEX_BROWSER_EXECUTABLE=/bin/true"}
+		"TOSUB2_PYTHON=" + filepath.Join(dir, "python")}
 	configureProcess(check)
 	output, err := check.CombinedOutput()
-	require.NoError(t, err, "pinned-runtime browser supervision: %s", output)
+	require.NoError(t, err, "pinned-runtime protocol supervision: %s", output)
 }

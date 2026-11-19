@@ -938,6 +938,9 @@ func TestCodexLoginDefaultRecoveryPreservesExistingChoices(t *testing.T) {
 
 func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 	valid := "codex_browser_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16130 action_ms=15001 http_status=200 response=document"
+	protocol := strings.Replace(valid, "codex_browser_failed", "codex_protocol_failed", 1)
+	require.NotNil(t, ParseCodexBrowserDiagnostic(protocol))
+	require.Equal(t, "timeout", safeLoginFailureCode(protocol))
 	diagnostic := ParseCodexBrowserDiagnostic(valid)
 	require.NotNil(t, diagnostic)
 	require.Equal(t, "submit_email", diagnostic.Action)

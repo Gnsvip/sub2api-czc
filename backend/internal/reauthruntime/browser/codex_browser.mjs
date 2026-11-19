@@ -299,6 +299,7 @@ export async function authorize(chromium, input, options = {}) {
         // itself, including its iframe. Never click/solve a challenge, submit
         // credentials through it, or extend the overall authorization budget.
         challengeAt ||= Date.now();
+        actionStarted = challengeAt;
         if (Date.now() - challengeAt >= 15000) fail('security_check');
         idleSince = Date.now();
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -345,6 +346,7 @@ export async function authorize(chromium, input, options = {}) {
       }
       if (progressed) idleSince = Date.now();
       operation('wait_next_page');
+      actionStarted = idleSince;
       if (Date.now() - idleSince > 30000) fail('additional_verification');
       await new Promise(resolve => setTimeout(resolve, 400));
     }

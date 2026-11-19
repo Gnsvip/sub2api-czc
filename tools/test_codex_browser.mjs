@@ -222,6 +222,10 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
             assert.equal(error.diagnostic.stage, 'protocol_connecting');
             assert.ok(error.diagnostic.action_ms >= 14000);
           }
+          if (scenario === 'security_check') {
+            assert.equal(error.diagnostic.action, 'security_check');
+            assert.ok(error.diagnostic.action_ms >= 15000);
+          }
           return true;
         });
         if (!tokenMismatch) assert.equal(tokenCalls, 0);

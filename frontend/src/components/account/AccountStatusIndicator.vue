@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center gap-2">
+  <div class="flex items-center gap-2" :class="{ 'flex-wrap': codexReauthorizationCount > 0 }">
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
@@ -155,6 +155,14 @@
         ></div>
       </div>
     </div>
+    <span
+      v-if="codexReauthorizationCount > 0"
+      class="basis-full whitespace-nowrap text-[11px] leading-4 text-sky-600 dark:text-sky-400"
+      :title="t('admin.accounts.status.codexReauthorizationCountHint')"
+      data-testid="codex-reauthorization-count"
+    >
+      {{ t('admin.accounts.status.codexReauthorizationCount', { count: codexReauthorizationCount }) }}
+    </span>
   </div>
 </template>
 
@@ -174,6 +182,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
+
+const codexReauthorizationCount = computed(() => {
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return 0
+  const count = props.account.extra?.openai_codex_reauthorization_count
+  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 0
+})
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {

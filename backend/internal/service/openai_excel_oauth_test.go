@@ -751,7 +751,8 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	grant.settings = &settingRepoStub{values: map[string]string{SettingKeyExcelBPSEnabled: "false"}}
 	oauth := grant.oauth
 	ctx := context.Background()
-	input := ExcelLoginInput{Enabled: false, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
+	disabled := false
+	input := CodexLoginInput{Enabled: &disabled, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
 	state, err := oauth.SaveCodexLogin(ctx, 42, input)
 	require.NoError(t, err)
 	require.False(t, state.Config.Enabled)
@@ -830,6 +831,46 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 		reader.account.Credentials["auth_mode"] = mode
 		_, err = oauth.CodexLoginStatus(ctx, 42)
 		require.Error(t, err)
+	}
+}
+
+func TestCodexLoginDefaultRecoveryPreservesExistingChoices(t *testing.T) {
+	on, off := true, false
+	for _, tc := range []struct {
+		name              string
+		existing, enabled *bool
+		want              bool
+	}{
+		{"new configuration defaults on", nil, nil, true},
+		{"new configuration can opt out", nil, &off, false},
+		{"new configuration explicitly enabled", nil, &on, true},
+		{"existing disabled stays disabled", &off, nil, false},
+		{"existing enabled stays enabled", &on, nil, true},
+		{"existing disabled can be enabled", &off, &on, true},
+		{"existing enabled can be disabled", &on, &off, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grant, _, base := newExcelGrantTestService(t)
+			repo := &codexLoginTestRepo{excelLoginTestRepo: &excelLoginTestRepo{excelReauthTestRepo: base}}
+			grant.repo = repo
+			if tc.existing != nil {
+				repo.config = &ExcelLoginConfig{AccountID: 42, Enabled: *tc.existing, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted", Revision: 3}
+			}
+			state, err := grant.oauth.CodexLoginStatus(context.Background(), 42)
+			require.NoError(t, err)
+			if tc.existing == nil {
+				require.True(t, state.Config.Enabled)
+				require.Nil(t, repo.config, "reading defaults must not create a saved configuration")
+			} else {
+				require.Equal(t, *tc.existing, state.Config.Enabled)
+			}
+			state, err = grant.oauth.SaveCodexLogin(context.Background(), 42, CodexLoginInput{
+				Enabled: tc.enabled, Password: "synthetic-password", Revision: state.Config.Revision,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, state.Config.Enabled)
+			require.Equal(t, tc.want, repo.config.Enabled)
+		})
 	}
 }
 

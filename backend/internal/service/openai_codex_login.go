@@ -22,6 +22,18 @@ const CodexAuthorizationPending = "Codex authorization pending"
 
 const CodexWorkspaceFallbackFrom = "codex_workspace_fallback_from"
 const CodexPersonalWorkspaceOnly = "codex_personal_workspace_only"
+const CodexReauthorizationCountExtraKey = "openai_codex_reauthorization_count"
+
+// Nil keeps an existing choice and defaults a new configuration to enabled.
+// Excel/BPS keeps its separate opt-in input and behavior.
+type CodexLoginInput struct {
+	Enabled    *bool  `json:"enabled"`
+	LoginEmail string `json:"login_email"`
+	Password   string `json:"password"`
+	TOTPSecret string `json:"totp_secret"`
+	ClearTOTP  bool   `json:"clear_totp"`
+	Revision   int64  `json:"revision"`
+}
 
 func codexPersonalPlan(plan string) bool {
 	switch plan {
@@ -179,7 +191,7 @@ func (s *OpenAIOAuthService) CodexLoginStatus(ctx context.Context, id int64) (*E
 		return nil, err
 	}
 	if c == nil {
-		c = &ExcelLoginConfig{AccountID: id, LoginEmail: a.GetCredential("email")}
+		c = &ExcelLoginConfig{AccountID: id, Enabled: true, LoginEmail: a.GetCredential("email")}
 	}
 	c.PasswordConfigured = c.PasswordCiphertext != ""
 	c.TOTPConfigured = c.TOTPCiphertext != ""
@@ -189,7 +201,7 @@ func (s *OpenAIOAuthService) CodexLoginStatus(ctx context.Context, id int64) (*E
 	}
 	return &ExcelLoginStatus{Config: c, Task: t, Runtime: s.ExcelLoginRuntimeStatus()}, nil
 }
-func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input ExcelLoginInput) (*ExcelLoginStatus, error) {
+func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input CodexLoginInput) (*ExcelLoginStatus, error) {
 	a, err := s.codexLoginAccount(ctx, id)
 	if err != nil {
 		return nil, err
@@ -203,13 +215,15 @@ func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input
 		return nil, err
 	}
 	if c == nil {
-		c = &ExcelLoginConfig{AccountID: id, LoginEmail: a.GetCredential("email")}
+		c = &ExcelLoginConfig{AccountID: id, Enabled: true, LoginEmail: a.GetCredential("email")}
 	}
 	previous := *c
 	if previous.Revision != input.Revision {
 		return nil, infraerrors.Conflict("CODEX_LOGIN_CONFIG_CHANGED", "设置已变更，请刷新后重试")
 	}
-	c.Enabled = input.Enabled
+	if input.Enabled != nil {
+		c.Enabled = *input.Enabled
+	}
 	if input.LoginEmail != "" {
 		c.LoginEmail = strings.TrimSpace(input.LoginEmail)
 	}

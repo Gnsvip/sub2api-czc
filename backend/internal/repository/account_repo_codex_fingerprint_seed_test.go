@@ -21,8 +21,9 @@ func TestBulkUpdateEnsuresCodexFingerprintSeedWithPerRowSQL(t *testing.T) {
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{27, 28}, service.AccountBulkUpdate{
 		Extra: map[string]any{
-			"codex_fingerprint_mode": "session",
-			"codex_fingerprint_seed": "22222222-2222-4222-8222-222222222222",
+			"codex_fingerprint_mode":                  "session",
+			"codex_fingerprint_seed":                  "22222222-2222-4222-8222-222222222222",
+			service.CodexReauthorizationCountExtraKey: 0,
 		},
 		EnsureCodexFingerprintSeed: true,
 	})
@@ -60,8 +61,9 @@ func TestUpdateExtraEnsuresCodexFingerprintSeedAtomicallyWhenEnabling(t *testing
 	repo := newAccountRepositoryWithSQL(client, db, nil)
 
 	err = repo.UpdateExtra(context.Background(), 27, map[string]any{
-		"codex_fingerprint_mode": "device",
-		"codex_fingerprint_seed": "22222222-2222-4222-8222-222222222222",
+		"codex_fingerprint_mode":                  "device",
+		"codex_fingerprint_seed":                  "22222222-2222-4222-8222-222222222222",
+		service.CodexReauthorizationCountExtraKey: 0,
 	})
 
 	require.NoError(t, err)

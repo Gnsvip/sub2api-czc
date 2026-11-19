@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -215,11 +216,25 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 		return false, err
 	}
 	recoverState := service.CodexLoginCanRecoverState(status, message)
+	// Count only successful browser reauthorization of an already bound account.
+	// The row/task locks and state checks above make repeated callbacks a no-op.
+	reauthorization := false
+	if message != service.CodexAuthorizationPending {
+		for _, key := range []string{"access_token", "refresh_token", "chatgpt_account_id"} {
+			value, _ := stored[key].(string)
+			reauthorization = reauthorization || strings.TrimSpace(value) != ""
+		}
+	}
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||$2::jsonb,
  status=CASE WHEN $3 THEN 'active' ELSE status END,
  error_message=CASE WHEN $3 THEN NULL ELSE error_message END,
  schedulable=CASE WHEN error_message=$4 AND extra->'openai_codex_authorization_pending'='true'::jsonb THEN TRUE ELSE schedulable END,
- extra=COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending',updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending)
+	 extra=(COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending') || CASE WHEN $5 THEN
+	 jsonb_build_object('openai_codex_reauthorization_count', CASE
+	 WHEN jsonb_typeof(extra->'openai_codex_reauthorization_count')='number'
+	 AND (extra->>'openai_codex_reauthorization_count') ~ '^[0-9]{1,15}$'
+	 THEN (extra->>'openai_codex_reauthorization_count')::bigint ELSE 0 END + 1)
+	 ELSE '{}'::jsonb END,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization)
 	if err != nil {
 		return false, err
 	}

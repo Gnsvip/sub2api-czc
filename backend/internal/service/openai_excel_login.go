@@ -339,7 +339,7 @@ func safeLoginFailureCode(reason string) string {
 	switch reason {
 	case "browser_unavailable", "browser_start_failed", "browser_dependency_failed":
 		return reason
-	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
+	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "workspace_unavailable", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
 		return reason
 	default:
 		return "worker_failed"

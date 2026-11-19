@@ -19,7 +19,7 @@ const codexLoginAccountSQL = `a.deleted_at IS NULL AND a.platform='openai' AND a
 
 const codexLoginRecoverableSQL = `a.status='error'
  AND LOWER(COALESCE(a.error_message,'')) !~ '(account_deactivated|account_deleted|account_retired|cyber_policy)'
- AND (a.error_message='Codex authorization pending' OR a.error_message LIKE 'Token revoked (401):%' OR a.error_message LIKE 'Unauthorized (401):%'
+ AND (a.error_message='Codex authorization pending' OR a.error_message LIKE 'Token revoked (401):%' OR a.error_message LIKE 'Unauthorized (401):%' OR a.error_message LIKE 'Authentication failed (401):%'
  OR (a.error_message LIKE 'Token refresh failed (non-retryable):%' AND a.error_message ~ '(refresh_token_reused|refresh_token_invalidated|invalid_grant|invalid_refresh_token)'))`
 
 const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',COALESCE(a.error_message,''),'schedulable',a.schedulable,'proxy_id',a.proxy_id)`
@@ -88,7 +88,7 @@ const codexLoginBudgetSQL = `NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t
  AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex'
  AND t.config_revision=c.revision AND t.status='failed' AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0))<3)
  AND ($2 OR NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex' AND t.config_revision=c.revision
- AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
+ AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
  AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0)))`
 
 func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int64, manual bool) (*service.ExcelLoginTask, error) {
@@ -207,6 +207,8 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	for key, value := range candidate {
 		info[key] = value
 	}
+	delete(info, service.CodexWorkspaceFallbackFrom)
+	delete(info, service.CodexPersonalWorkspaceOnly)
 	info["_token_version"] = time.Now().UnixMilli()
 	raw, err := json.Marshal(info)
 	if err != nil {
@@ -224,7 +226,7 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage='succeeded',error_code='',updated_at=NOW() WHERE id=$1`, id)
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate))
 	if err != nil {
 		return false, err
 	}

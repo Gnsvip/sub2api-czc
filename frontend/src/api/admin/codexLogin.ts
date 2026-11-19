@@ -80,9 +80,9 @@ export function codexLoginError(code?: string): string {
     account_changed: '账号状态已变更，请检查后重试',
     timeout: '本次授权超时',
     transport_error: '登录网络连接失败',
-    browser_unavailable: '服务器授权浏览器未就绪，请检查 CloakBrowser、Xvfb 和 xauth',
-    browser_start_failed: '授权浏览器启动失败，请检查浏览器依赖和沙箱权限',
-    browser_dependency_failed: '浏览器组件下载或校验失败，请检查服务器访问 GitHub、npm 的连接及组件缓存',
+    browser_unavailable: '旧版浏览器授权失败，请重新发起授权',
+    browser_start_failed: '旧版浏览器授权失败，请重新发起授权',
+    browser_dependency_failed: '旧版浏览器授权失败，请重新发起授权',
     rate_limited: '上游暂时限流，稍后重试',
     service_error: '上游登录服务暂不可用',
     worker_failed: '授权未完成，请检查登录资料和运行环境',
@@ -103,8 +103,8 @@ export function codexLoginTaskLabel(task?: CodexLoginTask | null): string {
   }
   if (task?.status === 'running') {
     const stages: Record<string, string> = {
-      browser_starting: '正在启动授权浏览器',
-      protocol_connecting: '正在打开登录页面',
+      browser_starting: '正在准备授权',
+      protocol_connecting: '正在连接授权服务',
       email_submitted: '已提交邮箱',
       password_submitted: '已提交密码',
       mfa_submitted: '已提交 2FA 验证码',

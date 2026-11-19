@@ -20,7 +20,7 @@
 
 已有账号重新授权完成身份和连通校验后，先用新令牌、原出口做一次 Astra 检测，再提交凭据和调度状态。检测正常才恢复原本允许的调度；降智或检测超时/失败时保留成功授权、累计次数，但暂停调度，分别提示「降智，未恢复调度」或「检测未完成，未恢复调度」，不会因此反复重新登录。管理员原先的手动暂停仍保留。
 
-这次恢复前检测独立于定时检测开关，不修改其开关和间隔、不自动换组，明确结果写入现有 Astra 历史。首次授权、普通 Token 刷新、Excel/BPS 保持原有流程。托管 Cloak 授权提交的等待上限至少 60 秒，以容纳连通校验（最多 20 秒）与 Astra 检测（最多 25 秒）；其他 worker 请求不变。
+这次恢复前检测独立于定时检测开关，不修改其开关和间隔、不自动换组，明确结果写入现有 Astra 历史。首次授权、普通 Token 刷新、Excel/BPS 保持原有流程。托管协议授权提交的等待上限至少 60 秒，以容纳连通校验（最多 20 秒）与 Astra 检测（最多 25 秒）；其他 worker 请求不变。
 
 启用后只对已持久化的授权失效状态入队，包括后台账号测试写入的 `Authentication failed (401):`，不因普通网络错误、限额、Cyber 策略或上游停用账号自动登录。数据库筛选与服务层判定一致；管理员暂停调度的账号在恢复成功后仍保持暂停。BPS 总开关关闭不影响普通 Codex 队列。
 
@@ -32,7 +32,7 @@
 
 ## 维护与验证
 
-保留 [ranxi2001/sub2api](https://github.com/ranxi2001/sub2api/tree/701612f6e9f7b697eb36397b9fb49bf7324e56a1) 运行包与有限重试调度；普通 Codex 的密码/TOTP 任务由应用内嵌的 Python/Node.js 适配层启动隔离 CloakBrowser，完成官方 OAuth 页面流程。环境与缓存说明见 [浏览器部署说明](codex-browser-authorization.md)。
+保留 [ranxi2001/sub2api](https://github.com/ranxi2001/sub2api/tree/701612f6e9f7b697eb36397b9fb49bf7324e56a1) 运行包与有限重试调度；普通 Codex 的密码/TOTP 任务使用应用内嵌的 reauth-web 协议适配层，完成邮箱、密码、2FA、工作区选择和 OAuth Token 交换。运行与诊断说明见 [协议授权说明](codex-protocol-authorization.md)。
 
 迁移 `282_codex_automatic_authorization.sql` 增加独立登录配置和共享任务队列的 profile/状态快照；既有 Excel 任务默认仍为 Excel。自动准备环境使用上游 `v2.22.0` 运行包；Linux amd64 包校验值：`9090add61ebdea7b8d15f2086293be1b3ebb9ef26bf3b3dd2d8af41df85593f7`。
 

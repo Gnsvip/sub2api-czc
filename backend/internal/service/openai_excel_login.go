@@ -339,7 +339,7 @@ type CodexBrowserDiagnostic struct {
 	Response   string `json:"response"`
 }
 
-var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_browser_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)$`)
+var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_(?:browser|protocol)_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)$`)
 
 func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
 	if len(raw) > 256 {
@@ -355,7 +355,7 @@ func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
 		return nil
 	}
 	switch m[2] {
-	case "initializing", "start_browser", "open_context", "open_login", "read_page", "choose_password", "fill_email", "submit_email", "fill_password", "submit_password", "fill_mfa", "submit_mfa", "select_workspace", "submit_workspace", "wait_next_page", "security_check", "exchange_token", "validate_tokens", "browser_process", "apply_credentials":
+	case "initializing", "start_browser", "open_context", "open_login", "read_page", "choose_password", "fill_email", "submit_email", "fill_password", "submit_password", "fill_mfa", "submit_mfa", "select_workspace", "submit_workspace", "wait_next_page", "security_check", "exchange_token", "validate_tokens", "browser_process", "protocol_process", "apply_credentials":
 	default:
 		return nil
 	}

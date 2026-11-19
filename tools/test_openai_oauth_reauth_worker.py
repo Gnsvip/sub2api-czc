@@ -7,13 +7,9 @@ import unittest
 import base64
 import importlib.util
 import io
-import hashlib
-import tarfile
 import signal
-import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -58,10 +54,164 @@ class OTPHandler(BaseHTTPRequestHandler):
         pass
 
 
+class CodexProtocolTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / "backend/internal/reauthruntime/protocol"
+        sys.path.insert(0, str(path))
+        import codex_protocol
+        from reauth import http_client
+        cls.protocol, cls.http = codex_protocol, http_client
+
+    def test_workspace_selection_preserves_business_and_original_identity(self):
+        p = {'id': 'personal', 'kind': 'personal', 'name': 'Personal'}
+        org = {'id': 'business', 'kind': 'organization', 'name': 'Custom name'}
+        for choices in ([p, org], [org, p]):
+            selection = self.protocol.choose_workspace({'workspaces': choices})
+            self.assertEqual(selection['workspace'], 'business')
+            self.assertTrue(selection['organization'])
+            selected = self.protocol.choose_workspace({'workspaces': choices}, 'personal', 'business')
+            self.assertEqual(selected['workspace'], 'personal', 'reauth ignores initial preference')
+        original = self.protocol.choose_workspace({'workspaces': [p, org]}, 'business')
+        self.assertEqual(original['workspace'], 'business')
+        fallback = self.protocol.choose_workspace({'workspaces': [p]}, 'former-business')
+        self.assertEqual(fallback['fallbackFrom'], 'former-business')
+        self.assertTrue(fallback['personalOnly'])
+        self.assertTrue(self.protocol.choose_workspace({'workspaces': [p]})['personalOnly'])
+
+    def test_workspace_selection_does_not_guess_or_choose_another_team(self):
+        choices = [{'id': 'a', 'kind': 'organization'}, {'id': 'b', 'kind': 'organization'}]
+        cases = [({'workspaces': choices}, '', '', 'workspace_selection_required'),
+                 ({'workspaces': choices}, 'gone', '', 'workspace_unavailable'),
+                 ({'workspaces': choices}, '', 'gone', 'workspace_unavailable'),
+                 ({'workspace_id': 'unclassified'}, '', '', 'workspace_unavailable'),
+                 ({'workspaces': [{'id': 'unknown'}]}, '', '', 'workspace_selection_required'),
+                 ({'workspaces': [choices[0], choices[0]]}, 'a', '', 'workspace_unavailable')]
+        for data, expected, preferred, code in cases:
+            with self.subTest(code=code), self.assertRaisesRegex(self.http.AuthStop, code):
+                self.protocol.choose_workspace(data, expected, preferred)
+        selected = self.protocol.choose_workspace({'workspaces': choices}, '', 'b')
+        self.assertEqual(selected['workspace'], 'b')
+
+    def token_fixture(self, plan='self_serve_business_prolite', workspace='business'):
+        p = self.protocol
+        auth = {'chatgpt_account_id': workspace, 'chatgpt_user_id': 'user-a', 'chatgpt_plan_type': plan}
+        access = {'exp': time.time() + 600, 'client_id': p.OAUTH_CLIENT_ID, p.AUTH: dict(auth)}
+        identity = {'exp': time.time() + 600, 'email': 'test@example.invalid', 'aud': p.OAUTH_CLIENT_ID, p.AUTH: dict(auth)}
+        return access, identity
+
+    @staticmethod
+    def tokens(access, identity):
+        def jwt(value):
+            return 'header.' + base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=') + '.signature'
+        return {'access_token': jwt(access), 'id_token': jwt(identity), 'refresh_token': 'synthetic-refresh'}
+
+    def test_tokens_reject_identity_client_expiry_and_workspace_mismatches(self):
+        p = self.protocol
+        claim = {'login_email': 'test@example.invalid', 'expected_workspace': 'business'}
+        access, identity = self.token_fixture()
+        self.assertEqual(p.credentials_from_tokens(self.tokens(access, identity), claim)['chatgpt_account_id'], 'business')
+        for side, field, value in [('access', 'client_id', 'another-client'), ('id', 'aud', 'another-client'),
+                                   ('id', 'email', 'other@example.invalid'), ('access', 'exp', 1), ('id', 'exp', 1),
+                                   ('access', p.AUTH, {}), ('id', p.AUTH, {'chatgpt_user_id': 'other-user'}),
+                                   ('access', p.AUTH, {'chatgpt_account_id': 'other', 'chatgpt_user_id': 'user-a'})]:
+            a, i = self.token_fixture()
+            (a if side == 'access' else i)[field] = value
+            with self.subTest(field=field, side=side), self.assertRaisesRegex(self.http.AuthStop, 'identity_mismatch'):
+                p.credentials_from_tokens(self.tokens(a, i), claim)
+
+    def test_personal_fallback_requires_selection_and_both_token_plans(self):
+        p = self.protocol
+        claim = {'login_email': 'test@example.invalid', 'expected_workspace': 'old', 'preferred_workspace_id': 'ignored'}
+        a, i = self.token_fixture('plus', 'personal')
+        selection = p.choose_workspace({'workspaces': [{'id': 'personal', 'kind': 'personal'}]}, 'old')
+        credentials = p.credentials_from_tokens(self.tokens(a, i), claim, selection)
+        self.assertEqual(credentials['codex_workspace_fallback_from'], 'old')
+        self.assertTrue(credentials['codex_personal_workspace_only'])
+        for bad in (None, {**selection, 'fallbackFrom': 'wrong'}, {**selection, 'workspace': 'wrong'}):
+            with self.assertRaisesRegex(self.http.AuthStop, 'identity_mismatch'):
+                p.credentials_from_tokens(self.tokens(a, i), claim, bad)
+        i[p.AUTH]['chatgpt_plan_type'] = 'team'
+        with self.assertRaisesRegex(self.http.AuthStop, 'identity_mismatch'):
+            p.credentials_from_tokens(self.tokens(a, i), claim, selection)
+
+    def test_initial_preferred_workspace_and_organization_plan_are_checked(self):
+        p = self.protocol
+        a, i = self.token_fixture()
+        for claim, selection in [({'login_email': 'test@example.invalid', 'preferred_workspace_id': 'wrong'}, None),
+                                  ({'login_email': 'test@example.invalid'}, {'workspace': 'business', 'personal': True})]:
+            with self.assertRaisesRegex(self.http.AuthStop, 'identity_mismatch'):
+                p.credentials_from_tokens(self.tokens(a, i), claim, selection)
+
+    def test_auth_transport_blocks_foreign_destinations_and_post_redirects(self):
+        http = self.http
+        for url in ('http://auth.openai.com/login', 'https://auth.openai.com.evil.invalid/login',
+                    'https://auth.openai.com@evil.invalid/login', 'https://127.0.0.1/',
+                    'https://auth.openai.com:444/login'):
+            with self.subTest(url=url), patch.object(http.Session, 'request') as send:
+                with http.create_http_session() as session, self.assertRaises(http.AuthStop):
+                    session.post(url, json={'password': 'synthetic'})
+                send.assert_not_called()
+        for method, destination in [('POST', 'https://auth.openai.com/next'), ('GET', 'https://evil.invalid/next'),
+                                    ('GET', 'https://chatgpt.com/next')]:
+            response = SimpleNamespace(status_code=302, headers={'location': destination})
+            with patch.object(http.Session, 'request', return_value=response) as send:
+                with http.create_http_session() as session, self.assertRaises(http.AuthStop):
+                    session.request(method, 'https://auth.openai.com/login')
+                self.assertEqual(send.call_count, 1)
+
+    def test_callback_is_not_requested_and_proxy_never_falls_back_to_environment(self):
+        http = self.http
+        response = SimpleNamespace(status_code=302, headers={'location': 'http://localhost:1455/auth/callback?code=synthetic&state=synthetic'})
+        with patch.dict(os.environ, {'HTTPS_PROXY': 'http://foreign.invalid:1234'}), patch.object(http.Session, 'request', return_value=response) as send:
+            with http.create_http_session('socks5://proxy.invalid:1080') as session:
+                self.assertFalse(session.trust_env)
+                self.assertEqual(session.proxies['https'], 'socks5h://proxy.invalid:1080')
+                self.assertIs(session.get('https://auth.openai.com/login'), response)
+                self.assertEqual(send.call_count, 1)
+            with http.create_http_session() as session:
+                self.assertFalse(session.trust_env)
+                self.assertEqual(session.proxies, {'http': '', 'https': ''})
+        for value in ('file:///tmp/proxy', 'http://proxy:bad', 'http://proxy:99999', 'http://proxy/path'):
+            with self.subTest(value=value), self.assertRaisesRegex(http.AuthStop, 'proxy_unavailable'):
+                http.create_http_session(value)
+
+    def test_auth_sessions_do_not_share_cookies(self):
+        with self.http.create_http_session() as first, self.http.create_http_session() as second:
+            first.cookies.set('login_session', 'synthetic', domain='auth.openai.com')
+            self.assertFalse(list(second.cookies.jar))
+
+    def test_security_and_additional_verification_stop_without_raw_errors(self):
+        for status, headers, body, code in [(403, {'cf-mitigated': 'challenge'}, {}, 'security_check'),
+                (429, {}, {}, 'rate_limited'), (503, {}, {}, 'service_error'),
+                (200, {}, {'page': {'type': 'email_otp_verification'}}, 'additional_verification'),
+                (401, {}, {'error': {'code': 'invalid_username_or_password', 'message': 'synthetic-secret'}}, 'password_rejected')]:
+            response = SimpleNamespace(status_code=status, headers=headers, text='', json=lambda: body)
+            progress = self.protocol.Progress(lambda *_args, **_kwargs: None)
+            with self.subTest(code=code), self.assertRaisesRegex(self.http.AuthStop, code):
+                progress.observe('POST', 'https://auth.openai.com/api/accounts/password/verify', response)
+            self.assertNotIn('synthetic-secret', json.dumps(progress.diagnostic()))
+
+    def test_callback_state_and_totp_regression(self):
+        from reauth.totp import totp_code
+        p = self.protocol
+        client = p.OAuthClient({}, verbose=False)
+        try:
+            for url in ('http://localhost:1455/auth/callback?code=x&state=wrong',
+                        'http://localhost:9999/auth/callback?code=x&state=expected',
+                        'https://evil.invalid/auth/callback?code=x&state=expected',
+                        'http://localhost:1455/auth/callback?code=x'):
+                self.assertIsNone(client._parse_validated_callback_url(url, 'expected', p.OAUTH_REDIRECT_URI))
+            self.assertTrue(client._parse_validated_callback_url('http://localhost:1455/auth/callback?code=x&state=expected', 'expected', p.OAUTH_REDIRECT_URI))
+        finally:
+            client.session.close()
+        self.assertEqual(totp_code('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', at_time=59, digits=8)[0], '94287082')
+
+
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
     def test_codex_completion_allows_manifest_and_astra_without_changing_other_calls(self):
         from tools import openai_oauth_reauth_worker as worker
-        browser = self.browser_adapter()
+        browser = self.protocol_adapter()
         for original, expected in ((30.0, 60.0), (90.0, 90.0)):
             api = worker.WorkerAPI(WorkerConfig("http://127.0.0.1", "synthetic-token", "probe", None, request_timeout=original))
             completion = browser.completion_api(api, worker)
@@ -71,113 +221,37 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
             self.assertEqual(completion.config.worker_id, api.config.worker_id)
             self.assertEqual(completion.config.worker_token, api.config.worker_token)
 
-    def test_managed_browser_dispatch_preserves_other_profiles_and_safe_failures(self):
-        browser = self.browser_adapter()
+    def test_managed_protocol_dispatch_preserves_other_profiles_and_safe_failures(self):
+        browser = self.protocol_adapter()
         worker = SimpleNamespace(process_password_claim=MagicMock(), safe_worker_failure=lambda _exc: "worker_failed", WorkerError=WorkerError)
         original = worker.process_password_claim
         browser.install(worker)
-        with patch.object(browser, "run_browser") as run:
+        with patch.object(browser, "run_protocol") as run:
             worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "local_worker"})
             run.assert_called_once()
             for profile in ("excel", "siwc"):
                 worker.process_password_claim(None, {"oauth_profile": profile})
             worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "session_studio"})
             self.assertEqual(original.call_count, 3)
-        self.assertEqual(worker.safe_worker_failure(browser.BrowserFailure("security_check")), "security_check")
-        for code in ("browser_unavailable", "totp_rejected", "identity_mismatch", "workspace_unavailable"):
+        self.assertEqual(worker.safe_worker_failure(browser.ProtocolFailure("security_check")), "security_check")
+        for code in ("security_check", "totp_rejected", "identity_mismatch", "workspace_unavailable"):
             self.assertEqual(worker.safe_worker_failure(WorkerError(code)), code)
         self.assertEqual(worker.safe_worker_failure(RuntimeError("password=synthetic-secret")), "worker_failed")
-        self.assertEqual(str(browser.BrowserFailure("synthetic-secret")), "worker_failed")
+        self.assertEqual(str(browser.ProtocolFailure("synthetic-secret")), "worker_failed")
 
     @staticmethod
-    def browser_adapter():
-        path = Path(__file__).resolve().parents[1] / "backend/internal/reauthruntime/browser/browser_worker.py"
-        spec = importlib.util.spec_from_file_location("codex_browser_adapter_tests", path)
+    def protocol_adapter():
+        path = Path(__file__).resolve().parents[1] / "backend/internal/reauthruntime/protocol/protocol_worker.py"
+        spec = importlib.util.spec_from_file_location("codex_protocol_adapter_tests", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
 
-    def test_managed_browser_requires_verified_package_before_extraction(self):
-        browser = self.browser_adapter()
-        with tempfile.TemporaryDirectory() as root:
-            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
-                browser.unpack_playwright(b"tampered archive", Path(root))
-            self.assertEqual(list(Path(root).iterdir()), [])
-
-    @staticmethod
-    def cloak_archive(name="chrome", kind=tarfile.REGTYPE):
-        output = io.BytesIO()
-        with tarfile.open(fileobj=output, mode="w:gz") as archive:
-            entry = tarfile.TarInfo(name)
-            entry.type = kind
-            entry.mode = 0o755
-            if kind == tarfile.REGTYPE:
-                data = b"synthetic browser executable"
-                entry.size = len(data)
-                archive.addfile(entry, io.BytesIO(data))
-            else:
-                entry.linkname = "../outside"
-                archive.addfile(entry)
-        return output.getvalue()
-
-    @unittest.skipUnless(os.name == "posix", "managed Cloak download targets Linux amd64")
-    def test_managed_cloak_download_is_shared_cached_and_partial_failures_are_removed(self):
-        browser = self.browser_adapter()
-        data = self.cloak_archive()
-        for broken in (False, True):
-            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as root:
-                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()), \
-                     patch.object(browser, "CLOAK_ARCHIVE_SIZE", len(data)), \
-                     patch.object(browser.platform, "machine", return_value="x86_64"), \
-                     patch.object(browser.sys, "platform", "linux"), \
-                     patch.object(browser, "urlopen", side_effect=lambda *a, **k: io.BytesIO(data[:-1] if broken else data)) as fetch:
-                    if broken:
-                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
-                            browser.ensure_cloak(Path(root))
-                        self.assertEqual([p for p in Path(root).iterdir() if p.is_dir()], [])
-                    else:
-                        with ThreadPoolExecutor(max_workers=2) as pool:
-                            results = list(pool.map(browser.ensure_cloak, [Path(root), Path(root)]))
-                        self.assertEqual(results[0], results[1])
-                        self.assertEqual(results[0].read_bytes(), b"synthetic browser executable")
-                        self.assertTrue(os.access(results[0], os.X_OK))
-                        fetch.assert_called_once()
-                        (results[0].parent / ".integrity").write_text("damaged")
-                        with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
-                            browser.ensure_cloak(Path(root))
-                        fetch.assert_called_once()
-
-    def test_managed_cloak_rejects_tampering_traversal_and_archive_links(self):
-        browser = self.browser_adapter()
-        for name, kind in (("../outside", tarfile.REGTYPE), ("/outside", tarfile.REGTYPE),
-                           ("chrome", tarfile.SYMTYPE), ("chrome", tarfile.LNKTYPE)):
-            with self.subTest(name=name, kind=kind), tempfile.TemporaryDirectory() as root:
-                data = self.cloak_archive(name, kind)
-                archive = Path(root) / "browser.tar.gz"
-                archive.write_bytes(data)
-                destination = Path(root) / "package"
-                destination.mkdir()
-                with patch.object(browser, "CLOAK_SHA256", hashlib.sha256(data).hexdigest()):
-                    with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
-                        browser.unpack_cloak(archive, destination)
-                self.assertEqual(list(destination.iterdir()), [])
-                self.assertFalse((Path(root) / "outside").exists())
-        with tempfile.TemporaryDirectory() as root:
-            archive = Path(root) / "browser.tar.gz"
-            archive.write_bytes(self.cloak_archive())
-            with self.assertRaisesRegex(browser.BrowserFailure, "browser_dependency_failed"):
-                browser.unpack_cloak(archive, Path(root) / "package")
-            self.assertFalse((Path(root) / "package").exists())
-
-    def test_managed_browser_submission_and_cleanup(self):
-        browser = self.browser_adapter()
+    def test_managed_protocol_submission_and_cleanup(self):
+        browser = self.protocol_adapter()
         credentials = {key: "synthetic-" + key for key in ("access_token", "refresh_token", "id_token", "client_id")}
-        for accepted, error, override in ((True, None, True), (True, None, False),
-                                         (False, None, True), (False, "security_check", True),
-                                         (False, "not-a-safe-code", True)):
+        for accepted, error in ((True, None), (False, None), (False, "security_check"), (False, "not-a-safe-code")):
             with self.subTest(accepted=accepted, error=error), tempfile.TemporaryDirectory() as root:
-                executable = Path(root) / "chrome"
-                executable.touch()
                 events = [{"type": "stage", "stage": "mfa_submitted"}]
                 events.append({"type": "error", "code": error} if error else {"type": "result", "credentials": credentials})
                 child = MagicMock()
@@ -190,48 +264,34 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                 claim = {"task_id": 12, "account_id": 42, "login_email": "test@example.com",
                          "password": "synthetic-password", "totp_secret": "synthetic-totp",
                          "proxy_url": "http://user:synthetic-proxy-password@127.0.0.1:9999", "expected_workspace": "workspace"}
-                with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": str(executable) if override else "", "DATABASE_PASSWORD": "private-db"}), \
-                     patch.object(browser, "ensure_cloak", return_value=executable) as prepare_browser, \
-                     patch.object(browser, "ensure_playwright", return_value=Path(root) / "index.mjs"), \
-                     patch.object(browser.shutil, "which", return_value="/usr/bin/test-display-tool"), \
+                with patch.dict(os.environ, {"DATABASE_PASSWORD": "private-db", "CLOAKBROWSER_LICENSE_KEY": "old-secret"}), \
                      patch.object(browser.subprocess, "Popen", return_value=child) as popen:
                     if accepted:
-                        browser.run_browser(api, claim, worker)
+                        browser.run_protocol(api, claim, worker)
                     else:
                         expected = error if error in browser.FAILURES else "worker_failed" if error else "verification_failed"
-                        with self.assertRaisesRegex(browser.BrowserFailure, expected):
-                            browser.run_browser(api, claim, worker)
-                self.assertEqual(prepare_browser.call_count, 0 if override else 1)
+                        with self.assertRaisesRegex(browser.ProtocolFailure, expected):
+                            browser.run_protocol(api, claim, worker)
                 kwargs = popen.call_args.kwargs
-                self.assertFalse(Path(kwargs["cwd"]).exists(), "temporary browser profile must be removed")
-                for secret in ("synthetic-password", "synthetic-totp", "synthetic-proxy-password", "private-db"):
+                self.assertFalse(Path(kwargs["cwd"]).exists(), "temporary task directory must be removed")
+                for secret in ("synthetic-password", "synthetic-totp", "synthetic-proxy-password", "private-db", "old-secret"):
                     self.assertNotIn(secret, repr(popen.call_args))
                 self.assertNotIn("OPENAI_REAUTH_WORKER_TOKEN", kwargs["env"])
                 self.assertEqual(api.credentials.call_count, 0 if error else 1)
                 self.assertTrue(child.stdout.closed)
 
-    def test_managed_browser_missing_executable_does_not_claim_success_or_download(self):
-        browser = self.browser_adapter()
-        api = SimpleNamespace(credentials=MagicMock())
-        with patch.dict(os.environ, {"OPENAI_CODEX_BROWSER_EXECUTABLE": "/missing/authorization-browser"}), \
-             patch.object(browser, "ensure_playwright") as prepare:
-            with self.assertRaisesRegex(browser.BrowserFailure, "browser_unavailable"):
-                browser.run_browser(api, {"task_id": 1, "login_email": "test@example.com", "password": "test"}, None)
-        prepare.assert_not_called()
-        api.credentials.assert_not_called()
-
-    def test_managed_browser_diagnostic_survives_actual_failure_api_without_secrets(self):
+    def test_managed_protocol_diagnostic_survives_actual_failure_api_without_secrets(self):
         from tools import openai_oauth_reauth_worker as worker
-        browser = self.browser_adapter()
+        browser = self.protocol_adapter()
         data = dict(stage="protocol_connecting", action="submit_email", elapsed_ms=16000,
                     action_ms=15000, http_status=200, response="document", ignored="synthetic-secret")
-        expected = "codex_browser_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16000 action_ms=15000 http_status=200 response=document"
+        expected = "codex_protocol_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16000 action_ms=15000 http_status=200 response=document"
         with patch.object(worker, "safe_worker_failure", worker.safe_worker_failure), \
              patch.object(worker, "process_password_claim", worker.process_password_claim):
             browser.install(worker)
             api = worker.WorkerAPI(WorkerConfig("http://127.0.0.1", "synthetic-token", "probe", None))
             with patch.object(api, "_post") as post:
-                api.fail(7, worker.safe_worker_failure(browser.BrowserFailure("timeout", data)))
+                api.fail(7, worker.safe_worker_failure(browser.ProtocolFailure("timeout", data)))
                 self.assertEqual(post.call_args.args[1], {"worker_id": "probe", "reason": expected})
                 for raw in (expected + " secret", expected.replace("submit_email", "secret"),
                             expected.replace("16000", "999999"), expected.replace("http_status=200", "http_status=999"),
@@ -240,17 +300,14 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                     self.assertEqual(post.call_args.args[1]["reason"], "worker_failed")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "production supervisor is Linux-only")
-    def test_managed_browser_supervisor_reaps_display_and_detached_children(self):
-        browser = self.browser_adapter()
-        self.assertTrue(shutil.which("xvfb-run") and shutil.which("xauth"), "Linux CI must exercise actual Xvfb cleanup")
+    def test_managed_protocol_supervisor_reaps_detached_children(self):
+        browser = self.protocol_adapter()
         # No login or network: reproduce the actual wrapper/descendant layout.
         script = '''import json,os,subprocess,sys,time
 from pathlib import Path
 detached=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)'],start_new_session=True)
-display=os.environ['DISPLAY'].split(':')[-1].split('.')[0]
-xvfb=int(Path('/tmp/.X'+display+'-lock').read_text().strip())
 target=Path(sys.argv[1]);pending=target.with_suffix('.tmp')
-pending.write_text(json.dumps({'child':os.getpid(),'detached':detached.pid,'xvfb':xvfb}));pending.replace(target)
+pending.write_text(json.dumps({'child':os.getpid(),'detached':detached.pid}));pending.replace(target)
 if sys.argv[2]=='natural':
  print('failure',flush=True)
  raise SystemExit(1)
@@ -260,9 +317,8 @@ time.sleep(90)
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 (root / "child.py").write_text(script)
-                child_command = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x800x24 -nolisten tcp",
-                                 sys.executable, str(root / "child.py"), str(root / "pids.json"), scenario]
-                command = [sys.executable, browser.__file__, "--browser-supervisor", str(os.getpid()), *child_command]
+                child_command = [sys.executable, str(root / "child.py"), str(root / "pids.json"), scenario]
+                command = [sys.executable, browser.__file__, "--protocol-supervisor", str(os.getpid()), *child_command]
                 if scenario == "parent_killed":
                     # The owner dies without any Python finally executing.
                     (root / "owner.py").write_text("import os,subprocess,sys\ncommand=sys.argv[1:]\ncommand[3]=str(os.getpid())\nsubprocess.Popen(command,start_new_session=True).wait()\n")

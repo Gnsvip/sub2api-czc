@@ -232,7 +232,7 @@ export default {
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
       status: {
         codexReauthorizationCount: 'Reauthorized {count} times',
-        codexReauthorizationCountHint: 'Successful Codex browser reauthorizations since this update; initial authorization and failed attempts are excluded.',
+        codexReauthorizationCountHint: 'Successful Codex reauthorizations since this update; initial authorization and failed attempts are excluded.',
         active: 'Active',
         inactive: 'Inactive',
         expired: 'Expired',

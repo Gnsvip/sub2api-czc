@@ -432,4 +432,3 @@ class ChatGPTClient:
         except Exception as e:
             self._log(f"验证异常: {e}")
             return False, str(e)
-

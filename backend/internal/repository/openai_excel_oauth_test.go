@@ -116,7 +116,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	ctx := context.Background()
 	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',error_message TEXT,schedulable BOOLEAN DEFAULT TRUE,proxy_id BIGINT,credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
-	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql"} {
+	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql", "283_codex_preferred_workspace.sql"} {
 		raw, e := os.ReadFile("../../migrations/" + migration)
 		require.NoError(t, e)
 		_, e = db.Exec(string(raw))
@@ -377,17 +377,20 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			}
 			_, err := db.Exec(`INSERT INTO accounts(id,credentials,extra,status,error_message,schedulable,proxy_id) VALUES($1,$2::jsonb,jsonb_build_object('keep','custom','openai_codex_authorization_pending',$3::boolean),'error',$4,FALSE,5)`, id, string(primaryJSON), pending, message)
 			require.NoError(t, err)
-			config := &service.ExcelLoginConfig{AccountID: id, Enabled: enabled, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted-password"}
+			config := &service.ExcelLoginConfig{AccountID: id, Enabled: enabled, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted-password", PreferredWorkspaceID: "workspace"}
 			ok, err := repo.SaveCodexLoginConfig(ctx, config, 0)
 			require.NoError(t, err)
 			require.True(t, ok)
+			saved, err := repo.GetCodexLoginConfig(ctx, id)
+			require.NoError(t, err)
+			require.Equal(t, "workspace", saved.PreferredWorkspaceID)
 			return config
 		}
-		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "admin pause", "proxy change", "disabled", "expired task", "first authorization without pending flag"} {
+		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "new workspace preference", "wrong first workspace", "admin pause", "proxy change", "disabled", "expired task", "first authorization without pending flag"} {
 			t.Run(scenario, func(t *testing.T) {
 				id := int64(1000 + i)
 				config := newAccount(id, false, scenario == "initial success")
-				if scenario == "first authorization without pending flag" {
+				if scenario == "first authorization without pending flag" || scenario == "wrong first workspace" {
 					_, e = db.Exec(`UPDATE accounts SET credentials='{"email":"user@example.com"}'::jsonb,status='active',error_message=NULL WHERE id=$1`, id)
 					require.NoError(t, e)
 				}
@@ -419,6 +422,11 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 					worker = "worker-b"
 				case "new credentials":
 					_, e = db.Exec(`UPDATE accounts SET credentials=credentials||'{"access_token":"new-admin-token"}'::jsonb WHERE id=$1`, id)
+				case "new workspace preference":
+					config.PreferredWorkspaceID = "different-workspace"
+					_, e = repo.SaveCodexLoginConfig(ctx, config, 1)
+				case "wrong first workspace":
+					_, e = db.Exec(`UPDATE openai_codex_login_configs SET preferred_workspace_id='different-workspace' WHERE account_id=$1`, id)
 				case "new config":
 					_, e = repo.SaveCodexLoginConfig(ctx, config, 1)
 				case "admin pause":
@@ -689,7 +697,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE id=$1`, again.ID)
 			require.NoError(t, e)
 		})
-		for index, reason := range []string{"password_rejected", "workspace_unavailable"} {
+		for index, reason := range []string{"password_rejected", "workspace_unavailable", "workspace_selection_required"} {
 			t.Run(reason+" needs manual intervention", func(t *testing.T) {
 				id := int64(1101 + index)
 				newAccount(id, true, false)

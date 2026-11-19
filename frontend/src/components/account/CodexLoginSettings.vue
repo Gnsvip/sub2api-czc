@@ -9,6 +9,7 @@
         <label class="block"><span class="input-label">密码</span><input v-model="password" type="password" class="input" autocomplete="new-password" :placeholder="state.config.password_configured ? '已保存；留空不修改' : '请输入密码'" /></label>
         <label class="block"><span class="input-label">TOTP 密钥</span><input v-model="totp" type="password" class="input" autocomplete="new-password" :placeholder="state.config.totp_configured ? '已保存；留空不修改' : '未开启二次验证可留空'" /></label>
         <label v-if="state.config.totp_configured" class="flex items-center gap-2 text-xs"><input v-model="clearTOTP" type="checkbox" /> 清除已保存的 TOTP 密钥</label>
+        <label class="block"><span class="input-label">首次授权工作区 ID（选填）</span><input v-model="preferredWorkspaceID" class="input" maxlength="128" autocomplete="off" placeholder="留空优先 Business；重新授权保留原工作区" data-testid="codex-preferred-workspace" /></label>
         <p class="text-xs text-gray-500">{{ codexLoginTaskLabel(state.task) }}<span v-if="state.task?.error_code"> · {{ codexLoginError(state.task.error_code) }}</span></p>
         <p v-if="state.runtime.state === 'unavailable'" class="text-xs text-amber-600">登录运行环境暂不可用。</p>
         <p class="text-xs text-gray-500">其他账号修改请先保存。授权成功后会刷新并关闭编辑窗口。</p>
@@ -32,6 +33,7 @@ const opened = ref(false)
 const loading = ref(false)
 const enabled = ref(false)
 const email = ref('')
+const preferredWorkspaceID = ref('')
 const password = ref('')
 const totp = ref('')
 const clearTOTP = ref(false)
@@ -46,7 +48,7 @@ async function load(initial = false) {
     if (current !== generation || !opened.value) return
     const completed = state.value?.task?.id === next.task?.id && ['queued', 'running'].includes(state.value?.task?.status || '') && next.task?.status === 'succeeded'
     state.value = next
-    if (initial) { email.value = next.config.login_email; enabled.value = next.config.enabled }
+    if (initial) { email.value = next.config.login_email; enabled.value = next.config.enabled; preferredWorkspaceID.value = next.config.preferred_workspace_id || '' }
     if (['queued','running'].includes(next.task?.status || '')) timer = setTimeout(() => load(), 5000)
     if (completed) {
       if (next.task?.stage.startsWith('succeeded_personal_workspace') || next.task?.stage.includes('_astra_')) appStore.showWarning(codexLoginTaskLabel(next.task), 8000)
@@ -73,7 +75,7 @@ async function save(run: boolean) {
   const current = generation
   const accountId = props.accountId
   try {
-    const saved = await saveCodexLogin(accountId, { enabled: enabled.value, login_email: email.value, password: password.value, totp_secret: totp.value, clear_totp: clearTOTP.value, revision: state.value.config.revision })
+    const saved = await saveCodexLogin(accountId, { enabled: enabled.value, login_email: email.value, password: password.value, totp_secret: totp.value, clear_totp: clearTOTP.value, revision: state.value.config.revision, preferred_workspace_id: preferredWorkspaceID.value.trim() })
     if (current !== generation || !opened.value) return
     state.value = saved; password.value = ''; totp.value = ''; clearTOTP.value = false
     if (run) {

@@ -6,6 +6,11 @@
         placeholder="邮箱----密码----2FA 密钥&#10;每行一个，最多 50 个；未启用 2FA 可留空最后一项" data-testid="codex-login-content" />
       <span class="input-hint">填写 TOTP 密钥，不是 6 位验证码；账号名称留空时使用邮箱。</span>
     </label>
+    <details class="text-sm">
+      <summary class="cursor-pointer text-gray-500">工作区：优先 Business</summary>
+      <label class="mt-2 block"><span class="input-label">指定工作区 ID（选填）</span><input v-model="preferredWorkspaceID" class="input" maxlength="128" autocomplete="off" :disabled="submitting" data-testid="codex-preferred-workspace" placeholder="多个 Business 工作区时填写" /></label>
+      <p class="input-hint">留空优先 Business；只有个人工作区时会提示。此设置用于本次添加的账号。</p>
+    </details>
     <label class="flex items-center gap-2 text-sm">
       <input v-model="autoRecover" type="checkbox" :disabled="submitting" /> 掉授权后自动恢复
     </label>
@@ -35,6 +40,7 @@ const props = defineProps<{ options: CodexLoginCreateOptions; hideSubmit?: boole
 const emit = defineEmits<{ created: [] }>()
 const content = ref('')
 const autoRecover = ref(true)
+const preferredWorkspaceID = ref('')
 const submitting = ref(false)
 const canSubmit = computed(() => !submitting.value && !!content.value.trim())
 const error = ref('')
@@ -67,7 +73,7 @@ async function submit() {
   error.value = ''
   clearTimeout(timer)
   try {
-    const response = await createCodexLoginAccounts(props.options, content.value, autoRecover.value)
+    const response = await createCodexLoginAccounts({ ...props.options, ...(preferredWorkspaceID.value.trim() ? { preferred_workspace_id: preferredWorkspaceID.value.trim() } : {}) }, content.value, autoRecover.value)
     content.value = ''
     if (disposed) return
     results.value = response.results

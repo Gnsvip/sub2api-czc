@@ -26,7 +26,7 @@ const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',
 
 func (r *openAIExcelOAuthRepository) GetCodexLoginConfig(ctx context.Context, id int64) (*service.ExcelLoginConfig, error) {
 	c := &service.ExcelLoginConfig{AccountID: id}
-	err := r.db.QueryRowContext(ctx, `SELECT enabled,login_email,password_ciphertext,totp_ciphertext,revision FROM openai_codex_login_configs WHERE account_id=$1`, id).Scan(&c.Enabled, &c.LoginEmail, &c.PasswordCiphertext, &c.TOTPCiphertext, &c.Revision)
+	err := r.db.QueryRowContext(ctx, `SELECT enabled,login_email,password_ciphertext,totp_ciphertext,revision,preferred_workspace_id FROM openai_codex_login_configs WHERE account_id=$1`, id).Scan(&c.Enabled, &c.LoginEmail, &c.PasswordCiphertext, &c.TOTPCiphertext, &c.Revision, &c.PreferredWorkspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -49,9 +49,9 @@ func (r *openAIExcelOAuthRepository) SaveCodexLoginConfig(ctx context.Context, c
 	}
 	var result sql.Result
 	if expected == 0 {
-		result, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_login_configs(account_id,enabled,login_email,password_ciphertext,totp_ciphertext) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, id, c.Enabled, c.LoginEmail, c.PasswordCiphertext, c.TOTPCiphertext)
+		result, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_login_configs(account_id,enabled,login_email,password_ciphertext,totp_ciphertext,preferred_workspace_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, id, c.Enabled, c.LoginEmail, c.PasswordCiphertext, c.TOTPCiphertext, c.PreferredWorkspaceID)
 	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE openai_codex_login_configs SET enabled=$2,login_email=$3,password_ciphertext=$4,totp_ciphertext=$5,revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$6`, id, c.Enabled, c.LoginEmail, c.PasswordCiphertext, c.TOTPCiphertext, expected)
+		result, err = tx.ExecContext(ctx, `UPDATE openai_codex_login_configs SET enabled=$2,login_email=$3,password_ciphertext=$4,totp_ciphertext=$5,preferred_workspace_id=$7,revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$6`, id, c.Enabled, c.LoginEmail, c.PasswordCiphertext, c.TOTPCiphertext, expected, c.PreferredWorkspaceID)
 	}
 	if err != nil {
 		return false, err
@@ -88,7 +88,7 @@ const codexLoginBudgetSQL = `NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t
  AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex'
  AND t.config_revision=c.revision AND t.status='failed' AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0))<3)
  AND ($2 OR NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex' AND t.config_revision=c.revision
- AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
+ AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','workspace_selection_required','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
  AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0)))`
 
 func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int64, manual bool) (*service.ExcelLoginTask, error) {
@@ -194,7 +194,8 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	err = tx.QueryRowContext(ctx, `SELECT t.id FROM openai_excel_login_tasks t JOIN openai_codex_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id
  WHERE t.id=$1 AND t.oauth_profile='codex' AND t.worker_id=$2 AND t.status='running' AND t.created_at>NOW()-INTERVAL '30 minutes' AND c.revision=t.config_revision
  AND MD5(a.credentials::text)=t.expected_credentials_hash
- AND `+codexLoginAccountStateSQL+`=t.expected_account_state FOR UPDATE OF c,t`, id, worker).Scan(&active)
+ AND `+codexLoginAccountStateSQL+`=t.expected_account_state
+ AND (COALESCE(a.credentials->>'chatgpt_account_id','')<>'' OR c.preferred_workspace_id='' OR c.preferred_workspace_id=$3) FOR UPDATE OF c,t`, id, worker, candidate["chatgpt_account_id"]).Scan(&active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

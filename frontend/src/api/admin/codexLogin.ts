@@ -8,7 +8,7 @@ export interface CodexLoginTask {
   error_code?: string
 }
 export interface CodexLoginStatus {
-  config: { enabled: boolean; login_email: string; password_configured: boolean; totp_configured: boolean; revision: number }
+  config: { enabled: boolean; login_email: string; password_configured: boolean; totp_configured: boolean; revision: number; preferred_workspace_id?: string }
   task: CodexLoginTask | null
   runtime: { mode: string; state: string; reason?: string }
 }
@@ -20,6 +20,7 @@ export interface CodexLoginResult {
   error_code?: string
 }
 export interface CodexLoginCreateOptions {
+  preferred_workspace_id?: string
   name?: string
   notes?: string
   group_ids: number[]
@@ -44,7 +45,7 @@ export async function getCodexLoginStatus(id: number) {
   const { data } = await apiClient.get<CodexLoginStatus>(`/admin/openai/accounts/${id}/codex-login`)
   return data
 }
-export async function saveCodexLogin(id: number, input: { enabled: boolean; login_email: string; password?: string; totp_secret?: string; clear_totp?: boolean; revision: number }) {
+export async function saveCodexLogin(id: number, input: { enabled: boolean; login_email: string; password?: string; totp_secret?: string; clear_totp?: boolean; revision: number; preferred_workspace_id?: string }) {
   const { data } = await apiClient.put<CodexLoginStatus>(`/admin/openai/accounts/${id}/codex-login`, input)
   return data
 }
@@ -59,7 +60,8 @@ export function codexLoginError(code?: string): string {
     password_rejected: '密码不正确，请修改登录资料',
     totp_rejected: '2FA 验证失败，请检查 TOTP 密钥',
     identity_mismatch: '授权身份或工作区与原账号不一致',
-    workspace_unavailable: '无可用工作区，请手动授权',
+    workspace_unavailable: '未找到可用或指定的工作区，请检查设置或手动授权',
+    workspace_selection_required: '有多个工作区，请填写工作区 ID 后重试',
     security_check: '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证',
     account_blocked: '上游账号已停用或拒绝授权，需要人工处理',
     additional_verification: '需要人工完成额外验证',

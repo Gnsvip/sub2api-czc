@@ -31,7 +31,7 @@ CLOAK_URL = ("https://github.com/CloakHQ/CloakBrowser/releases/download/"
              f"chromium-v{CLOAK_VERSION}/cloakbrowser-linux-x64.tar.gz")
 FAILURES = frozenset({"browser_unavailable", "browser_start_failed", "browser_dependency_failed",
                      "security_check", "additional_verification", "password_rejected", "totp_rejected",
-                     "identity_mismatch", "workspace_unavailable", "proxy_unavailable", "timeout", "transport_error",
+                     "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "proxy_unavailable", "timeout", "transport_error",
                      "account_blocked", "rate_limited", "service_error", "verification_failed", "worker_failed"})
 STAGES = frozenset({"starting", "browser_starting", "protocol_connecting", "email_submitted",
                    "password_submitted", "mfa_submitted", "waiting_callback", "exchanging_token",
@@ -218,7 +218,7 @@ def run_browser(api, claim, worker, root=None):
         # exit to clean it up. No shared desktop or public display port.
         command = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x800x24 -nolisten tcp", *command]
     payload = {key: str(claim.get(key) or "") for key in
-               ("login_email", "password", "totp_secret", "proxy_url", "expected_workspace")}
+               ("login_email", "password", "totp_secret", "proxy_url", "expected_workspace", "preferred_workspace_id")}
     # No credentials in argv, process environment, screenshots, traces or files.
     with tempfile.TemporaryDirectory(prefix="sub2api-codex-browser-") as temp:
         env = {"PATH": os.defpath, "LANG": "C.UTF-8", "HOME": temp, "TMPDIR": temp,

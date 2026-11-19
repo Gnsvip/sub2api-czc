@@ -94,19 +94,6 @@
         <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
           <button
             type="button"
-            @click="form.platform = 'anthropic'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'anthropic'
-                ? 'bg-white text-orange-600 shadow-sm dark:bg-dark-600 dark:text-orange-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <Icon name="sparkles" size="sm" />
-            Anthropic
-          </button>
-          <button
-            type="button"
             @click="form.platform = 'openai'"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
@@ -129,6 +116,19 @@
               />
             </svg>
             OpenAI
+          </button>
+          <button
+            type="button"
+            @click="form.platform = 'anthropic'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'anthropic'
+                ? 'bg-white text-orange-600 shadow-sm dark:bg-dark-600 dark:text-orange-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <Icon name="sparkles" size="sm" />
+            Anthropic
           </button>
           <button
             type="button"
@@ -4459,7 +4459,7 @@ const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
-const apiKeyBaseUrl = ref('https://api.anthropic.com')
+const apiKeyBaseUrl = ref('https://api.openai.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
@@ -5109,12 +5109,12 @@ const tempUnschedPresets = computed(() => [
 const form = reactive({
   name: '',
   notes: '',
-  platform: 'anthropic' as AccountPlatform,
+  platform: 'openai' as AccountPlatform,
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
   proxy_ids: [] as number[],
-  concurrency: 10,
+  concurrency: 50,
   load_factor: null as number | null,
   priority: 1,
   rate_multiplier: 1,
@@ -5693,12 +5693,12 @@ const resetForm = () => {
   step.value = 1
   form.name = ''
   form.notes = ''
-  form.platform = 'anthropic'
+  form.platform = 'openai'
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
   form.proxy_ids = []
-  form.concurrency = 10
+  form.concurrency = 50
   concurrencyEdited.value = false
   form.load_factor = null
   form.priority = 1
@@ -5712,7 +5712,7 @@ const resetForm = () => {
   apiProtocol.value = 'adaptive'
   openCodeGoProtocolRules.value = cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules('zen'))
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
-  apiKeyBaseUrl.value = 'https://api.anthropic.com'
+  apiKeyBaseUrl.value = 'https://api.openai.com'
   apiKeyValue.value = ''
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true

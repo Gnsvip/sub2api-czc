@@ -757,7 +757,8 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	}
 	ctx := context.Background()
 	disabled := false
-	input := CodexLoginInput{Enabled: &disabled, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
+	preferred := "first-workspace"
+	input := CodexLoginInput{PreferredWorkspaceID: &preferred, Enabled: &disabled, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
 	state, err := oauth.SaveCodexLogin(ctx, 42, input)
 	require.NoError(t, err)
 	require.False(t, state.Config.Enabled)
@@ -774,15 +775,18 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	require.Equal(t, "codex", claim.OAuthProfile)
 	require.Equal(t, input.Password, claim.Password)
 	require.Equal(t, "acct-1", claim.ExpectedWorkspace)
+	require.Equal(t, preferred, claim.PreferredWorkspaceID)
 	excel, err := oauth.ClaimExcelLogin(ctx, "worker")
 	require.NoError(t, err)
 	require.Nil(t, excel)
+	input.PreferredWorkspaceID = nil // Older clients preserve the saved preference.
 	input.Password = ""
 	input.TOTPSecret = ""
 	input.Revision = 1
 	state, err = oauth.SaveCodexLogin(ctx, 42, input)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, state.Config.Revision, "unchanged settings must not cancel work or reset the failure budget")
+	require.Equal(t, preferred, state.Config.PreferredWorkspaceID)
 	svc := &OpenAIGatewayService{openAITokenProvider: &OpenAITokenProvider{openAIOAuthService: oauth}}
 	svc.syncExcelBPS403Recovery(ctx)
 	require.Equal(t, 1, repo.scans, "Codex queue must scan even with BPS disabled")
@@ -938,6 +942,7 @@ func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 		{"browser_start_failed", "browser_start_failed"},
 		{"browser_dependency_failed", "browser_dependency_failed"},
 		{"workspace_unavailable", "workspace_unavailable"},
+		{"workspace_selection_required", "workspace_selection_required"},
 		{"workspace_unavailable private-secret", "worker_failed"},
 		{"browser_start_failed private-secret", "worker_failed"},
 		{"local_protocol_failed stage=web_login reason=password_rejected elapsed_ms=10 exit=1", "password_rejected"},
@@ -952,4 +957,58 @@ func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 	}
 	require.False(t, CodexLoginCanRecoverState(StatusError, "Unauthorized (401): account_deactivated"))
 	require.False(t, CodexLoginCanRecoverState(StatusError, "Unauthorized (401): cyber_policy"))
+}
+
+func TestCodexLoginFirstWorkspacePreferenceAndPersonalNotice(t *testing.T) {
+	for _, raw := range []string{"", " workspace-id_1 "} {
+		id, err := NormalizeCodexPreferredWorkspaceID(raw)
+		require.NoError(t, err)
+		require.Equal(t, strings.TrimSpace(raw), id)
+	}
+	for _, raw := range []string{"name with spaces", "https://example.com", strings.Repeat("a", 129)} {
+		_, err := NormalizeCodexPreferredWorkspaceID(raw)
+		require.Error(t, err)
+	}
+	for _, tc := range []struct {
+		name, preferred, plan, stage string
+		reject                       bool
+	}{
+		{"automatic business", "", "team", "succeeded", false},
+		{"specified business", "workspace", "business", "succeeded", false},
+		{"wrong specified workspace", "another", "team", "", true},
+		{"only personal", "", "free", "succeeded_personal_workspace_only", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grant, reader, base := newExcelGrantTestService(t)
+			repo := &codexLoginTestRepo{excelLoginTestRepo: &excelLoginTestRepo{excelReauthTestRepo: base}, allowFinish: true}
+			grant.repo = repo
+			reader.account.Credentials = map[string]any{"email": "user@example.com"}
+			reader.account.ErrorMessage = CodexAuthorizationPending
+			repo.config = &ExcelLoginConfig{AccountID: 42, LoginEmail: "user@example.com", Revision: 1, PreferredWorkspaceID: tc.preferred}
+			repo.task = &ExcelLoginTask{ID: 9, AccountID: 42, OAuthProfile: "codex", Status: "running", WorkerID: "worker", ConfigRevision: 1}
+			verified := false
+			grant.oauth.codexLoginVerify = func(context.Context, *Account) error { verified = true; return nil }
+			credentials := codexLoginTestCredentials(t, openai.ClientID, "workspace", "user", "user@example.com", tc.plan)
+			if tc.plan == "free" {
+				credentials[CodexPersonalWorkspaceOnly] = true
+			}
+			result, err := grant.oauth.CompleteCodexLogin(context.Background(), 9, "worker", credentials)
+			if tc.reject {
+				require.Error(t, err)
+				require.False(t, verified)
+				require.Zero(t, repo.finished)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.stage, result.Stage)
+				require.True(t, verified)
+				require.Nil(t, repo.astra)
+				if tc.plan == "free" {
+					require.Equal(t, true, repo.write[CodexPersonalWorkspaceOnly])
+				}
+			}
+		})
+	}
+	team := codexLoginTestCredentials(t, openai.ClientID, "workspace", "user", "user@example.com", "team")
+	team[CodexPersonalWorkspaceOnly] = true
+	require.Error(t, ValidateCodexLoginIdentity(map[string]any{"email": "user@example.com"}, team))
 }

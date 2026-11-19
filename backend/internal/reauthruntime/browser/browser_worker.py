@@ -327,7 +327,10 @@ def run_browser(api, claim, worker, root=None):
         # xvfb-run creates private Xauthority, selects a free display and traps
         # exit to clean it up. No shared desktop or public display port.
         command = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x800x24 -nolisten tcp", *command]
-        command = [sys.executable, str(Path(__file__).resolve()), "--browser-supervisor", str(os.getpid()), *command]
+        # The pinned runtime's launcher selects its matching loader/libraries.
+        # sys.executable alone may load host libpython and fail importing ctypes.
+        python = os.environ.get("TOSUB2_PYTHON") or sys.executable
+        command = [python, str(Path(__file__).resolve()), "--browser-supervisor", str(os.getpid()), *command]
     payload = {key: str(claim.get(key) or "") for key in
                ("login_email", "password", "totp_secret", "proxy_url", "expected_workspace", "preferred_workspace_id")}
     # No credentials in argv, process environment, screenshots, traces or files.

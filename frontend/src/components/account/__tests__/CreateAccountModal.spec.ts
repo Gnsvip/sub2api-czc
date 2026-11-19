@@ -100,6 +100,7 @@ vi.mock('vue-i18n', async () => {
 import CreateAccountModal from '../CreateAccountModal.vue'
 import CodexAutomaticAuthorization from '../CodexAutomaticAuthorization.vue'
 import CodexLoginSettings from '../CodexLoginSettings.vue'
+import { codexLoginTaskLabel } from '@/api/admin/codexLogin'
 import { readAccountCreationDefaults, writeAccountCreationDefaults } from '../accountCreationDefaults'
 
 const BaseDialogStub = defineComponent({
@@ -253,6 +254,16 @@ async function submitOpenAIOAuthMethod(wrapper: ReturnType<typeof mountModal>, m
 }
 
 describe('Codex automatic authorization and remembered settings', () => {
+  it.each([
+    ['succeeded', '已授权'],
+    ['succeeded_astra_degraded', '已授权 · 降智，未恢复调度'],
+    ['succeeded_astra_unknown', '已授权 · 检测未完成，未恢复调度'],
+    ['succeeded_personal_workspace_only_astra_degraded', '已授权 · 仅个人工作区 · 降智，未恢复调度'],
+    ['succeeded_personal_workspace_astra_unknown', '已授权 · 个人工作区 · 检测未完成，未恢复调度'],
+  ])('shows the authorization and scheduling outcome for %s', (stage, label) => {
+    expect(codexLoginTaskLabel({ id: 9, account_id: 42, status: 'succeeded', stage })).toBe(label)
+  })
+
   const runtime = { mode: 'managed', state: 'running' }
   const config = { enabled: false, login_email: 'example@example.com', password_configured: true, totp_configured: true, revision: 1 }
   beforeEach(() => {
@@ -334,7 +345,7 @@ describe('Codex automatic authorization and remembered settings', () => {
     await wrapper.get('[data-testid="codex-login-content"]').setValue(pasted)
     await wrapper.get('[data-testid="codex-login-submit"]').trigger('click')
     await flushPromises()
-    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.objectContaining({ group_ids: [1, 2], concurrency: 50 }), pasted, false)
+    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.objectContaining({ group_ids: [1, 2], concurrency: 50 }), pasted, true)
     expect(createAccountMock).not.toHaveBeenCalled()
     expect((wrapper.get('[data-testid="codex-login-content"]').element as HTMLTextAreaElement).value).toBe('')
     expect(localStorage.getItem('sub2api.account-create.v1.7.openai.oauth')).not.toContain('synthetic-password')
@@ -346,6 +357,36 @@ describe('Codex automatic authorization and remembered settings', () => {
     const calls = getCodexLoginStatusMock.mock.calls.length
     await vi.advanceTimersByTimeAsync(10000)
     expect(getCodexLoginStatusMock).toHaveBeenCalledTimes(calls)
+  })
+
+  it('defaults new automatic accounts to recovery enabled and permits opting out', async () => {
+    const wrapper = mount(CodexAutomaticAuthorization, { props: { options: { group_ids: [], proxy_ids: [], concurrency: 50, priority: 1 } } })
+    const checkbox = wrapper.get('input[type="checkbox"]')
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true)
+    await checkbox.setValue(false)
+    const content = 'example@example.com----synthetic-password----'
+    await wrapper.get('textarea').setValue(content)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.anything(), content, false)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('keeps an existing recovery choice of %s when editing', async (enabled) => {
+    const savedState = { config: { ...config, enabled }, task: null, runtime }
+    getCodexLoginStatusMock.mockResolvedValue(savedState)
+    saveCodexLoginMock.mockResolvedValue(savedState)
+    const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
+    const details = wrapper.get('details')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+    expect((wrapper.findAll('input[type="checkbox"]')[0]!.element as HTMLInputElement).checked).toBe(enabled)
+    await wrapper.findAll('button')[0]!.trigger('click')
+    await flushPromises()
+    expect(saveCodexLoginMock).toHaveBeenCalledWith(42, expect.objectContaining({ enabled, revision: 1 }))
+    expect(runCodexLoginMock).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('blocks duplicate footer and form submissions while automatic creation is pending', async () => {

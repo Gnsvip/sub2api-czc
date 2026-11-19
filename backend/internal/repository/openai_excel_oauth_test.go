@@ -366,6 +366,9 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 		auth := map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}
 		codexCandidate["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": auth})
 		codexCandidate["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": auth})
+		healthyAstra := func() *service.CodexLoginAstraResult {
+			return &service.CodexLoginAstraResult{Verdict: "healthy", SampledAt: time.Now()}
+		}
 		newAccount := func(id int64, enabled bool, pending bool) *service.ExcelLoginConfig {
 			t.Helper()
 			message := "Unauthorized (401): expired credentials"
@@ -380,10 +383,14 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			require.True(t, ok)
 			return config
 		}
-		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "admin pause", "proxy change", "disabled", "expired task"} {
+		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "admin pause", "proxy change", "disabled", "expired task", "first authorization without pending flag"} {
 			t.Run(scenario, func(t *testing.T) {
 				id := int64(1000 + i)
 				config := newAccount(id, false, scenario == "initial success")
+				if scenario == "first authorization without pending flag" {
+					_, e = db.Exec(`UPDATE accounts SET credentials='{"email":"user@example.com"}'::jsonb,status='active',error_message=NULL WHERE id=$1`, id)
+					require.NoError(t, e)
+				}
 				if scenario == "admin pause" {
 					_, e = db.Exec(`UPDATE accounts SET schedulable=TRUE WHERE id=$1`, id)
 					require.NoError(t, e)
@@ -424,10 +431,17 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 					_, e = db.Exec(`UPDATE openai_excel_login_tasks SET created_at=NOW()-INTERVAL '31 minutes' WHERE id=$1`, queued.ID)
 				}
 				require.NoError(t, e)
-				ok, e := repo.FinishCodexLogin(ctx, queued.ID, worker, codexCandidate)
+				ok, e := repo.FinishCodexLogin(ctx, queued.ID, worker, codexCandidate, healthyAstra())
 				require.NoError(t, e)
-				success := scenario == "initial success" || scenario == "paused recovery"
+				success := scenario == "initial success" || scenario == "paused recovery" || scenario == "first authorization without pending flag"
 				require.Equal(t, success, ok)
+				var reauthorizations int
+				require.NoError(t, db.QueryRow(`SELECT COALESCE((extra->>'openai_codex_reauthorization_count')::int,0) FROM accounts WHERE id=$1`, id).Scan(&reauthorizations))
+				if scenario == "paused recovery" {
+					require.Equal(t, 1, reauthorizations)
+				} else {
+					require.Zero(t, reauthorizations, "initial, expired or rejected tasks must not count as reauthorizations")
+				}
 				var token, status, keep string
 				var schedulable bool
 				require.NoError(t, db.QueryRow(`SELECT credentials->>'access_token',status,schedulable,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&token, &status, &schedulable, &keep))
@@ -446,6 +460,109 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.Equal(t, "preserve-excel", grant)
 			})
 		}
+		t.Run("fresh Astra result gates recovery and retains successful authorization", func(t *testing.T) {
+			for i, tc := range []struct {
+				name, verdict   string
+				paused, missing bool
+			}{
+				{"healthy resumes", "healthy", false, false},
+				{"degraded stays paused", "degraded", false, false},
+				{"unknown stays paused despite old healthy point", "unknown", false, false},
+				{"missing result fails closed", "unknown", false, true},
+				{"healthy preserves administrator pause", "healthy", true, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					id := int64(1300 + i)
+					newAccount(id, true, false)
+					_, e := db.Exec(`UPDATE accounts SET schedulable=$2,
+ extra=extra||jsonb_build_object('codex_tibo_verdict:http',jsonb_build_object('model','gpt-6-astra','recent_samples',
+ jsonb_build_array(jsonb_build_object('verdict','healthy','at',$3::text)))) WHERE id=$1`, id, !tc.paused, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano))
+					require.NoError(t, e)
+					queued, e := repo.QueueCodexLogin(ctx, id, false)
+					require.NoError(t, e)
+					require.NotNil(t, queued)
+					claimed, e := repo.ClaimCodexLogin(ctx, "astra-gate")
+					require.NoError(t, e)
+					require.Equal(t, queued.ID, claimed.ID)
+					var astra *service.CodexLoginAstraResult
+					if !tc.missing {
+						astra = &service.CodexLoginAstraResult{Verdict: tc.verdict, SampledAt: time.Now()}
+					}
+					ok, e := repo.FinishCodexLogin(ctx, queued.ID, "astra-gate", codexCandidate, astra)
+					require.NoError(t, e)
+					require.True(t, ok)
+					var status, token string
+					var schedulable bool
+					var count, points int
+					require.NoError(t, db.QueryRow(`SELECT status,schedulable,credentials->>'access_token',
+ (extra->>'openai_codex_reauthorization_count')::int,jsonb_array_length(extra->'codex_tibo_verdict:http'->'recent_samples')
+ FROM accounts WHERE id=$1`, id).Scan(&status, &schedulable, &token, &count, &points))
+					require.Equal(t, service.StatusActive, status, "valid authorization is retained independently of quality")
+					require.Equal(t, tc.verdict == "healthy" && !tc.paused, schedulable)
+					require.Equal(t, codexCandidate["access_token"], token)
+					require.Equal(t, 1, count)
+					if tc.verdict == "unknown" {
+						require.Equal(t, 1, points, "unknown must not fabricate a definitive point")
+					} else {
+						require.Equal(t, 2, points, "preserve history and append the fresh result")
+					}
+					finished, e := repo.GetCodexLoginTask(ctx, id)
+					require.NoError(t, e)
+					require.Equal(t, "succeeded", finished.Status)
+					stage := "succeeded"
+					if tc.verdict != "healthy" {
+						stage += "_astra_" + tc.verdict
+					}
+					require.Equal(t, stage, finished.Stage)
+					ids, e := repo.ListCodexLoginCandidates(ctx)
+					require.NoError(t, e)
+					require.NotContains(t, ids, id, "failed quality must not trigger a fresh browser login")
+				})
+			}
+		})
+		t.Run("successful reauthorization counts once and survives task cleanup", func(t *testing.T) {
+			const id int64 = 1190
+			newAccount(id, true, false)
+			_, e := db.Exec(`UPDATE accounts SET extra=extra||'{"openai_codex_reauthorization_count":"invalid"}'::jsonb WHERE id=$1`, id)
+			require.NoError(t, e)
+			for want := 1; want <= 2; want++ {
+				_, e := db.Exec(`UPDATE accounts SET status='error',error_message='Authentication failed (401): expired credentials' WHERE id=$1`, id)
+				require.NoError(t, e)
+				queued, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				require.NotNil(t, queued)
+				claimed, e := repo.ClaimCodexLogin(ctx, "count-worker")
+				require.NoError(t, e)
+				require.Equal(t, queued.ID, claimed.ID)
+				type completion struct {
+					changed bool
+					err     error
+				}
+				results := make(chan completion, 2)
+				for i := 0; i < 2; i++ {
+					go func() {
+						ok, err := repo.FinishCodexLogin(ctx, queued.ID, "count-worker", codexCandidate, healthyAstra())
+						results <- completion{ok, err}
+					}()
+				}
+				completed := 0
+				for i := 0; i < 2; i++ {
+					result := <-results
+					require.NoError(t, result.err)
+					if result.changed {
+						completed++
+					}
+				}
+				require.Equal(t, 1, completed)
+				var count int
+				var keep string
+				require.NoError(t, db.QueryRow(`SELECT (extra->>'openai_codex_reauthorization_count')::int,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&count, &keep))
+				require.Equal(t, want, count)
+				require.Equal(t, "custom", keep)
+				_, e = db.Exec(`DELETE FROM openai_excel_login_tasks WHERE account_id=$1`, id)
+				require.NoError(t, e)
+			}
+		})
 		t.Run("administrator test authentication failures trigger guarded recovery", func(t *testing.T) {
 			for i, tc := range []struct {
 				message  string
@@ -485,7 +602,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				claimed, e := repo.ClaimCodexLogin(ctx, "admin-test-recovery")
 				require.NoError(t, e)
 				require.Equal(t, queued.ID, claimed.ID)
-				ok, e := repo.FinishCodexLogin(ctx, queued.ID, "admin-test-recovery", codexCandidate)
+				ok, e := repo.FinishCodexLogin(ctx, queued.ID, "admin-test-recovery", codexCandidate, healthyAstra())
 				require.NoError(t, e)
 				require.True(t, ok)
 				var status string
@@ -510,7 +627,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			personal := map[string]any{"client_id": openai.ClientID, "refresh_token": "personal-refresh", "email": "user@example.com", "chatgpt_account_id": "personal", "chatgpt_user_id": "user", "plan_type": "free", service.CodexWorkspaceFallbackFrom: "workspace", service.CodexPersonalWorkspaceOnly: true}
 			personal["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": personalAuth})
 			personal["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": personalAuth})
-			ok, e := repo.FinishCodexLogin(ctx, queued.ID, "personal-fallback", personal)
+			ok, e := repo.FinishCodexLogin(ctx, queued.ID, "personal-fallback", personal, healthyAstra())
 			require.NoError(t, e)
 			require.True(t, ok)
 			var workspace, plan, status string
@@ -541,6 +658,9 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				ok, e := repo.FailExcelLogin(ctx, queued.ID, "worker", "transport_error")
 				require.NoError(t, e)
 				require.True(t, ok)
+				var count int
+				require.NoError(t, db.QueryRow(`SELECT COALESCE((extra->>'openai_codex_reauthorization_count')::int,0) FROM accounts WHERE id=$1`, id).Scan(&count))
+				require.Zero(t, count, "failed attempts must not increase the successful reauthorization count")
 				cooldown, e := repo.QueueCodexLogin(ctx, id, true)
 				require.NoError(t, e)
 				require.Nil(t, cooldown)
@@ -558,7 +678,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			require.NotNil(t, manual)
 			_, e = repo.ClaimCodexLogin(ctx, "worker")
 			require.NoError(t, e)
-			ok, e := repo.FinishCodexLogin(ctx, manual.ID, "worker", codexCandidate)
+			ok, e := repo.FinishCodexLogin(ctx, manual.ID, "worker", codexCandidate, healthyAstra())
 			require.NoError(t, e)
 			require.True(t, ok)
 			_, e = db.Exec(`UPDATE accounts SET status='error',error_message='Token revoked (401): expired' WHERE id=$1`, id)

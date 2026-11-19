@@ -118,14 +118,15 @@ func TestLockAndMergeAccountProbeExtraPreservesAstraSwitch(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
 		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
 		WillReturnRows(sqlmock.NewRows(accountProbeExtraMockColumns()).
-			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{"openai_astra_probe_enabled":false,"openai_astra_probe_interval_minutes":30}`)))
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{"openai_astra_probe_enabled":false,"openai_astra_probe_interval_minutes":30,"openai_codex_reauthorization_count":2}`)))
 	account := &service.Account{ID: 27, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Credentials: map[string]any{"api_key": "sk-test"},
-		Extra:       map[string]any{service.OpenAIAstraProbeEnabledExtraKey: true, "unrelated": "keep"}}
+		Extra:       map[string]any{service.OpenAIAstraProbeEnabledExtraKey: true, service.CodexReauthorizationCountExtraKey: 1, "unrelated": "keep"}}
 	extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, false, extra[service.OpenAIAstraProbeEnabledExtraKey], "stale forms cannot re-enable probes")
 	require.Equal(t, "keep", extra["unrelated"])
+	require.Equal(t, float64(2), extra[service.CodexReauthorizationCountExtraKey], "stale forms must preserve the committed reauthorization count")
 	require.Equal(t, float64(30), extra[service.OpenAIAstraProbeIntervalExtraKey])
 	require.Equal(t, float64(30), filterSchedulerExtra(extra)[service.OpenAIAstraProbeIntervalExtraKey])
 	require.Equal(t, false, filterSchedulerExtra(extra)[service.OpenAIAstraProbeEnabledExtraKey])

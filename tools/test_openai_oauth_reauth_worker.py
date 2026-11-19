@@ -9,6 +9,10 @@ import importlib.util
 import io
 import hashlib
 import tarfile
+import signal
+import shutil
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -215,6 +219,79 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                 browser.run_browser(api, {"task_id": 1, "login_email": "test@example.com", "password": "test"}, None)
         prepare.assert_not_called()
         api.credentials.assert_not_called()
+
+    def test_managed_browser_diagnostic_survives_actual_failure_api_without_secrets(self):
+        from tools import openai_oauth_reauth_worker as worker
+        browser = self.browser_adapter()
+        data = dict(stage="protocol_connecting", action="submit_email", elapsed_ms=16000,
+                    action_ms=15000, http_status=200, response="document", ignored="synthetic-secret")
+        expected = "codex_browser_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16000 action_ms=15000 http_status=200 response=document"
+        with patch.object(worker, "safe_worker_failure", worker.safe_worker_failure), \
+             patch.object(worker, "process_password_claim", worker.process_password_claim):
+            browser.install(worker)
+            api = worker.WorkerAPI(WorkerConfig("http://127.0.0.1", "synthetic-token", "probe", None))
+            with patch.object(api, "_post") as post:
+                api.fail(7, worker.safe_worker_failure(browser.BrowserFailure("timeout", data)))
+                self.assertEqual(post.call_args.args[1], {"worker_id": "probe", "reason": expected})
+                for raw in (expected + " secret", expected.replace("submit_email", "secret"),
+                            expected.replace("16000", "999999"), expected.replace("http_status=200", "http_status=999"),
+                            expected.replace("action_ms=15000", "action_ms=17000")):
+                    api.fail(7, raw)
+                    self.assertEqual(post.call_args.args[1]["reason"], "worker_failed")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "production supervisor is Linux-only")
+    def test_managed_browser_supervisor_reaps_display_and_detached_children(self):
+        browser = self.browser_adapter()
+        self.assertTrue(shutil.which("xvfb-run") and shutil.which("xauth"), "Linux CI must exercise actual Xvfb cleanup")
+        # No login or network: reproduce the actual wrapper/descendant layout.
+        script = '''import json,os,subprocess,sys,time
+from pathlib import Path
+detached=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)'],start_new_session=True)
+display=os.environ['DISPLAY'].split(':')[-1].split('.')[0]
+xvfb=int(Path('/tmp/.X'+display+'-lock').read_text().strip())
+target=Path(sys.argv[1]);pending=target.with_suffix('.tmp')
+pending.write_text(json.dumps({'child':os.getpid(),'detached':detached.pid,'xvfb':xvfb}));pending.replace(target)
+if sys.argv[2]=='natural':
+ print('failure',flush=True)
+ raise SystemExit(1)
+time.sleep(90)
+'''
+        for scenario in ("natural", "terminate", "child_killed", "parent_killed"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / "child.py").write_text(script)
+                child_command = ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x800x24 -nolisten tcp",
+                                 sys.executable, str(root / "child.py"), str(root / "pids.json"), scenario]
+                command = [sys.executable, browser.__file__, "--browser-supervisor", str(os.getpid()), *child_command]
+                if scenario == "parent_killed":
+                    # The owner dies without any Python finally executing.
+                    (root / "owner.py").write_text("import os,subprocess,sys\ncommand=sys.argv[1:]\ncommand[3]=str(os.getpid())\nsubprocess.Popen(command,start_new_session=True).wait()\n")
+                    command = [sys.executable, str(root / "owner.py"), *command]
+                innocent = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(90)"])
+                process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                try:
+                    end = time.monotonic() + 10
+                    while not (root / "pids.json").exists() and time.monotonic() < end:
+                        time.sleep(0.05)
+                    self.assertTrue((root / "pids.json").exists())
+                    pids = json.loads((root / "pids.json").read_text())
+                    if scenario == "terminate":
+                        browser.stop_child(process)
+                    elif scenario == "child_killed":
+                        os.kill(pids["child"], signal.SIGKILL)
+                    elif scenario == "parent_killed":
+                        process.kill()
+                    process.wait(timeout=12)
+                    end = time.monotonic() + 8
+                    while any(Path(f"/proc/{pid}").exists() for pid in pids.values()) and time.monotonic() < end:
+                        time.sleep(0.05)
+                    self.assertEqual([name for name, pid in pids.items() if Path(f"/proc/{pid}").exists()], [])
+                    self.assertIsNone(innocent.poll(), "another task's process must survive cleanup")
+                finally:
+                    if process.poll() is None:
+                        browser.stop_child(process)
+                    innocent.terminate()
+                    innocent.wait(timeout=5)
 
     def test_siwc_failures_use_fixed_stage_and_reason_without_external_output(self):
         cases = (

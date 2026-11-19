@@ -17,14 +17,15 @@ import (
 )
 
 type ExcelLoginConfig struct {
-	AccountID          int64  `json:"account_id"`
-	Enabled            bool   `json:"enabled"`
-	LoginEmail         string `json:"login_email"`
-	PasswordConfigured bool   `json:"password_configured"`
-	TOTPConfigured     bool   `json:"totp_configured"`
-	Revision           int64  `json:"revision"`
-	PasswordCiphertext string `json:"-"`
-	TOTPCiphertext     string `json:"-"`
+	AccountID            int64  `json:"account_id"`
+	Enabled              bool   `json:"enabled"`
+	LoginEmail           string `json:"login_email"`
+	PreferredWorkspaceID string `json:"preferred_workspace_id,omitempty"`
+	PasswordConfigured   bool   `json:"password_configured"`
+	TOTPConfigured       bool   `json:"totp_configured"`
+	Revision             int64  `json:"revision"`
+	PasswordCiphertext   string `json:"-"`
+	TOTPCiphertext       string `json:"-"`
 }
 type ExcelLoginInput struct {
 	Enabled    bool   `json:"enabled"`
@@ -66,16 +67,17 @@ type ExcelLoginStatus struct {
 
 // Secret fields exist only on the authenticated internal worker response.
 type ExcelLoginClaim struct {
-	OAuthProfile      string `json:"oauth_profile"`
-	ExpectedWorkspace string `json:"expected_workspace"`
-	TaskID            int64  `json:"task_id"`
-	AccountID         int64  `json:"account_id"`
-	LoginEmail        string `json:"login_email"`
-	CredentialMode    string `json:"credential_mode"`
-	Engine            string `json:"engine"`
-	Password          string `json:"password"`
-	TOTPSecret        string `json:"totp_secret,omitempty"`
-	ProxyURL          string `json:"proxy_url,omitempty"`
+	OAuthProfile         string `json:"oauth_profile"`
+	ExpectedWorkspace    string `json:"expected_workspace"`
+	PreferredWorkspaceID string `json:"preferred_workspace_id,omitempty"`
+	TaskID               int64  `json:"task_id"`
+	AccountID            int64  `json:"account_id"`
+	LoginEmail           string `json:"login_email"`
+	CredentialMode       string `json:"credential_mode"`
+	Engine               string `json:"engine"`
+	Password             string `json:"password"`
+	TOTPSecret           string `json:"totp_secret,omitempty"`
+	ProxyURL             string `json:"proxy_url,omitempty"`
 }
 
 func (s *OpenAIOAuthService) excelLoginRepo() (ExcelLoginRepository, error) {
@@ -339,7 +341,7 @@ func safeLoginFailureCode(reason string) string {
 	switch reason {
 	case "browser_unavailable", "browser_start_failed", "browser_dependency_failed":
 		return reason
-	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "workspace_unavailable", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
+	case "timeout", "password_rejected", "totp_rejected", "proxy_unavailable", "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "security_check", "additional_verification", "verification_failed", "account_changed", "config_changed", "credentials_unavailable", "account_blocked", "transport_error", "rate_limited", "service_error":
 		return reason
 	default:
 		return "worker_failed"

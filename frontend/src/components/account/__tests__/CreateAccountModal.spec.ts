@@ -200,7 +200,8 @@ async function submitApiKeyAccount(
   disableUpstreamBillingProbe = false
 ) {
   const wrapper = mountModal()
-  await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'admin.accounts.claudeConsole')
+  await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'Anthropic')
+  if (platform === 'anthropic') await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
   if (platform === 'openai') {
     await selectButtonByText(wrapper, 'API Key')
   }
@@ -256,6 +257,7 @@ async function submitOpenAIOAuthMethod(wrapper: ReturnType<typeof mountModal>, m
 describe('Codex automatic authorization and remembered settings', () => {
   it.each([
     ['succeeded', '已授权'],
+    ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
     ['succeeded_astra_degraded', '已授权 · 降智，未恢复调度'],
     ['succeeded_astra_unknown', '已授权 · 检测未完成，未恢复调度'],
     ['succeeded_personal_workspace_only_astra_degraded', '已授权 · 仅个人工作区 · 降智，未恢复调度'],
@@ -277,6 +279,21 @@ describe('Codex automatic authorization and remembered settings', () => {
     runCodexLoginMock.mockReset().mockResolvedValue({ id: 9, account_id: 42, status: 'queued', stage: 'queued' })
   })
   afterEach(() => { authUser.value = undefined; localStorage.clear(); vi.useRealTimers() })
+
+  it('opens with OpenAI first and selected again after reopening', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    const first = () => wrapper.get('[data-tour="account-form-platform"]').findAll('button')[0]!
+    expect(first().text()).toBe('OpenAI')
+    expect(first().classes()).toContain('text-green-600')
+    expect(wrapper.find('[data-testid="openai-automatic-mode"]').exists()).toBe(true)
+    await selectButtonByText(wrapper, 'Anthropic')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(first().classes()).toContain('text-green-600')
+    wrapper.unmount()
+  })
 
   it('keeps only non-secret defaults, separated by administrator and platform', () => {
     const value = { group_ids: [1, 2, 2, -1], proxy_ids: [8], concurrency: 25, priority: 3, authorization_mode: 'automatic' as const, password: 'never-store-password', totp_secret: 'never-store-totp' }
@@ -366,14 +383,15 @@ describe('Codex automatic authorization and remembered settings', () => {
     await checkbox.setValue(false)
     const content = 'example@example.com----synthetic-password----'
     await wrapper.get('textarea').setValue(content)
+    await wrapper.get('[data-testid="codex-preferred-workspace"]').setValue(' workspace-id ')
     await wrapper.get('button').trigger('click')
     await flushPromises()
-    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.anything(), content, false)
+    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.objectContaining({ preferred_workspace_id: 'workspace-id' }), content, false)
     wrapper.unmount()
   })
 
   it.each([true, false])('keeps an existing recovery choice of %s when editing', async (enabled) => {
-    const savedState = { config: { ...config, enabled }, task: null, runtime }
+    const savedState = { config: { ...config, enabled, preferred_workspace_id: 'workspace-id' }, task: null, runtime }
     getCodexLoginStatusMock.mockResolvedValue(savedState)
     saveCodexLoginMock.mockResolvedValue(savedState)
     const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
@@ -384,7 +402,7 @@ describe('Codex automatic authorization and remembered settings', () => {
     expect((wrapper.findAll('input[type="checkbox"]')[0]!.element as HTMLInputElement).checked).toBe(enabled)
     await wrapper.findAll('button')[0]!.trigger('click')
     await flushPromises()
-    expect(saveCodexLoginMock).toHaveBeenCalledWith(42, expect.objectContaining({ enabled, revision: 1 }))
+    expect(saveCodexLoginMock).toHaveBeenCalledWith(42, expect.objectContaining({ enabled, revision: 1, preferred_workspace_id: 'workspace-id' }))
     expect(runCodexLoginMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -431,7 +449,8 @@ describe('Codex automatic authorization and remembered settings', () => {
   it.each([
     ['totp_rejected', '2FA 验证失败，请检查 TOTP 密钥'],
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
-    ['workspace_unavailable', '无可用工作区，请手动授权'],
+    ['workspace_unavailable', '未找到可用或指定的工作区，请检查设置或手动授权'],
+    ['workspace_selection_required', '有多个工作区，请填写工作区 ID 后重试'],
     ['browser_unavailable', '服务器授权浏览器未就绪，请检查 CloakBrowser、Xvfb 和 xauth'],
     ['browser_start_failed', '授权浏览器启动失败，请检查浏览器依赖和沙箱权限'],
   ])('shows the specific %s failure without claiming authorization succeeded', async (code, message) => {
@@ -581,6 +600,8 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   it('changes untouched defaults only for GPT OAuth and keeps explicit concurrency', async () => {
     const wrapper = mountModal()
     const concurrency = () => wrapper.get<HTMLInputElement>('[data-testid="create-account-concurrency"]')
+    expect(concurrency().element.value).toBe('50')
+    await selectButtonByText(wrapper, 'Anthropic')
     expect(concurrency().element.value).toBe('10')
     await selectButtonByText(wrapper, 'OpenAI')
     expect(concurrency().element.value).toBe('50')
@@ -1422,6 +1443,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 describe('CreateAccountModal Vertex service account', () => {
   it('keeps Anthropic Vertex accounts on Service Account JSON only', async () => {
     const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Anthropic')
     await selectButtonByText(wrapper, 'admin.accounts.vertexLabel')
     expect(wrapper.find('[data-testid="vertex-auth-mode-apikey"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="vertex-api-key-input"]').exists()).toBe(false)

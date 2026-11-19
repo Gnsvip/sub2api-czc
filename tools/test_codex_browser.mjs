@@ -50,10 +50,14 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace', 'first_business', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_multiple_business', 'first_selected_business', 'first_missing_selected', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token', 'first_unknown_picker', 'recovery_ignores_preference']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
+      const first = scenario.startsWith('first_');
+      const personalFirst = ['first_only_personal', 'first_locked_personal', 'first_personal_team_token'].includes(scenario);
+      const scenarioInput = { ...input, expected_workspace: first ? '' : input.expected_workspace,
+        preferred_workspace_id: scenario === 'first_selected_business' ? 'workspace' : scenario === 'first_missing_selected' ? 'absent' : scenario === 'recovery_ignores_preference' ? 'other' : '' };
       const injected = { launch: async options => {
         assert.equal(options.chromiumSandbox, true);
         assert.ok(options.args.some(arg => /^--fingerprint=\d+$/.test(arg)));
@@ -72,7 +76,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
             let body;
             if (url.pathname === '/oauth/authorize') {
               state = url.searchParams.get('state'); challenge = url.searchParams.get('code_challenge');
-              assert.equal(url.searchParams.get('allowed_workspace_id'), input.expected_workspace);
+              assert.equal(url.searchParams.get('allowed_workspace_id'), scenarioInput.expected_workspace || scenarioInput.preferred_workspace_id || null);
               body = scenario === 'security_check' ? '<h1>Verify you are human</h1>' : form('Log in', '<input type="email" name="email">', '/password');
               if (scenario === 'temporary_security_iframe' || scenario === 'resolved_http_challenge') {
                 const login = JSON.stringify(body);
@@ -95,15 +99,21 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               const code = new URLSearchParams(route.request().postData()).get('code');
               assert.match(code, /^\d{6}$/); submitted.push('totp');
               body = scenario === 'totp_rejected' ? '<p>Invalid verification code</p>' : form('Authorize Codex', '<select name="workspace"><option value="other">Personal account</option><option value="workspace">Business</option></select>', '/finish');
-              if (scenario === 'radio_workspace' || scenario === 'personal_radio_fallback') {
-                const target = scenario === 'radio_workspace' ? '<label><input type="radio" name="workspace" value="workspace">Business</label>' : '';
+              if (scenario === 'radio_workspace' || scenario === 'first_radio_business' || scenario === 'personal_radio_fallback') {
+                const target = (scenario === 'radio_workspace' || scenario === 'first_radio_business') ? '<label><input type="radio" name="workspace" value="workspace">Business</label>' : '';
                 body = form('Select a workspace', '<label><input type="radio" name="workspace" value="other" checked>Personal account</label>' + target, '/finish');
-              } else if (scenario === 'personal_locked_default') {
+              } else if (scenario === 'personal_locked_default' || scenario === 'first_locked_personal') {
                 body = form('Select a workspace', '<label><input type="radio" name="workspace_id" value="other" checked disabled>JG<br>Personal account</label><label><input type="radio" name="workspace_id" value="workspace" disabled>Unavailable team</label><input type="hidden" name="workspace" value="other">', '/finish');
-              } else if (['personal_select_fallback', 'wrong_fallback_workspace', 'team_token_fallback'].includes(scenario)) {
+              } else if (['personal_select_fallback', 'wrong_fallback_workspace', 'team_token_fallback', 'first_only_personal', 'first_personal_team_token'].includes(scenario)) {
                 body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option></select>', '/finish');
               } else if (scenario === 'personal_with_other_team') {
                 body = form('Select a workspace', '<select name="workspace"><option value="team">Another team</option><option value="other">Personal account</option></select>', '/finish');
+              } else if (scenario === 'first_named_business') {
+                body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option><option value="workspace">Acme Research</option></select>', '/finish');
+              } else if (['first_multiple_business', 'first_selected_business'].includes(scenario)) {
+                body = form('Select a workspace', '<select name="workspace"><option value="other">Personal account</option><option value="team">Acme</option><option value="workspace">Research</option></select>', '/finish');
+              } else if (scenario === 'first_unknown_picker') {
+                body = form('Select a workspace', '<button type="button">Personal account</button>', '/finish');
               } else if (scenario === 'missing_workspace') {
                 body = form('Select a workspace', '<label><input type="radio" name="workspace" value="team" checked>Another team</label>', '/finish');
               } else if (scenario === 'ambiguous_personal_workspace') {
@@ -111,7 +121,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               }
             } else if (url.pathname === '/finish') {
               consentSubmissions++;
-              const expected = scenario.startsWith('personal_') || scenario === 'wrong_fallback_workspace' || scenario === 'team_token_fallback' ? 'other' : 'workspace';
+              const expected = personalFirst || scenario.startsWith('personal_') || scenario === 'wrong_fallback_workspace' || scenario === 'team_token_fallback' ? 'other' : 'workspace';
               assert.equal(new URLSearchParams(route.request().postData()).get('workspace'), expected);
               await route.fulfill({ status: 302, headers: { location: `${REDIRECT}?code=test-code&state=${scenario === 'bad_state' ? 'wrong' : state}` } });
               return;
@@ -134,6 +144,12 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
                 payload = { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp, 'https://api.openai.com/auth': selectedAuth }),
                   id_token: jwt({ aud: CLIENT_ID, exp, email: input.login_email, 'https://api.openai.com/auth': selectedAuth }) };
               }
+              if (first) {
+                const selectedAuth = { ...auth, chatgpt_account_id: personalFirst ? 'other' : scenario === 'first_wrong_token' ? 'unselected' : 'workspace',
+                  chatgpt_plan_type: scenario === 'first_personal_team_token' ? 'business' : personalFirst || scenario === 'first_business_personal_token' ? 'free' : 'team' };
+                payload = { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp, 'https://api.openai.com/auth': selectedAuth }),
+                  id_token: jwt({ aud: CLIENT_ID, exp, email: input.login_email, 'https://api.openai.com/auth': selectedAuth }) };
+              }
               return { status: () => 200, body: async () => Buffer.from(JSON.stringify(payload)) };
             } };
             const value = target[property];
@@ -141,8 +157,8 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
           } });
         } };
       } };
-      const promise = authorize(injected, input, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace'].includes(scenario)) {
+      const promise = authorize(injected, scenarioInput, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
+      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'first_business', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_selected_business', 'recovery_ignores_preference'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);
@@ -153,11 +169,15 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
           assert.equal(result.codex_personal_workspace_only, scenario !== 'personal_with_other_team');
           assert.equal(result.chatgpt_account_id, 'other');
           assert.equal(result.plan_type, 'free');
-        } else assert.equal(result.codex_workspace_fallback_from, undefined);
+        } else {
+          assert.equal(result.codex_workspace_fallback_from, undefined);
+          if (personalFirst) assert.equal(result.codex_personal_workspace_only, true);
+          if (first) assert.equal(result.chatgpt_account_id, personalFirst ? 'other' : 'workspace');
+        }
       } else {
-        const noChoice = ['missing_workspace', 'ambiguous_personal_workspace'].includes(scenario);
-        const tokenMismatch = ['wrong_workspace', 'wrong_fallback_workspace', 'team_token_fallback'].includes(scenario);
-        const code = noChoice ? 'workspace_unavailable' : scenario === 'bad_state' || tokenMismatch ? 'identity_mismatch' : scenario;
+        const noChoice = ['missing_workspace', 'ambiguous_personal_workspace', 'first_missing_selected', 'first_unknown_picker', 'first_multiple_business'].includes(scenario);
+        const tokenMismatch = ['wrong_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token'].includes(scenario);
+        const code = scenario === 'first_multiple_business' ? 'workspace_selection_required' : noChoice ? 'workspace_unavailable' : scenario === 'bad_state' || tokenMismatch ? 'identity_mismatch' : scenario;
         await assert.rejects(promise, { code });
         if (!tokenMismatch) assert.equal(tokenCalls, 0);
         if (noChoice) assert.equal(consentSubmissions, 0);

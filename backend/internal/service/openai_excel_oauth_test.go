@@ -937,6 +937,31 @@ func TestCodexLoginDefaultRecoveryPreservesExistingChoices(t *testing.T) {
 }
 
 func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
+	valid := "codex_browser_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16130 action_ms=15001 http_status=200 response=document"
+	diagnostic := ParseCodexBrowserDiagnostic(valid)
+	require.NotNil(t, diagnostic)
+	require.Equal(t, "submit_email", diagnostic.Action)
+	require.Equal(t, 16130, diagnostic.ElapsedMS)
+	require.Equal(t, "timeout", safeLoginFailureCode(valid))
+	grant, _, base := newExcelGrantTestService(t)
+	repo := &excelLoginTestRepo{excelReauthTestRepo: base}
+	grant.repo = repo
+	require.NoError(t, grant.oauth.FailExcelLogin(context.Background(), 8, "worker", valid))
+	require.Equal(t, valid, repo.failures[0])
+	for _, invalid := range []string{
+		valid + " password=PRIVATE",
+		strings.Replace(valid, "submit_email", "private_email", 1),
+		strings.Replace(valid, "protocol_connecting", "private_stage", 1),
+		strings.Replace(valid, "reason=timeout", "reason=private_reason", 1),
+		strings.Replace(valid, "elapsed_ms=16130", "elapsed_ms=360001", 1),
+		strings.Replace(valid, "action_ms=15001", "action_ms=16131", 1),
+		strings.Replace(valid, "http_status=200", "http_status=999", 1),
+		strings.Replace(valid, "response=document", "response=none", 1),
+	} {
+		require.Nil(t, ParseCodexBrowserDiagnostic(invalid))
+		require.NoError(t, grant.oauth.FailExcelLogin(context.Background(), 8, "worker", invalid))
+		require.Equal(t, "worker_failed", repo.failures[len(repo.failures)-1])
+	}
 	for _, tc := range []struct{ input, want string }{
 		{"browser_unavailable", "browser_unavailable"},
 		{"browser_start_failed", "browser_start_failed"},

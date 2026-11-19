@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,15 +37,16 @@ type ExcelLoginInput struct {
 	Revision   int64  `json:"revision"`
 }
 type ExcelLoginTask struct {
-	OAuthProfile   string    `json:"oauth_profile"`
-	ID             int64     `json:"id"`
-	AccountID      int64     `json:"account_id"`
-	Status         string    `json:"status"`
-	Stage          string    `json:"stage"`
-	ErrorCode      string    `json:"error_code,omitempty"`
-	WorkerID       string    `json:"-"`
-	ConfigRevision int64     `json:"-"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Diagnostic     *CodexBrowserDiagnostic `json:"diagnostic,omitempty"`
+	OAuthProfile   string                  `json:"oauth_profile"`
+	ID             int64                   `json:"id"`
+	AccountID      int64                   `json:"account_id"`
+	Status         string                  `json:"status"`
+	Stage          string                  `json:"stage"`
+	ErrorCode      string                  `json:"error_code,omitempty"`
+	WorkerID       string                  `json:"-"`
+	ConfigRevision int64                   `json:"-"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 type ExcelLoginRepository interface {
 	GetExcelLoginConfig(context.Context, int64) (*ExcelLoginConfig, error)
@@ -326,7 +328,55 @@ func (s *OpenAIOAuthService) ProgressExcelLogin(ctx context.Context, id int64, w
 // code instead of persisting runner output (which may contain login secrets).
 var codexLoginFailureDiagnostic = regexp.MustCompile(`^local_protocol_failed stage=[a-z_]{1,32} reason=([a-z_]{1,40}) elapsed_ms=[0-9]{1,7} exit=-?[0-9]{1,3}$`)
 
+// A bounded snapshot, never browser exception text, URLs, page bodies or identity.
+type CodexBrowserDiagnostic struct {
+	Stage      string `json:"stage"`
+	Action     string `json:"action"`
+	Reason     string `json:"reason"`
+	ElapsedMS  int    `json:"elapsed_ms"`
+	ActionMS   int    `json:"action_ms"`
+	HTTPStatus int    `json:"http_status"`
+	Response   string `json:"response"`
+}
+
+var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_browser_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|token)$`)
+
+func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
+	if len(raw) > 256 {
+		return nil
+	}
+	m := codexBrowserDiagnosticPattern.FindStringSubmatch(raw)
+	if m == nil {
+		return nil
+	}
+	switch m[1] {
+	case "starting", "browser_starting", "protocol_connecting", "email_submitted", "password_submitted", "mfa_submitted", "waiting_callback", "exchanging_token", "applying_credentials":
+	default:
+		return nil
+	}
+	switch m[2] {
+	case "initializing", "start_browser", "open_context", "open_login", "read_page", "choose_password", "fill_email", "submit_email", "fill_password", "submit_password", "fill_mfa", "submit_mfa", "select_workspace", "submit_workspace", "wait_next_page", "security_check", "exchange_token", "validate_tokens", "browser_process", "apply_credentials":
+	default:
+		return nil
+	}
+	switch m[3] {
+	case "browser_unavailable", "browser_start_failed", "browser_dependency_failed", "security_check", "additional_verification", "password_rejected", "totp_rejected", "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "proxy_unavailable", "timeout", "transport_error", "account_blocked", "rate_limited", "service_error", "verification_failed", "worker_failed":
+	default:
+		return nil
+	}
+	elapsed, _ := strconv.Atoi(m[4])
+	action, _ := strconv.Atoi(m[5])
+	status, _ := strconv.Atoi(m[6])
+	if elapsed > 360000 || action > elapsed || (status != 0 && (status < 100 || status > 599)) || (m[7] == "none") != (status == 0) {
+		return nil
+	}
+	return &CodexBrowserDiagnostic{Stage: m[1], Action: m[2], Reason: m[3], ElapsedMS: elapsed, ActionMS: action, HTTPStatus: status, Response: m[7]}
+}
+
 func safeLoginFailureCode(reason string) string {
+	if diagnostic := ParseCodexBrowserDiagnostic(reason); diagnostic != nil {
+		return diagnostic.Reason
+	}
 	if match := codexLoginFailureDiagnostic.FindStringSubmatch(reason); match != nil {
 		reason = match[1]
 	}
@@ -349,7 +399,9 @@ func safeLoginFailureCode(reason string) string {
 }
 
 func (s *OpenAIOAuthService) FailExcelLogin(ctx context.Context, id int64, worker, reason string) error {
-	reason = safeLoginFailureCode(reason)
+	if ParseCodexBrowserDiagnostic(reason) == nil {
+		reason = safeLoginFailureCode(reason)
+	}
 	r, err := s.excelLoginRepo()
 	if err != nil {
 		return err

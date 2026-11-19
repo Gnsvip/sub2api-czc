@@ -116,7 +116,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	ctx := context.Background()
 	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',error_message TEXT,schedulable BOOLEAN DEFAULT TRUE,proxy_id BIGINT,credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
-	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql", "283_codex_preferred_workspace.sql"} {
+	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql", "283_codex_preferred_workspace.sql", "284_codex_browser_diagnostic.sql"} {
 		raw, e := os.ReadFile("../../migrations/" + migration)
 		require.NoError(t, e)
 		_, e = db.Exec(string(raw))
@@ -699,7 +699,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE id=$1`, again.ID)
 			require.NoError(t, e)
 		})
-		for index, reason := range []string{"password_rejected", "workspace_unavailable", "workspace_selection_required"} {
+		for index, reason := range []string{"password_rejected", "workspace_unavailable", "workspace_selection_required", "security_check"} {
 			t.Run(reason+" needs manual intervention", func(t *testing.T) {
 				id := int64(1101 + index)
 				newAccount(id, true, false)
@@ -708,8 +708,18 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.NotNil(t, queued)
 				_, e = repo.ClaimCodexLogin(ctx, "worker")
 				require.NoError(t, e)
-				_, e = repo.FailExcelLogin(ctx, queued.ID, "worker", reason)
+				diagnostic := "codex_browser_failed stage=protocol_connecting action=security_check reason=" + reason + " elapsed_ms=20000 action_ms=15000 http_status=403 response=document"
+				ok, e := repo.FailExcelLogin(ctx, queued.ID, "another-worker", diagnostic)
 				require.NoError(t, e)
+				require.False(t, ok, "diagnostics must respect worker ownership")
+				_, e = repo.FailExcelLogin(ctx, queued.ID, "worker", diagnostic)
+				require.NoError(t, e)
+				failed, e := repo.GetCodexLoginTask(ctx, id)
+				require.NoError(t, e)
+				require.Equal(t, reason, failed.ErrorCode)
+				require.NotNil(t, failed.Diagnostic)
+				require.Equal(t, 403, failed.Diagnostic.HTTPStatus)
+				require.Equal(t, "security_check", failed.Diagnostic.Action)
 				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '16 minutes' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
 				again, e := repo.QueueCodexLogin(ctx, id, false)

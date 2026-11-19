@@ -76,7 +76,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_multiple_business', 'first_selected_business', 'first_missing_selected', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token', 'first_unknown_picker', 'recovery_ignores_preference']) {
+  for (const scenario of ['success', 'delayed_submit', 'multiple_forms', 'submit_timeout', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_multiple_business', 'first_selected_business', 'first_missing_selected', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token', 'first_unknown_picker', 'recovery_ignores_preference']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
@@ -104,6 +104,11 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               state = url.searchParams.get('state'); challenge = url.searchParams.get('code_challenge');
               assert.equal(url.searchParams.get('allowed_workspace_id'), scenarioInput.expected_workspace || scenarioInput.preferred_workspace_id || null);
               body = scenario === 'security_check' ? '<h1>Verify you are human</h1>' : form('Log in', '<input type="email" name="email">', '/password');
+              if (scenario === 'delayed_submit' || scenario === 'submit_timeout') {
+                body = body.replace('<button type="submit">', '<button type="submit" disabled>');
+                if (scenario === 'delayed_submit') body += '<script>setTimeout(() => document.querySelector("button").disabled = false, 6500)</script>';
+              }
+              if (scenario === 'multiple_forms') body = '<form action="/wrong-form"><button type="submit">Continue</button></form>' + body;
               if (scenario === 'temporary_security_iframe' || scenario === 'resolved_http_challenge') {
                 const login = JSON.stringify(body);
                 body = '<title>Just a moment</title><p>Checking your browser</p>' +
@@ -184,7 +189,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, scenarioInput, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_selected_business', 'recovery_ignores_preference'].includes(scenario)) {
+      if (scenario.startsWith('personal_') || ['success', 'delayed_submit', 'multiple_forms', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_selected_business', 'recovery_ignores_preference'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);
@@ -205,8 +210,20 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
       } else {
         const noChoice = ['missing_workspace', 'ambiguous_personal_workspace', 'first_missing_selected', 'first_unknown_picker', 'first_multiple_business'].includes(scenario);
         const tokenMismatch = ['wrong_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token'].includes(scenario);
-        const code = scenario === 'first_multiple_business' ? 'workspace_selection_required' : noChoice ? 'workspace_unavailable' : scenario === 'bad_state' || tokenMismatch ? 'identity_mismatch' : scenario;
-        await assert.rejects(promise, { code });
+        const code = scenario === 'submit_timeout' ? 'timeout' : scenario === 'first_multiple_business' ? 'workspace_selection_required' : noChoice ? 'workspace_unavailable' : scenario === 'bad_state' || tokenMismatch ? 'identity_mismatch' : scenario;
+        await assert.rejects(promise, error => {
+          assert.equal(error.code, code);
+          assert.ok(error.diagnostic.elapsed_ms >= error.diagnostic.action_ms);
+          assert.equal(error.diagnostic.http_status, 200);
+          assert.equal(error.diagnostic.response, tokenMismatch ? 'token' : 'document');
+          assert.ok(!JSON.stringify(error.diagnostic).includes('synthetic'));
+          if (scenario === 'submit_timeout') {
+            assert.equal(error.diagnostic.action, 'submit_email');
+            assert.equal(error.diagnostic.stage, 'protocol_connecting');
+            assert.ok(error.diagnostic.action_ms >= 14000);
+          }
+          return true;
+        });
         if (!tokenMismatch) assert.equal(tokenCalls, 0);
         if (noChoice) assert.equal(consentSubmissions, 0);
       }

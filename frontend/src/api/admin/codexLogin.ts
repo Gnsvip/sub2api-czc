@@ -6,6 +6,15 @@ export interface CodexLoginTask {
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   stage: string
   error_code?: string
+  diagnostic?: {
+    stage: string
+    action: string
+    reason: string
+    elapsed_ms: number
+    action_ms: number
+    http_status: number
+    response: 'none' | 'document' | 'token'
+  }
 }
 export interface CodexLoginStatus {
   config: { enabled: boolean; login_email: string; password_configured: boolean; totp_configured: boolean; revision: number; preferred_workspace_id?: string }

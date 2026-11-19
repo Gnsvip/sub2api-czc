@@ -124,10 +124,18 @@ async function visible(page, selector) {
   return null;
 }
 
-async function advance(page) {
-  const submit = await visible(page, 'button[type="submit"],input[type="submit"]');
-  const button = submit || page.getByRole('button', { name: /^(continue|allow|authorize|verify|继续|同意|授权|验证)$/i }).first();
-  await button.click({ timeout: 5000 });
+async function advance(page, timeout, field) {
+  // A login page may contain another form. Submit the form whose input we
+  // filled, and let Playwright wait for its button to become actionable.
+  const form = field?.locator('xpath=ancestor::form[1]');
+  const scope = form && await form.count() ? form : page;
+  const submits = scope.locator('button[type="submit"],input[type="submit"]');
+  let button;
+  for (let index = 0; index < Math.min(await submits.count(), 20); index++) {
+    if (await submits.nth(index).isVisible()) { button = submits.nth(index); break; }
+  }
+  button ||= scope.getByRole('button', { name: /^(continue|allow|authorize|verify|继续|同意|授权|验证)$/i }).first();
+  await button.click({ timeout });
 }
 
 async function selectWorkspace(page, expected, preferred) {
@@ -182,7 +190,11 @@ async function selectWorkspace(page, expected, preferred) {
 
 export async function authorize(chromium, input, options = {}) {
   const emit = options.emit || (() => {});
-  const stage = name => emit({ type: 'stage', stage: name });
+  const started = Date.now();
+  let currentStage = 'starting', action = 'initializing', actionStarted = started;
+  let httpStatus = 0, responseKind = 'none';
+  const stage = name => { currentStage = name; emit({ type: 'stage', stage: name }); };
+  const operation = name => { if (action !== name) { action = name; actionStarted = Date.now(); } };
   const proxy = proxyOptions(input.proxy_url);
   if (!input.login_email || !input.password) fail('worker_failed');
   const verifier = randomBytes(32).toString('base64url');
@@ -194,22 +206,29 @@ export async function authorize(chromium, input, options = {}) {
   if (input.expected_workspace || input.preferred_workspace_id) params.set('allowed_workspace_id', input.expected_workspace || input.preferred_workspace_id);
   let browser, context;
   let callback, callbackError, workspaceSelection, blocked = '', challengeAt = 0;
-  const deadline = Date.now() + (options.timeoutMs || 180000);
+  const deadline = started + Math.min(options.timeoutMs || 180000, 180000);
+  const budget = (limit = 15000) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) fail('timeout');
+    return Math.min(limit, remaining);
+  };
   try {
     stage('browser_starting');
+    operation('start_browser');
     try {
       browser = await chromium.launch({ executablePath: options.executablePath,
-        headless: options.headless ?? false, chromiumSandbox: true, timeout: 30000,
+        headless: options.headless ?? false, chromiumSandbox: true, timeout: budget(30000),
         // Match the tested Cloak 0.6 defaults, while retaining Chromium sandbox.
         ignoreDefaultArgs: ['--enable-automation', '--enable-unsafe-swiftshader'],
         args: [`--fingerprint=${randomInt(10000, 100000)}`, '--fingerprint-platform=windows',
           ...(!proxy ? ['--no-proxy-server'] : [])],
         ...(proxy ? { proxy } : {}) });
     } catch { fail('browser_start_failed'); }
+    operation('open_context');
     context = await browser.newContext({ locale: 'en-US', viewport: null, serviceWorkers: 'block',
       acceptDownloads: false, ...(proxy ? { proxy } : {}) });
     const page = await context.newPage();
-    page.setDefaultTimeout(5000);
+    page.setDefaultTimeout(budget());
     let callbackRequest;
     const captureCallback = request => {
       try {
@@ -231,6 +250,7 @@ export async function authorize(chromium, input, options = {}) {
     page.on('response', response => {
       if (response.request().isNavigationRequest() && response.request().frame() === page.mainFrame() &&
           response.url().startsWith(AUTH + '/')) {
+        httpStatus = response.status(); responseKind = 'document';
         if (response.status() === 429) blocked = 'rate_limited';
         if (response.status() >= 500) blocked = 'service_error';
         if (response.headers()['cf-mitigated'] === 'challenge') {
@@ -242,22 +262,25 @@ export async function authorize(chromium, input, options = {}) {
       }
     });
     stage('protocol_connecting');
-    await page.goto(`${AUTH}/oauth/authorize?${params}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    operation('open_login');
+    await page.goto(`${AUTH}/oauth/authorize?${params}`, { waitUntil: 'domcontentloaded', timeout: budget(30000) });
     const sent = new Set();
     let idleSince = Date.now();
     while (!callback) {
       if (callbackError) throw callbackError;
       if (blocked && blocked !== 'security_check') fail(blocked);
-      if (Date.now() > deadline) fail('timeout');
+      page.setDefaultTimeout(budget());
       if (page.isClosed()) fail('transport_error');
       const current = new URL(page.url());
       if (callback) break;
       if (current.origin !== AUTH) fail('additional_verification');
+      operation('read_page');
       const text = (await page.locator('body').innerText()).slice(0, 24000);
       if (!sent.has('password') && !sent.has('password_method')) {
         const usePassword = page.getByRole('button', { name: /^(?:use (?:your )?password(?: instead)?|log in with (?:a )?password|使用密码(?:登录)?|改用密码(?:登录)?)$/i })
           .or(page.getByRole('link', { name: /^(?:use (?:your )?password(?: instead)?|log in with (?:a )?password|使用密码(?:登录)?|改用密码(?:登录)?)$/i })).first();
         if (await usePassword.isVisible()) {
+          operation('choose_password');
           await usePassword.click(); sent.add('password_method'); idleSince = Date.now();
           continue;
         }
@@ -271,6 +294,7 @@ export async function authorize(chromium, input, options = {}) {
       // Only an actual login form with no remaining challenge clears its latch.
       if (blocked === 'security_check' && !reason && !challengeVisible && (email || password || code)) blocked = '';
       if (reason === 'security_check' || blocked === 'security_check' || challengeVisible) {
+        operation('security_check');
         // A normal browser may finish an initial JavaScript interstitial by
         // itself, including its iframe. Never click/solve a challenge, submit
         // credentials through it, or extend the overall authorization budget.
@@ -284,12 +308,17 @@ export async function authorize(chromium, input, options = {}) {
       if (reason) fail(reason);
       let progressed = false;
       if (email && !sent.has('email')) {
+        operation('fill_email');
         await email.fill(input.login_email);
-        await advance(page); sent.add('email'); stage('email_submitted'); progressed = true;
+        operation('submit_email');
+        await advance(page, budget(), email); sent.add('email'); stage('email_submitted'); progressed = true;
       } else if (password && !sent.has('password')) {
+        operation('fill_password');
         await password.fill(input.password);
-        await advance(page); sent.add('password'); stage('password_submitted'); progressed = true;
+        operation('submit_password');
+        await advance(page, budget(), password); sent.add('password'); stage('password_submitted'); progressed = true;
       } else if (code && !sent.has('mfa')) {
+        operation('fill_mfa');
         if (!input.totp_secret) fail('additional_verification');
         // Navigation may finish between the body read and locating the input.
         // Read the current label again; never send a TOTP to an email OTP form.
@@ -301,34 +330,45 @@ export async function authorize(chromium, input, options = {}) {
         }
         const remaining = 30000 - (Date.now() % 30000);
         if (remaining < 5000) await new Promise(resolve => setTimeout(resolve, remaining + 300));
+        page.setDefaultTimeout(budget());
         await code.fill(totp(input.totp_secret));
-        await advance(page); sent.add('mfa'); stage('mfa_submitted'); progressed = true;
+        operation('submit_mfa');
+        await advance(page, budget(), code); sent.add('mfa'); stage('mfa_submitted'); progressed = true;
       } else if (/consent|select.*(?:workspace|organization)|(?:workspace|organization).*select/.test(current.pathname) && !sent.has(current.pathname)) {
+        operation('select_workspace');
         const selected = await selectWorkspace(page, input.expected_workspace, input.preferred_workspace_id);
         // Do not accept an unknown first-login picker and silently bind its default.
         if (!selected && !workspaceSelection && !input.expected_workspace) fail('workspace_unavailable');
         if (selected) workspaceSelection = selected;
-        await advance(page); sent.add(current.pathname); stage('waiting_callback'); progressed = true;
+        operation('submit_workspace');
+        await advance(page, budget()); sent.add(current.pathname); stage('waiting_callback'); progressed = true;
       }
       if (progressed) idleSince = Date.now();
+      operation('wait_next_page');
       if (Date.now() - idleSince > 30000) fail('additional_verification');
       await new Promise(resolve => setTimeout(resolve, 400));
     }
     if (callbackError) throw callbackError;
     stage('exchanging_token');
+    operation('exchange_token');
     // The browser API client inherits this context's original proxy.
-    const response = await context.request.post(`${AUTH}/oauth/token`, { maxRedirects: 0, timeout: 30000,
+    const response = await context.request.post(`${AUTH}/oauth/token`, { maxRedirects: 0, timeout: budget(30000),
       form: { grant_type: 'authorization_code', client_id: CLIENT_ID, redirect_uri: REDIRECT,
         code: callback, code_verifier: verifier } });
+    httpStatus = response.status(); responseKind = 'token';
     if (response.status() !== 200) fail(response.status() === 429 ? 'rate_limited' : 'service_error');
     const body = await response.body();
     if (body.length > 1048576) fail('worker_failed');
+    operation('validate_tokens');
     return credentialsFromTokens(JSON.parse(body), input, workspaceSelection);
   } catch (error) {
-    if (error instanceof LoginFailure) throw error;
     // Never propagate Playwright errors: they can include URLs, form data and tokens.
-    if (error?.name === 'TimeoutError') fail('timeout');
-    fail(proxy ? 'proxy_unavailable' : 'transport_error');
+    const failure = new LoginFailure(error instanceof LoginFailure ? error.code :
+      error?.name === 'TimeoutError' ? 'timeout' : proxy ? 'proxy_unavailable' : 'transport_error');
+    const failedAt = Date.now();
+    failure.diagnostic = { stage: currentStage, action, elapsed_ms: failedAt - started,
+      action_ms: failedAt - actionStarted, http_status: httpStatus, response: responseKind };
+    throw failure;
   } finally {
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
@@ -350,7 +390,8 @@ async function main() {
       headless: process.env.OPENAI_CODEX_BROWSER_HEADLESS === 'true', emit });
     emit({ type: 'result', credentials });
   } catch (error) {
-    emit({ type: 'error', code: error instanceof LoginFailure ? error.code : 'worker_failed' });
+    emit({ type: 'error', code: error instanceof LoginFailure ? error.code : 'worker_failed',
+      ...(error instanceof LoginFailure && error.diagnostic ? { diagnostic: error.diagnostic } : {}) });
     process.exitCode = 1;
   }
 }

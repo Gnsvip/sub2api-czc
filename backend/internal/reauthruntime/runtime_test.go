@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -215,4 +216,35 @@ func TestExcelBPSPinnedRuntimeReleaseSelfCheck(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, expected, string(digest))
 	require.Equal(t, "idle", m.Status().State, "self-check must not start a live worker")
+
+	// Exercise the embedded adapter with the real pinned Python distribution.
+	// A bare sys.executable can import host libpython and fail before launching
+	// Xvfb, although the ordinary system-Python lifecycle tests pass.
+	overlay, err := m.prepareBrowserOverlay()
+	require.NoError(t, err)
+	runner := filepath.Join(m.root, "synthetic-browser")
+	require.NoError(t, os.WriteFile(runner, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"error\",\"code\":\"security_check\"}'\n"), 0700))
+	script := `import importlib.util,sys
+from pathlib import Path
+from types import SimpleNamespace
+path=Path(sys.argv[1])/'browser_worker.py'
+spec=importlib.util.spec_from_file_location('adapter',path)
+adapter=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(adapter)
+adapter.ensure_playwright=lambda root: root/'unused-library'
+try:
+    adapter.run_browser(None,{'task_id':1,'login_email':'test@example.invalid','password':'synthetic'},
+                        SimpleNamespace(_best_effort_progress=lambda *args:None),root=path)
+except adapter.BrowserFailure as error:
+    assert error.code=='security_check',error.code
+else:
+    raise AssertionError('synthetic browser failure was not returned')
+`
+	check := exec.CommandContext(ctx, filepath.Join(dir, "python"), "-c", script, overlay)
+	check.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "PYTHONDONTWRITEBYTECODE=1",
+		"TOSUB2_PYTHON=" + filepath.Join(dir, "python"), "NODE_EXECUTABLE=" + runner,
+		"OPENAI_CODEX_BROWSER_EXECUTABLE=/bin/true"}
+	configureProcess(check)
+	output, err := check.CombinedOutput()
+	require.NoError(t, err, "pinned-runtime browser supervision: %s", output)
 }

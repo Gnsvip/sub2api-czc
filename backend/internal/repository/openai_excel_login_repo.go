@@ -53,13 +53,17 @@ func (r *openAIExcelOAuthRepository) SaveExcelLoginConfig(ctx context.Context, c
 	return true, tx.Commit()
 }
 
-const excelLoginTaskColumns = `id,account_id,status,stage,error_code,worker_id,config_revision,updated_at,oauth_profile`
+const excelLoginTaskColumns = `id,account_id,status,stage,error_code,worker_id,config_revision,updated_at,oauth_profile,diagnostic`
 
 func scanExcelLoginTask(row interface{ Scan(...any) error }) (*service.ExcelLoginTask, error) {
 	t := &service.ExcelLoginTask{}
-	err := row.Scan(&t.ID, &t.AccountID, &t.Status, &t.Stage, &t.ErrorCode, &t.WorkerID, &t.ConfigRevision, &t.UpdatedAt, &t.OAuthProfile)
+	var diagnostic string
+	err := row.Scan(&t.ID, &t.AccountID, &t.Status, &t.Stage, &t.ErrorCode, &t.WorkerID, &t.ConfigRevision, &t.UpdatedAt, &t.OAuthProfile, &diagnostic)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
+	}
+	if parsed := service.ParseCodexBrowserDiagnostic(diagnostic); parsed != nil && parsed.Reason == t.ErrorCode {
+		t.Diagnostic = parsed
 	}
 	return t, err
 }
@@ -142,7 +146,11 @@ func (r *openAIExcelOAuthRepository) ProgressExcelLogin(ctx context.Context, id 
 	return n == 1, err
 }
 func (r *openAIExcelOAuthRepository) FailExcelLogin(ctx context.Context, id int64, worker, code string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code=$3,updated_at=NOW() WHERE id=$1 AND worker_id=$2 AND status='running'`, id, worker, code)
+	diagnostic := ""
+	if parsed := service.ParseCodexBrowserDiagnostic(code); parsed != nil {
+		diagnostic, code = code, parsed.Reason
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code=$3,diagnostic=$4,updated_at=NOW() WHERE id=$1 AND worker_id=$2 AND status='running'`, id, worker, code, diagnostic)
 	if err != nil {
 		return false, err
 	}

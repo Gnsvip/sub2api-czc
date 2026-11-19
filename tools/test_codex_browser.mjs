@@ -214,7 +214,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         await assert.rejects(promise, error => {
           assert.equal(error.code, code);
           assert.ok(error.diagnostic.elapsed_ms >= error.diagnostic.action_ms);
-          assert.equal(error.diagnostic.http_status, 200);
+          assert.equal(error.diagnostic.http_status, scenario === 'bad_state' ? 302 : 200);
           assert.equal(error.diagnostic.response, tokenMismatch ? 'token' : 'document');
           assert.ok(!JSON.stringify(error.diagnostic).includes('synthetic'));
           if (scenario === 'submit_timeout') {

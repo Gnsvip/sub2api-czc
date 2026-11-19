@@ -248,9 +248,11 @@ export async function authorize(chromium, input, options = {}) {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'Authorization received. You may close this page.' });
     });
     page.on('response', response => {
-      if (response.request().isNavigationRequest() && response.request().frame() === page.mainFrame() &&
-          response.url().startsWith(AUTH + '/')) {
-        httpStatus = response.status(); responseKind = 'document';
+      const request = response.request();
+      if (request.frame() === page.mainFrame() && response.url().startsWith(AUTH + '/') &&
+          (request.isNavigationRequest() || ['fetch', 'xhr'].includes(request.resourceType()))) {
+        httpStatus = response.status();
+        responseKind = request.isNavigationRequest() ? 'document' : 'auth_request';
         if (response.status() === 429) blocked = 'rate_limited';
         if (response.status() >= 500) blocked = 'service_error';
         if (response.headers()['cf-mitigated'] === 'challenge') {

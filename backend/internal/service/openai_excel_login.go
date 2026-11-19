@@ -339,7 +339,7 @@ type CodexBrowserDiagnostic struct {
 	Response   string `json:"response"`
 }
 
-var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_browser_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|token)$`)
+var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_browser_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)$`)
 
 func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
 	if len(raw) > 256 {

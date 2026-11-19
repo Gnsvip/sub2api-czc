@@ -13,7 +13,7 @@ export interface CodexLoginTask {
     elapsed_ms: number
     action_ms: number
     http_status: number
-    response: 'none' | 'document' | 'token'
+    response: 'none' | 'document' | 'auth_request' | 'token'
   }
 }
 export interface CodexLoginStatus {

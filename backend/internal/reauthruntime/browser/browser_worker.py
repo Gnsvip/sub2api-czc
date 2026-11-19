@@ -43,7 +43,7 @@ ACTIONS = frozenset({"initializing", "start_browser", "open_context", "open_logi
                      "fill_mfa", "submit_mfa", "select_workspace", "submit_workspace", "wait_next_page",
                      "security_check", "exchange_token", "validate_tokens", "browser_process", "apply_credentials"})
 DIAGNOSTIC = re.compile(r"codex_browser_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) "
-                        r"elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|token)")
+                        r"elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)")
 
 
 def safe_diagnostic(code, data):
@@ -56,7 +56,7 @@ def safe_diagnostic(code, data):
     if (any(type(value) is not int for value in (elapsed, action, status))
             or not 0 <= action <= elapsed <= 360000
             or status != 0 and not 100 <= status <= 599
-            or data.get("response") not in ("none", "document", "token")
+            or data.get("response") not in ("none", "document", "auth_request", "token")
             or (data["response"] == "none") != (status == 0)):
         return None
     return (f"codex_browser_failed stage={data['stage']} action={data['action']} reason={code} "
@@ -340,8 +340,16 @@ def run_browser(api, claim, worker, root=None):
         child = None
         credentials = None
         failure = None
+        last_stage = "browser_starting"
         reader = None
-        deadline = time.monotonic() + 240
+        started = time.monotonic()
+        deadline = started + 240
+
+        def process_failure(code):
+            elapsed = min(360000, int((time.monotonic() - started) * 1000))
+            return BrowserFailure(code, dict(stage=last_stage, action="browser_process", elapsed_ms=elapsed,
+                                             action_ms=elapsed, http_status=0, response="none"))
+
         try:
             child = subprocess.Popen(command,
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -374,23 +382,25 @@ def run_browser(api, claim, worker, root=None):
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise failure or BrowserFailure("timeout")
+                    raise failure or process_failure("timeout")
                 try:
                     event = events.get(timeout=remaining)
                 except queue.Empty:
-                    raise failure or BrowserFailure("timeout") from None
+                    raise failure or process_failure("timeout") from None
                 if event is None:
                     break
                 if not isinstance(event, dict):
                     raise BrowserFailure("worker_failed")
                 if event.get("type") == "stage" and event.get("stage") in STAGES:
+                    last_stage = event["stage"]
                     worker._best_effort_progress(api, task_id, event["stage"])
                 elif event.get("type") == "result" and credentials is None:
                     if failure is not None:
                         raise failure
                     credentials = event.get("credentials")
                 elif event.get("type") == "error":
-                    failure = failure or BrowserFailure(event.get("code"), event.get("diagnostic"))
+                    candidate = BrowserFailure(event.get("code"), event.get("diagnostic"))
+                    failure = failure or (candidate if candidate.diagnostic else process_failure(candidate.code))
                     deadline = min(deadline, time.monotonic() + 10)
                 else:
                     raise BrowserFailure("worker_failed")
@@ -398,9 +408,9 @@ def run_browser(api, claim, worker, root=None):
             if failure is not None:
                 raise failure
             if exit_code != 0:
-                raise BrowserFailure("worker_failed")
+                raise process_failure("worker_failed")
         except (OSError, subprocess.SubprocessError):
-            raise BrowserFailure("browser_start_failed") from None
+            raise process_failure("browser_start_failed") from None
         finally:
             payload.clear()
             if child is not None:

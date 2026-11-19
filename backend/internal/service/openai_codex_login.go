@@ -27,12 +27,30 @@ const CodexReauthorizationCountExtraKey = "openai_codex_reauthorization_count"
 // Nil keeps an existing choice and defaults a new configuration to enabled.
 // Excel/BPS keeps its separate opt-in input and behavior.
 type CodexLoginInput struct {
-	Enabled    *bool  `json:"enabled"`
-	LoginEmail string `json:"login_email"`
-	Password   string `json:"password"`
-	TOTPSecret string `json:"totp_secret"`
-	ClearTOTP  bool   `json:"clear_totp"`
-	Revision   int64  `json:"revision"`
+	Enabled              *bool   `json:"enabled"`
+	LoginEmail           string  `json:"login_email"`
+	Password             string  `json:"password"`
+	TOTPSecret           string  `json:"totp_secret"`
+	ClearTOTP            bool    `json:"clear_totp"`
+	Revision             int64   `json:"revision"`
+	PreferredWorkspaceID *string `json:"preferred_workspace_id,omitempty"`
+}
+
+// The ID is an optional first-login choice, not permission to change an existing identity.
+func NormalizeCodexPreferredWorkspaceID(raw string) (string, error) {
+	id := strings.TrimSpace(raw)
+	invalid := func() (string, error) {
+		return "", infraerrors.BadRequest("CODEX_LOGIN_INPUT_INVALID", "工作区 ID 只能包含字母、数字、横线或下划线，最多 128 个字符")
+	}
+	if len(id) > 128 {
+		return invalid()
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return invalid()
+		}
+	}
+	return id, nil
 }
 
 func codexPersonalPlan(plan string) bool {
@@ -46,8 +64,9 @@ func codexPersonalPlan(plan string) bool {
 
 func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult) string {
 	stage := "succeeded"
-	if excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
-		if only, _ := credentials[CodexPersonalWorkspaceOnly].(bool); only {
+	only, _ := credentials[CodexPersonalWorkspaceOnly].(bool)
+	if only || excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
+		if only {
 			stage = "succeeded_personal_workspace_only"
 		} else {
 			stage = "succeeded_personal_workspace"
@@ -241,6 +260,12 @@ func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input
 	if previous.Revision != input.Revision {
 		return nil, infraerrors.Conflict("CODEX_LOGIN_CONFIG_CHANGED", "设置已变更，请刷新后重试")
 	}
+	if input.PreferredWorkspaceID != nil {
+		c.PreferredWorkspaceID, err = NormalizeCodexPreferredWorkspaceID(*input.PreferredWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if input.Enabled != nil {
 		c.Enabled = *input.Enabled
 	}
@@ -279,7 +304,7 @@ func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input
 	if c.PasswordCiphertext == "" {
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_INPUT_INVALID", "请先保存登录密码")
 	}
-	if previous.Revision > 0 && previous.Enabled == c.Enabled && previous.LoginEmail == c.LoginEmail && previous.PasswordCiphertext == c.PasswordCiphertext && previous.TOTPCiphertext == c.TOTPCiphertext {
+	if previous.Revision > 0 && previous.Enabled == c.Enabled && previous.LoginEmail == c.LoginEmail && previous.PasswordCiphertext == c.PasswordCiphertext && previous.TOTPCiphertext == c.TOTPCiphertext && previous.PreferredWorkspaceID == c.PreferredWorkspaceID {
 		return s.CodexLoginStatus(ctx, id)
 	}
 	changed, err := r.SaveCodexLoginConfig(ctx, c, input.Revision)
@@ -417,7 +442,7 @@ func (s *OpenAIOAuthService) ClaimCodexLogin(ctx context.Context, worker string)
 	if p != nil {
 		proxy = p.URL()
 	}
-	return &ExcelLoginClaim{OAuthProfile: "codex", ExpectedWorkspace: a.GetCredential("chatgpt_account_id"), TaskID: t.ID, AccountID: a.ID, LoginEmail: c.LoginEmail, CredentialMode: "password_totp", Engine: "local_worker", Password: password, TOTPSecret: secret, ProxyURL: proxy}, nil
+	return &ExcelLoginClaim{OAuthProfile: "codex", ExpectedWorkspace: a.GetCredential("chatgpt_account_id"), PreferredWorkspaceID: c.PreferredWorkspaceID, TaskID: t.ID, AccountID: a.ID, LoginEmail: c.LoginEmail, CredentialMode: "password_totp", Engine: "local_worker", Password: password, TOTPSecret: secret, ProxyURL: proxy}, nil
 }
 func (s *OpenAIOAuthService) IsCodexLoginTask(ctx context.Context, id int64) (bool, error) {
 	r, err := s.codexLoginRepo()
@@ -480,7 +505,8 @@ func codexLoginTokenInfo(c map[string]any) (*OpenAITokenInfo, error) {
 		return nil, invalid
 	}
 	userInfo := it.GetUserInfo()
-	if excelMapString(c, CodexWorkspaceFallbackFrom) != "" && (!codexPersonalPlan(at.OpenAIAuth.ChatGPTPlanType) || !codexPersonalPlan(userInfo.PlanType)) {
+	onlyPersonal, _ := c[CodexPersonalWorkspaceOnly].(bool)
+	if (onlyPersonal || excelMapString(c, CodexWorkspaceFallbackFrom) != "") && (!codexPersonalPlan(at.OpenAIAuth.ChatGPTPlanType) || !codexPersonalPlan(userInfo.PlanType)) {
 		return nil, invalid
 	}
 	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: userInfo.PlanType, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
@@ -538,6 +564,10 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if cfg == nil || cfg.Revision != t.ConfigRevision {
 		return nil, infraerrors.Conflict("CODEX_LOGIN_CONFIG_CHANGED", "登录设置已变更，未覆盖新设置")
 	}
+	if a.GetCredential("chatgpt_account_id") == "" && cfg.PreferredWorkspaceID != "" && cfg.PreferredWorkspaceID != info.ChatGPTAccountID {
+		_ = s.FailExcelLogin(ctx, id, worker, "identity_mismatch")
+		return nil, infraerrors.BadRequest("CODEX_LOGIN_IDENTITY_MISMATCH", "授权工作区与指定工作区不一致")
+	}
 	if !strings.EqualFold(cfg.LoginEmail, info.Email) {
 		_ = s.FailExcelLogin(ctx, id, worker, "identity_mismatch")
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_IDENTITY_MISMATCH", "授权邮箱与登录资料不一致")
@@ -583,6 +613,9 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if from := excelMapString(c, CodexWorkspaceFallbackFrom); from != "" {
 		safe[CodexWorkspaceFallbackFrom] = from
 		safe[CodexPersonalWorkspaceOnly], _ = c[CodexPersonalWorkspaceOnly].(bool)
+	}
+	if only, _ := c[CodexPersonalWorkspaceOnly].(bool); only {
+		safe[CodexPersonalWorkspaceOnly] = true
 	}
 	changed, err := r.FinishCodexLogin(ctx, id, worker, safe, astra)
 	if err != nil {

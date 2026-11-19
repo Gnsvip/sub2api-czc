@@ -79,6 +79,7 @@ func (h *OpenAIOAuthHandler) QueueCodexLogin(c *gin.Context) {
 type codexLoginCreateRequest struct {
 	Content                 string         `json:"content"`
 	AutoRecover             *bool          `json:"auto_recover"`
+	PreferredWorkspaceID    string         `json:"preferred_workspace_id"`
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
 	GroupIDs                []int64        `json:"group_ids"`
@@ -123,6 +124,11 @@ func (h *OpenAIOAuthHandler) CreateCodexLoginAccounts(c *gin.Context) {
 		response.BadRequest(c, "并发、优先级和倍率不能为负数")
 		return
 	}
+	req.PreferredWorkspaceID, err = service.NormalizeCodexPreferredWorkspaceID(req.PreferredWorkspaceID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if err = h.openaiOAuthService.CodexLoginReady(); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -163,7 +169,7 @@ func (h *OpenAIOAuthHandler) CreateCodexLoginAccounts(c *gin.Context) {
 		})
 		if e == nil {
 			result.AccountID = account.ID
-			_, e = h.openaiOAuthService.SaveCodexLogin(ctx, account.ID, service.CodexLoginInput{Enabled: req.AutoRecover, LoginEmail: entry.Email, Password: entry.Password, TOTPSecret: entry.TOTPSecret})
+			_, e = h.openaiOAuthService.SaveCodexLogin(ctx, account.ID, service.CodexLoginInput{Enabled: req.AutoRecover, LoginEmail: entry.Email, Password: entry.Password, TOTPSecret: entry.TOTPSecret, PreferredWorkspaceID: &req.PreferredWorkspaceID})
 			if e == nil {
 				result.Task, e = h.openaiOAuthService.QueueCodexLogin(ctx, account.ID)
 			}

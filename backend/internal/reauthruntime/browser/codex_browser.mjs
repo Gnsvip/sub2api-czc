@@ -7,7 +7,7 @@ export const REDIRECT = 'http://localhost:1455/auth/callback';
 const AUTH = 'https://auth.openai.com';
 const AUTH_CLAIM = 'https://api.openai.com/auth';
 const failures = new Set(['browser_start_failed', 'security_check', 'additional_verification',
-  'password_rejected', 'totp_rejected', 'identity_mismatch', 'workspace_unavailable', 'proxy_unavailable', 'timeout',
+  'password_rejected', 'totp_rejected', 'identity_mismatch', 'workspace_unavailable', 'workspace_selection_required', 'proxy_unavailable', 'timeout',
   'transport_error', 'account_blocked', 'rate_limited', 'service_error', 'worker_failed']);
 
 export class LoginFailure extends Error {
@@ -83,12 +83,19 @@ export function credentialsFromTokens(tokens, input, selection) {
       (i?.chatgpt_account_id && i.chatgpt_account_id !== a.chatgpt_account_id) ||
       (idUser && idUser !== user) ||
       (input.expected_workspace && input.expected_workspace !== a.chatgpt_account_id && !fallback) ||
-      (selection?.fallbackFrom && !fallback)) fail('identity_mismatch');
+      (selection?.fallbackFrom && !fallback) ||
+      (selection?.workspace && selection.workspace !== a.chatgpt_account_id) ||
+      (!input.expected_workspace && input.preferred_workspace_id && input.preferred_workspace_id !== a.chatgpt_account_id) ||
+      (selection?.organization && (!['team', 'business', 'enterprise', 'edu'].includes(a?.chatgpt_plan_type) ||
+        !['team', 'business', 'enterprise', 'edu'].includes(i?.chatgpt_plan_type))) ||
+      (selection?.personal && (!['free', 'go', 'plus', 'pro'].includes(a?.chatgpt_plan_type) ||
+        !['free', 'go', 'plus', 'pro'].includes(i?.chatgpt_plan_type)))) fail('identity_mismatch');
   return { access_token: tokens.access_token, refresh_token: tokens.refresh_token, id_token: tokens.id_token,
     client_id: CLIENT_ID, email: id.email, chatgpt_account_id: a.chatgpt_account_id,
     chatgpt_user_id: user, expires_at: access.exp, plan_type: a.chatgpt_plan_type || '',
     ...(fallback ? { codex_workspace_fallback_from: input.expected_workspace,
-      codex_personal_workspace_only: selection.personalOnly === true } : {}) };
+      codex_personal_workspace_only: selection.personalOnly === true } : {}),
+    ...(!input.expected_workspace && selection?.personalOnly ? { codex_personal_workspace_only: true } : {}) };
 }
 
 export function pageFailure(text, title = '', url = '') {
@@ -116,8 +123,7 @@ async function advance(page) {
   await button.click({ timeout: 5000 });
 }
 
-async function selectWorkspace(page, expected) {
-  if (!expected) return;
+async function selectWorkspace(page, expected, preferred) {
   const choices = [];
   const select = await visible(page, 'select');
   if (select) {
@@ -140,12 +146,28 @@ async function selectWorkspace(page, expected) {
       if (choice.value) choices.push({ ...choice, choose: async () => { if (!checked) await radio.check(); } });
     }
   }
-  if (!choices.length) return; // Keep the final token check for unrecognized widgets.
+  if (!choices.length) return;
+  const personal = choices.filter(choice => /(?:^|\s)(?:personal(?:\s+(?:account|workspace))?|个人(?:账号|账户|工作区))(?:$|\s)/i.test(String(choice.label || '').trim()));
+  if (!expected) {
+    let selected;
+    if (preferred) {
+      selected = choices.find(choice => choice.value === preferred);
+      if (!selected) fail('workspace_unavailable');
+    } else {
+      // Workspace names are customizable. The OAuth picker lists personal and
+      // organization workspaces; prefer the unique non-personal choice.
+      const organizations = choices.filter(choice => !personal.includes(choice));
+      if (organizations.length > 1 || (!organizations.length && personal.length > 1)) fail('workspace_selection_required');
+      selected = organizations[0] || personal[0];
+      if (!selected) fail('workspace_unavailable');
+    }
+    await selected.choose();
+    return { workspace: selected.value, personal: personal.includes(selected), organization: !personal.includes(selected), personalOnly: personal.includes(selected) && choices.length === 1 };
+  }
   const original = choices.find(choice => choice.value === expected);
   if (original) { await original.choose(); return { workspace: expected }; }
   // Only an explicitly labeled personal choice may replace an unavailable
   // original workspace. Never choose another team or merely the first option.
-  const personal = choices.filter(choice => /(?:^|\s)(?:personal(?:\s+(?:account|workspace))?|个人(?:账号|账户|工作区))(?:$|\s)/i.test(String(choice.label || '').trim()));
   if (personal.length !== 1) fail('workspace_unavailable');
   await personal[0].choose();
   return { workspace: personal[0].value, fallbackFrom: expected, personalOnly: choices.length === 1 };
@@ -162,7 +184,7 @@ export async function authorize(chromium, input, options = {}) {
     scope: 'openid profile email offline_access', state, code_challenge_method: 'S256',
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     codex_cli_simplified_flow: 'true', id_token_add_organizations: 'true' });
-  if (input.expected_workspace) params.set('allowed_workspace_id', input.expected_workspace);
+  if (input.expected_workspace || input.preferred_workspace_id) params.set('allowed_workspace_id', input.expected_workspace || input.preferred_workspace_id);
   let browser, context;
   let callback, callbackError, workspaceSelection, blocked = '', challengeAt = 0;
   const deadline = Date.now() + (options.timeoutMs || 180000);
@@ -275,7 +297,9 @@ export async function authorize(chromium, input, options = {}) {
         await code.fill(totp(input.totp_secret));
         await advance(page); sent.add('mfa'); stage('mfa_submitted'); progressed = true;
       } else if (/consent|select.*(?:workspace|organization)|(?:workspace|organization).*select/.test(current.pathname) && !sent.has(current.pathname)) {
-        const selected = await selectWorkspace(page, input.expected_workspace);
+        const selected = await selectWorkspace(page, input.expected_workspace, input.preferred_workspace_id);
+        // Do not accept an unknown first-login picker and silently bind its default.
+        if (!selected && !workspaceSelection && !input.expected_workspace) fail('workspace_unavailable');
         if (selected) workspaceSelection = selected;
         await advance(page); sent.add(current.pathname); stage('waiting_callback'); progressed = true;
       }

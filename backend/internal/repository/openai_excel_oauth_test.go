@@ -452,12 +452,14 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				}
 				var token, status, keep string
 				var schedulable bool
-				require.NoError(t, db.QueryRow(`SELECT credentials->>'access_token',status,schedulable,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&token, &status, &schedulable, &keep))
+				require.NoError(t, db.QueryRow(`SELECT COALESCE(credentials->>'access_token',''),status,schedulable,extra->>'keep' FROM accounts WHERE id=$1`, id).Scan(&token, &status, &schedulable, &keep))
 				require.Equal(t, "custom", keep)
 				if success {
 					require.Equal(t, codexCandidate["access_token"], token)
 					require.Equal(t, "active", status)
 					require.Equal(t, scenario == "initial success", schedulable)
+				} else if scenario == "wrong first workspace" {
+					require.Empty(t, token, "a rejected first workspace must not write credentials")
 				} else if scenario == "new credentials" {
 					require.Equal(t, "new-admin-token", token)
 				} else {

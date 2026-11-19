@@ -14,7 +14,7 @@
     <label class="flex items-center gap-2 text-sm">
       <input v-model="autoRecover" type="checkbox" :disabled="submitting" /> 掉授权后自动恢复
     </label>
-    <p class="text-xs text-gray-500">关闭页面后任务继续。启用自动恢复后，临时失败至少间隔 15 分钟重试，连续失败 3 次后停止；密码或验证问题需手动处理。</p>
+    <p class="text-xs text-gray-500">关闭页面后任务继续。启用自动恢复后，临时失败冷却 60 秒，由下一轮扫描重试，最多重试 3 次（共 4 次）；密码或验证问题需手动处理。</p>
     <p v-if="error" class="text-sm text-red-600" role="alert">{{ error }}</p>
     <p v-if="runtime?.state === 'preparing'" class="text-sm text-gray-500">正在准备登录运行环境…</p>
     <p v-if="runtime?.state === 'unavailable'" class="text-sm text-amber-600">登录运行环境暂不可用，任务尚未完成。请稍后检查。</p>

@@ -362,7 +362,9 @@ describe('Codex automatic authorization and remembered settings', () => {
   })
 
   it.each([true, false])('keeps an existing recovery choice of %s when editing', async (enabled) => {
-    getCodexLoginStatusMock.mockResolvedValueOnce({ config: { ...config, enabled }, task: null, runtime })
+    const savedState = { config: { ...config, enabled }, task: null, runtime }
+    getCodexLoginStatusMock.mockResolvedValue(savedState)
+    saveCodexLoginMock.mockResolvedValue(savedState)
     const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
     const details = wrapper.get('details')
     ;(details.element as HTMLDetailsElement).open = true

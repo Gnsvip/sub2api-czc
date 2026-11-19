@@ -449,7 +449,8 @@ describe('Codex automatic authorization and remembered settings', () => {
   it.each([
     ['totp_rejected', '2FA 验证失败，请检查 TOTP 密钥'],
     ['security_check', '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证'],
-    ['workspace_unavailable', '无可用工作区，请手动授权'],
+    ['workspace_unavailable', '未找到可用或指定的工作区，请检查设置或手动授权'],
+    ['workspace_selection_required', '有多个工作区，请填写工作区 ID 后重试'],
     ['browser_unavailable', '服务器授权浏览器未就绪，请检查 CloakBrowser、Xvfb 和 xauth'],
     ['browser_start_failed', '授权浏览器启动失败，请检查浏览器依赖和沙箱权限'],
   ])('shows the specific %s failure without claiming authorization succeeded', async (code, message) => {
@@ -599,6 +600,8 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   it('changes untouched defaults only for GPT OAuth and keeps explicit concurrency', async () => {
     const wrapper = mountModal()
     const concurrency = () => wrapper.get<HTMLInputElement>('[data-testid="create-account-concurrency"]')
+    expect(concurrency().element.value).toBe('50')
+    await selectButtonByText(wrapper, 'Anthropic')
     expect(concurrency().element.value).toBe('10')
     await selectButtonByText(wrapper, 'OpenAI')
     expect(concurrency().element.value).toBe('50')
@@ -1440,6 +1443,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 describe('CreateAccountModal Vertex service account', () => {
   it('keeps Anthropic Vertex accounts on Service Account JSON only', async () => {
     const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Anthropic')
     await selectButtonByText(wrapper, 'admin.accounts.vertexLabel')
     expect(wrapper.find('[data-testid="vertex-auth-mode-apikey"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="vertex-api-key-input"]').exists()).toBe(false)

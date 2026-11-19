@@ -59,7 +59,7 @@ export function codexLoginError(code?: string): string {
     account_exists: '账号已存在，请在编辑账号中配置或重新授权',
     password_rejected: '密码不正确，请修改登录资料',
     totp_rejected: '2FA 验证失败，请检查 TOTP 密钥',
-    identity_mismatch: '授权身份或工作区与原账号不一致',
+    identity_mismatch: '登录身份或所选工作区校验失败',
     workspace_unavailable: '未找到可用或指定的工作区，请检查设置或手动授权',
     workspace_selection_required: '有多个工作区，请填写工作区 ID 后重试',
     security_check: '登录被上游安全校验拦截，请通过账号菜单“重新授权”完成验证',

@@ -46,11 +46,37 @@ test('proxy errors fail closed and diagnostics are fixed codes', () => {
   }
 });
 
+test('first organization authorization accepts current Business SKUs while preserving identity and workspace checks', () => {
+  const first = { ...input, expected_workspace: '', preferred_workspace_id: '' };
+  const selection = { workspace: 'workspace', organization: true, personal: false };
+  const withPlan = (plan, idPlan = plan) => ({ ...tokens,
+    access_token: jwt({ client_id: CLIENT_ID, exp, 'https://api.openai.com/auth': { ...auth, chatgpt_plan_type: plan } }),
+    id_token: jwt({ aud: CLIENT_ID, exp, email: input.login_email, 'https://api.openai.com/auth': { ...auth, chatgpt_plan_type: idPlan } }) });
+  for (const plan of ['team', 'business', 'self_serve_business_prolite', 'self_serve_business_usage_based',
+    'enterprise', 'ent26', 'enterprise_cbp_usage_based', 'enterprise_cbp_automation', 'edu', 'edu_plus', 'edu_pro']) {
+    const candidate = withPlan(plan);
+    const result = credentialsFromTokens(candidate, first, selection);
+    assert.equal(result.plan_type, plan);
+    assert.equal(result.chatgpt_account_id, selection.workspace);
+    assert.equal(result.codex_workspace_fallback_from, undefined);
+    assert.throws(() => credentialsFromTokens(candidate, { ...first, login_email: 'other@example.com' }, selection), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(candidate, first, { ...selection, workspace: 'unselected' }), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(candidate, { ...first, preferred_workspace_id: 'unselected' }, selection), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(candidate, { ...first, expected_workspace: 'original' }, selection), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(candidate, first, { workspace: 'workspace', personal: true }), { code: 'identity_mismatch' });
+  }
+  for (const plan of ['free', 'go', 'plus', 'pro', 'unknown', '', 'business_unrecognized']) {
+    assert.throws(() => credentialsFromTokens(withPlan(plan), first, selection), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(withPlan('self_serve_business_prolite', plan), first, selection), { code: 'identity_mismatch' });
+    assert.throws(() => credentialsFromTokens(withPlan(plan, 'self_serve_business_prolite'), first, selection), { code: 'identity_mismatch' });
+  }
+});
+
 test('isolated browser executes login, TOTP, workspace, callback and token exchange', {
   skip: !process.env.CODEX_TEST_PLAYWRIGHT,
 }, async t => {
   const { chromium } = await import(pathToFileURL(process.env.CODEX_TEST_PLAYWRIGHT).href);
-  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace', 'first_business', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_multiple_business', 'first_selected_business', 'first_missing_selected', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token', 'first_unknown_picker', 'recovery_ignores_preference']) {
+  for (const scenario of ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'personal_radio_fallback', 'personal_locked_default', 'personal_select_fallback', 'personal_with_other_team', 'missing_workspace', 'ambiguous_personal_workspace', 'wrong_fallback_workspace', 'team_token_fallback', 'password_rejected', 'totp_rejected', 'security_check', 'additional_verification', 'bad_state', 'wrong_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_multiple_business', 'first_selected_business', 'first_missing_selected', 'first_wrong_token', 'first_personal_team_token', 'first_business_personal_token', 'first_unknown_picker', 'recovery_ignores_preference']) {
     await t.test(scenario, async () => {
       let actualBrowser, actualContext, state, challenge, submitted = [], tokenCalls = 0, consentSubmissions = 0;
       const stages = [];
@@ -146,7 +172,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
               }
               if (first) {
                 const selectedAuth = { ...auth, chatgpt_account_id: personalFirst ? 'other' : scenario === 'first_wrong_token' ? 'unselected' : 'workspace',
-                  chatgpt_plan_type: scenario === 'first_personal_team_token' ? 'business' : personalFirst || scenario === 'first_business_personal_token' ? 'free' : 'team' };
+                  chatgpt_plan_type: scenario === 'first_business_prolite' ? 'self_serve_business_prolite' : scenario === 'first_business_usage_based' ? 'self_serve_business_usage_based' : scenario === 'first_personal_team_token' ? 'business' : personalFirst || scenario === 'first_business_personal_token' ? 'free' : 'team' };
                 payload = { ...tokens, access_token: jwt({ client_id: CLIENT_ID, exp, 'https://api.openai.com/auth': selectedAuth }),
                   id_token: jwt({ aud: CLIENT_ID, exp, email: input.login_email, 'https://api.openai.com/auth': selectedAuth }) };
               }
@@ -158,7 +184,7 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
         } };
       } };
       const promise = authorize(injected, scenarioInput, { headless: process.env.CODEX_TEST_HEADED !== '1', timeoutMs: 30000, emit: event => stages.push(event) });
-      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'first_business', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_selected_business', 'recovery_ignores_preference'].includes(scenario)) {
+      if (scenario.startsWith('personal_') || ['success', 'temporary_security_iframe', 'resolved_http_challenge', 'password_choice', 'radio_workspace', 'first_business', 'first_business_prolite', 'first_business_usage_based', 'first_named_business', 'first_radio_business', 'first_only_personal', 'first_locked_personal', 'first_selected_business', 'recovery_ignores_preference'].includes(scenario)) {
         const result = await promise;
         assert.equal(result.client_id, CLIENT_ID);
         assert.deepEqual(submitted, [input.login_email, input.password, 'totp']);
@@ -173,6 +199,8 @@ test('isolated browser executes login, TOTP, workspace, callback and token excha
           assert.equal(result.codex_workspace_fallback_from, undefined);
           if (personalFirst) assert.equal(result.codex_personal_workspace_only, true);
           if (first) assert.equal(result.chatgpt_account_id, personalFirst ? 'other' : 'workspace');
+          if (scenario === 'first_business_prolite') assert.equal(result.plan_type, 'self_serve_business_prolite');
+          if (scenario === 'first_business_usage_based') assert.equal(result.plan_type, 'self_serve_business_usage_based');
         }
       } else {
         const noChoice = ['missing_workspace', 'ambiguous_personal_workspace', 'first_missing_selected', 'first_unknown_picker', 'first_multiple_business'].includes(scenario);

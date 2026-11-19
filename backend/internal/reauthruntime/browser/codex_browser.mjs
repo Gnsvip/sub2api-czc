@@ -66,6 +66,14 @@ function jwt(raw) {
   } catch { fail('identity_mismatch'); }
 }
 
+// Match the organization SKUs already recognized by the account UI. Business
+// Premium is issued as self_serve_business_prolite, not simply "business".
+function organizationPlan(plan) {
+  return ['team', 'business', 'self_serve_business_prolite', 'self_serve_business_usage_based',
+    'enterprise', 'ent26', 'enterprise_cbp_usage_based', 'enterprise_cbp_automation',
+    'edu', 'edu_plus', 'edu_pro'].includes(plan);
+}
+
 export function credentialsFromTokens(tokens, input, selection) {
   if (!tokens || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) fail('identity_mismatch');
   const access = jwt(tokens.access_token), id = jwt(tokens.id_token);
@@ -86,8 +94,7 @@ export function credentialsFromTokens(tokens, input, selection) {
       (selection?.fallbackFrom && !fallback) ||
       (selection?.workspace && selection.workspace !== a.chatgpt_account_id) ||
       (!input.expected_workspace && input.preferred_workspace_id && input.preferred_workspace_id !== a.chatgpt_account_id) ||
-      (selection?.organization && (!['team', 'business', 'enterprise', 'edu'].includes(a?.chatgpt_plan_type) ||
-        !['team', 'business', 'enterprise', 'edu'].includes(i?.chatgpt_plan_type))) ||
+      (selection?.organization && (!organizationPlan(a?.chatgpt_plan_type) || !organizationPlan(i?.chatgpt_plan_type))) ||
       (selection?.personal && (!['free', 'go', 'plus', 'pro'].includes(a?.chatgpt_plan_type) ||
         !['free', 'go', 'plus', 'pro'].includes(i?.chatgpt_plan_type)))) fail('identity_mismatch');
   return { access_token: tokens.access_token, refresh_token: tokens.refresh_token, id_token: tokens.id_token,

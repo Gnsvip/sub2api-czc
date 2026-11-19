@@ -68,7 +68,7 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
             worker.process_password_claim(None, {"oauth_profile": "codex", "engine": "session_studio"})
             self.assertEqual(original.call_count, 3)
         self.assertEqual(worker.safe_worker_failure(browser.BrowserFailure("security_check")), "security_check")
-        for code in ("browser_unavailable", "totp_rejected", "identity_mismatch"):
+        for code in ("browser_unavailable", "totp_rejected", "identity_mismatch", "workspace_unavailable"):
             self.assertEqual(worker.safe_worker_failure(WorkerError(code)), code)
         self.assertEqual(worker.safe_worker_failure(RuntimeError("password=synthetic-secret")), "worker_failed")
         self.assertEqual(str(browser.BrowserFailure("synthetic-secret")), "worker_failed")

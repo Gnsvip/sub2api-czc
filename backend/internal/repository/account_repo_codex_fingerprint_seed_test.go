@@ -24,6 +24,7 @@ func TestBulkUpdateEnsuresCodexFingerprintSeedWithPerRowSQL(t *testing.T) {
 			"codex_fingerprint_mode":                  "session",
 			"codex_fingerprint_seed":                  "22222222-2222-4222-8222-222222222222",
 			service.CodexReauthorizationCountExtraKey: 0,
+			service.CodexAuthAutoPauseExtraKey:        true,
 		},
 		EnsureCodexFingerprintSeed: true,
 	})
@@ -64,6 +65,7 @@ func TestUpdateExtraEnsuresCodexFingerprintSeedAtomicallyWhenEnabling(t *testing
 		"codex_fingerprint_mode":                  "device",
 		"codex_fingerprint_seed":                  "22222222-2222-4222-8222-222222222222",
 		service.CodexReauthorizationCountExtraKey: 0,
+		service.CodexAuthAutoPauseExtraKey:        true,
 	})
 
 	require.NoError(t, err)

@@ -24,6 +24,9 @@ const CodexWorkspaceFallbackFrom = "codex_workspace_fallback_from"
 const CodexPersonalWorkspaceOnly = "codex_personal_workspace_only"
 const CodexReauthorizationCountExtraKey = "openai_codex_reauthorization_count"
 
+// Managed only by authentication failure/recovery and explicit scheduling edits.
+const CodexAuthAutoPauseExtraKey = "openai_codex_auth_auto_paused"
+
 // Nil keeps an existing choice and defaults a new configuration to enabled.
 // Excel/BPS keeps its separate opt-in input and behavior.
 type CodexLoginInput struct {

@@ -106,12 +106,13 @@ func stripCodexManagedExtraFromUpdate(extra map[string]any) map[string]any {
 	}
 	_, seedExists := extra["codex_fingerprint_seed"]
 	_, countExists := extra[service.CodexReauthorizationCountExtraKey]
-	if !seedExists && !countExists {
+	_, autoPauseExists := extra[service.CodexAuthAutoPauseExtraKey]
+	if !seedExists && !countExists && !autoPauseExists {
 		return extra
 	}
 	stripped := make(map[string]any, len(extra)-1)
 	for key, value := range extra {
-		if key == "codex_fingerprint_seed" || key == service.CodexReauthorizationCountExtraKey {
+		if key == "codex_fingerprint_seed" || key == service.CodexReauthorizationCountExtraKey || key == service.CodexAuthAutoPauseExtraKey {
 			continue
 		}
 		stripped[key] = value
@@ -157,6 +158,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	account.Extra = copyJSONMap(normalizeJSONMap(account.Extra))
+	delete(account.Extra, service.CodexAuthAutoPauseExtraKey)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -777,7 +780,7 @@ func lockAndMergeAccountProbeExtra(
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
 	// Preserve independently managed state under the row lock. A stale edit
 	// must not erase reset reservations or undo the account's probe switch.
-	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey, service.CodexReauthorizationCountExtraKey} {
+	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey, service.CodexReauthorizationCountExtraKey, service.CodexAuthAutoPauseExtraKey} {
 		delete(extra, key)
 		if state, ok := currentExtra[key]; ok {
 			if extra == nil {
@@ -785,6 +788,9 @@ func lockAndMergeAccountProbeExtra(
 			}
 			extra[key] = state
 		}
+	}
+	if !identityUnchanged || account.Status != service.StatusError || account.Schedulable {
+		delete(extra, service.CodexAuthAutoPauseExtraKey)
 	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
@@ -1570,12 +1576,19 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 }
 
 func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg string) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetStatus(service.StatusError).
-		SetErrorMessage(errorMsg).
-		SetSchedulable(false).
-		Save(ctx)
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.SetError(ctx, id, errorMsg)
+	}
+	// Record the pre-error scheduling intent in the same row update. Repeated
+	// 401s preserve this marker; an already manually paused account never gets it.
+	recoverable := service.CodexLoginCanRecoverState(service.StatusError, errorMsg) && errorMsg != service.CodexAuthorizationPending
+	_, err := r.sql.ExecContext(ctx, `UPDATE accounts AS a SET
+ extra=CASE WHEN $3 AND `+codexLoginAccountSQL+` AND
+ (a.schedulable OR (a.status='error' AND a.extra->'openai_codex_auth_auto_paused'='true'::jsonb))
+ THEN COALESCE(a.extra,'{}'::jsonb)||'{"openai_codex_auth_auto_paused":true}'::jsonb
+ ELSE COALESCE(a.extra,'{}'::jsonb)-'openai_codex_auth_auto_paused' END,
+ status='error',error_message=$2,schedulable=FALSE,updated_at=NOW()
+ WHERE a.id=$1 AND a.deleted_at IS NULL`, id, errorMsg, recoverable)
 	if err != nil {
 		return err
 	}
@@ -2874,10 +2887,10 @@ func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedu
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.SetSchedulable(ctx, id, schedulable)
 	}
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetSchedulable(schedulable).
-		Save(ctx)
+	// Even setting false again is an explicit pause, revoking automatic resume.
+	_, err := r.sql.ExecContext(ctx, `UPDATE accounts SET schedulable=$2,
+ extra=COALESCE(extra,'{}'::jsonb)-'openai_codex_auth_auto_paused',updated_at=NOW()
+ WHERE id=$1 AND deleted_at IS NULL`, id, schedulable)
 	if err != nil {
 		return err
 	}
@@ -3373,7 +3386,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND COALESCE(btrim("+credentialPlaceholder+"::jsonb ->> 'account_mode') <> 'zen', true) IS NOT TRUE")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
+	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed || updates.Schedulable != nil || updates.Status != nil {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3487,6 +3500,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		if _, bpsChanged := updates.Extra["openai_excel_bps"]; bpsChanged {
 			extraExpression = excelBPSPendingExtraSQL(extraExpression)
+		}
+		if updates.Schedulable != nil || updates.Status != nil {
+			extraExpression = "(" + extraExpression + ") - 'openai_codex_auth_auto_paused'"
 		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}

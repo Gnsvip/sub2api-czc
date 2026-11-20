@@ -260,6 +260,8 @@ describe('Codex automatic authorization and remembered settings', () => {
     ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
     ['succeeded_astra_degraded', '已授权 · 降智，未恢复调度'],
     ['succeeded_astra_unknown', '已授权 · 检测未完成，未恢复调度'],
+    ['succeeded_free_plan', '已授权 · Free 套餐，已停止调度'],
+    ['succeeded_personal_workspace_only_free_plan', '已授权 · Free 套餐，已停止调度'],
     ['succeeded_personal_workspace_only_astra_degraded', '已授权 · 仅个人工作区 · 降智，未恢复调度'],
     ['succeeded_personal_workspace_astra_unknown', '已授权 · 个人工作区 · 检测未完成，未恢复调度'],
   ])('shows the authorization and scheduling outcome for %s', (stage, label) => {
@@ -400,9 +402,59 @@ describe('Codex automatic authorization and remembered settings', () => {
     await details.trigger('toggle')
     await flushPromises()
     expect((wrapper.findAll('input[type="checkbox"]')[0]!.element as HTMLInputElement).checked).toBe(enabled)
-    await wrapper.findAll('button')[0]!.trigger('click')
+    await wrapper.get('[data-testid="codex-login-save"]').trigger('click')
     await flushPromises()
     expect(saveCodexLoginMock).toHaveBeenCalledWith(42, expect.objectContaining({ enabled, revision: 1, preferred_workspace_id: 'workspace-id' }))
+    expect(runCodexLoginMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('offers an expiry on the automatic authorization page without expanding settings', async () => {
+    const wrapper = mountModal([], [], document.body)
+    expect(wrapper.get('[data-testid="codex-account-expiry"]').text()).toContain('到期后仍可调用')
+    expect(wrapper.findAll('input[type="datetime-local"]')).toHaveLength(1)
+    await wrapper.get('[data-testid="openai-automatic-mode"]').trigger('click')
+    const expiry = wrapper.get('[data-testid="codex-expiry-input"]')
+    expect(expiry.isVisible()).toBe(true)
+    expect(wrapper.findAll('input[type="datetime-local"]')).toHaveLength(1)
+    await expiry.setValue('2030-04-15T09:20')
+    await wrapper.get('[data-testid="codex-login-content"]').setValue('example@example.com----synthetic-password----')
+    await wrapper.get('[data-testid="codex-login-submit"]').trigger('click')
+    await flushPromises()
+    expect(createCodexLoginMock).toHaveBeenCalledWith(expect.objectContaining({
+      expires_at: new Date('2030-04-15T09:20').getTime() / 1000,
+      auto_pause_on_expired: false,
+    }), expect.any(String), true)
+    expect(readAccountCreationDefaults(7, 'openai', 'oauth').settings).not.toHaveProperty('expires_at')
+    wrapper.unmount()
+  })
+
+  it('edits and clears the authorization expiry while leaving an untouched date unchanged', async () => {
+    const savedDate = new Date('2030-04-15T09:20').getTime() / 1000
+    const savedState = { config, task: null, runtime, expires_at: savedDate, auto_pause_on_expired: true }
+    getCodexLoginStatusMock.mockResolvedValue(savedState)
+    saveCodexLoginMock.mockImplementation(async (_id, input) => ({ ...savedState, expires_at: input.expires_at === undefined ? savedDate : input.expires_at || null, auto_pause_on_expired: input.expires_at === undefined }))
+    const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
+    const details = wrapper.get('details')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="codex-expiry-input"]').element.value).toBe('2030-04-15T09:20')
+    expect(wrapper.get('[data-testid="codex-account-expiry"]').text()).toContain('到期后停止调度')
+    await wrapper.get('[data-testid="codex-login-save"]').trigger('click')
+    await flushPromises()
+    expect(saveCodexLoginMock.mock.calls[0][1]).not.toHaveProperty('expires_at')
+    await wrapper.get('[data-testid="codex-expiry-input"]').setValue('2030-05-16T10:30')
+    expect(wrapper.get('[data-testid="codex-account-expiry"]').text()).toContain('到期后仍可调用')
+    await wrapper.get('[data-testid="codex-login-save"]').trigger('click')
+    await flushPromises()
+    expect(saveCodexLoginMock.mock.calls[1][1].expires_at).toBe(new Date('2030-05-16T10:30').getTime() / 1000)
+    expect(wrapper.emitted('expiry-saved')?.[0]).toEqual([new Date('2030-05-16T10:30').getTime() / 1000])
+    await wrapper.get('[data-testid="codex-expiry-input"]').setValue('')
+    await wrapper.get('[data-testid="codex-login-save"]').trigger('click')
+    await flushPromises()
+    expect(saveCodexLoginMock.mock.calls[2][1].expires_at).toBe(0)
+    expect(wrapper.emitted('expiry-saved')?.[1]).toEqual([null])
     expect(runCodexLoginMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -480,11 +532,14 @@ describe('Codex automatic authorization and remembered settings', () => {
     wrapper.unmount()
   })
 
-  it('shows the personal-workspace notice before closing the completed account editor', async () => {
+  it.each([
+    ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
+    ['succeeded_free_plan', '已授权 · Free 套餐，已停止调度'],
+  ])('shows the %s notice before closing the completed account editor', async (stage, label) => {
     vi.useFakeTimers()
     showWarningMock.mockClear()
     getCodexLoginStatusMock.mockResolvedValueOnce({ config, task: { id: 9, account_id: 42, status: 'running', stage: 'exchanging_token' }, runtime })
-      .mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage: 'succeeded_personal_workspace_only' }, runtime })
+      .mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage }, runtime })
     const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
     const details = wrapper.get('details')
     ;(details.element as HTMLDetailsElement).open = true
@@ -492,7 +547,7 @@ describe('Codex automatic authorization and remembered settings', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
-    expect(showWarningMock).toHaveBeenCalledWith('已授权 · 仅个人工作区', 8000)
+    expect(showWarningMock).toHaveBeenCalledWith(label, 8000)
     expect(wrapper.emitted('authorized')).toHaveLength(1)
     wrapper.unmount()
   })
@@ -519,7 +574,7 @@ describe('Codex automatic authorization and remembered settings', () => {
     await passwords[0]!.setValue('synthetic-new-password')
     let resolveSave!: (value: unknown) => void
     saveCodexLoginMock.mockReturnValueOnce(new Promise(resolve => { resolveSave = resolve }))
-    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.get('[data-testid="codex-login-run"]').trigger('click')
     await wrapper.setProps({ accountId: 43 })
     resolveSave({ config, task: null, runtime })
     await flushPromises()

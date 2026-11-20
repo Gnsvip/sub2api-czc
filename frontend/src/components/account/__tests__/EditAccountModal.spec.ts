@@ -268,6 +268,19 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('preserves an expiry saved through authorization settings when saving the outer account form', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: {}, auto_pause_on_expired: true }
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const deadline = new Date('2030-05-16T10:30').getTime() / 1000
+    wrapper.getComponent(CodexLoginSettings).vm.$emit('expiry-saved', deadline)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ expires_at: deadline, auto_pause_on_expired: false }))
+    wrapper.unmount()
+  })
+
   it('refreshes the authorized account before updating the list and closing', async () => {
     const account = { ...buildAccount(), type: 'oauth', credentials: {} }
     const refreshed = { ...account, status: 'active', credentials: { email: 'fixture@example.com' } }

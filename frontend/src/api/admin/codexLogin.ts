@@ -17,6 +17,8 @@ export interface CodexLoginTask {
   }
 }
 export interface CodexLoginStatus {
+  expires_at?: number | null
+  auto_pause_on_expired?: boolean
   config: { enabled: boolean; login_email: string; password_configured: boolean; totp_configured: boolean; revision: number; preferred_workspace_id?: string }
   task: CodexLoginTask | null
   runtime: { mode: string; state: string; reason?: string }
@@ -54,7 +56,7 @@ export async function getCodexLoginStatus(id: number) {
   const { data } = await apiClient.get<CodexLoginStatus>(`/admin/openai/accounts/${id}/codex-login`)
   return data
 }
-export async function saveCodexLogin(id: number, input: { enabled: boolean; login_email: string; password?: string; totp_secret?: string; clear_totp?: boolean; revision: number; preferred_workspace_id?: string }) {
+export async function saveCodexLogin(id: number, input: { enabled: boolean; login_email: string; password?: string; totp_secret?: string; clear_totp?: boolean; revision: number; preferred_workspace_id?: string; expires_at?: number }) {
   const { data } = await apiClient.put<CodexLoginStatus>(`/admin/openai/accounts/${id}/codex-login`, input)
   return data
 }
@@ -78,6 +80,7 @@ export function codexLoginError(code?: string): string {
     credentials_unavailable: '无法读取加密登录资料',
     config_changed: '登录资料已修改，旧任务已取消',
     account_changed: '账号状态已变更，请检查后重试',
+    account_expired: '已到期，不再自动重新授权',
     timeout: '本次授权超时',
     transport_error: '登录网络连接失败',
     browser_unavailable: '旧版浏览器授权失败，请重新发起授权',
@@ -95,6 +98,7 @@ export function codexLoginError(code?: string): string {
 }
 export function codexLoginTaskLabel(task?: CodexLoginTask | null): string {
   if (task?.status === 'succeeded') {
+    if (task.stage.endsWith('_free_plan')) return '已授权 · Free 套餐，已停止调度'
     const workspace = task.stage.startsWith('succeeded_personal_workspace_only') ? ' · 仅个人工作区'
       : task.stage.startsWith('succeeded_personal_workspace') ? ' · 个人工作区' : ''
     if (task.stage.endsWith('_astra_degraded')) return `已授权${workspace} · 降智，未恢复调度`

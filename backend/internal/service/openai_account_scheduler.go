@@ -978,6 +978,18 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 
 	weights := s.service.openAIWSSchedulerWeightsForRequest(ctx)
 	now := time.Now()
+	preferExpiry := true
+	if req.StickyWeighted {
+		for _, candidate := range candidates {
+			if (req.StickyAccountID > 0 && candidate.account.ID == req.StickyAccountID) ||
+				(req.PreviousResponseCanMove && req.StickyPreviousAccountID > 0 && candidate.account.ID == req.StickyPreviousAccountID) {
+				// Existing weighted sessions keep their original scores. Expiry
+				// preference must not be the reason to migrate a usable binding.
+				preferExpiry = false
+				break
+			}
+		}
+	}
 	upstreamCostFactors := map[int64]float64(nil)
 	if req.UseUpstreamTokenCost && weights.UpstreamCost > 0 {
 		accounts := make([]*Account, 0, len(candidates))
@@ -1059,6 +1071,14 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor +
 			weights.UpstreamCost*(upstreamCostFactor-openAIUpstreamCostNeutralFactor)
+		if preferExpiry && item.loadKnown {
+			if bonus := openAIAccountExpiryBonus(item.account, item.loadInfo, item.errorRate, now); bonus > 0 {
+				item.score += bonus
+				// A busy dated top-K must not make the request wait while another
+				// eligible account has an available concurrency slot.
+				plan.includeOverflowFallback = true
+			}
+		}
 		if req.StickyWeighted {
 			if req.PreviousResponseCanMove && req.StickyPreviousAccountID > 0 && item.account.ID == req.StickyPreviousAccountID {
 				item.score += weights.Previous
@@ -3109,8 +3129,9 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor +
 			weights.UpstreamCost*(upstreamCostFactor-openAIUpstreamCostNeutralFactor)
+		expiryBonus := openAIAccountExpiryBonus(candidate.account, loadMap[candidate.account.ID], 0, now)
 		score := OpenAIAccountSchedulerScoreSnapshot{
-			BaseScore:             baseScore,
+			BaseScore:             baseScore + expiryBonus,
 			StickyWeightedEnabled: stickyWeightedEnabled,
 			StickyScoreInfinity:   !stickyWeightedEnabled,
 		}

@@ -1444,6 +1444,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 		})
 		shuffleWithinSortGroups(available)
+		orderOpenAIExpiryCandidates(available, loadMap, OpenAIAccountScheduleRequest{
+			GroupID: groupID, SessionHash: sessionHash, RequestedModel: requestedModel,
+		}, time.Now())
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {
 				return rateOrder.compare(available[i].account, available[j].account) < 0

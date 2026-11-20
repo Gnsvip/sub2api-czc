@@ -91,6 +91,7 @@ func (r schedulerGroupAwareOpenAIAccountRepo) ListSchedulableUngroupedByPlatform
 }
 
 type schedulerTestConcurrencyCache struct {
+	acquireHook func(int64, int) (bool, error)
 	ConcurrencyCache
 	loadBatchErr    error
 	loadMap         map[int64]*AccountLoadInfo
@@ -102,6 +103,9 @@ type schedulerTestConcurrencyCache struct {
 }
 
 func (c schedulerTestConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	if c.acquireHook != nil {
+		return c.acquireHook(accountID, maxConcurrency)
+	}
 	if c.acquiredIDs != nil {
 		*c.acquiredIDs = append(*c.acquiredIDs, accountID)
 	}

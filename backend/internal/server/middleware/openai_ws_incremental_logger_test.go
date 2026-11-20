@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func incrementalAccessEvent(t *testing.T, values map[string]any) *logger.LogEvent {
@@ -131,4 +133,34 @@ func TestLoggerOpenAIWSIncrementalFieldsAbsentOnUnrelatedRequests(t *testing.T) 
 			t.Fatal("unrelated request gained incremental state")
 		}
 	}
+}
+
+func TestLoggerOpenAIAccountScheduleExplainsAllocation(t *testing.T) {
+	for _, sticky := range []bool{false, true} {
+		decision := service.OpenAIAccountScheduleDecision{Layer: "load_balance", SelectedAccountID: 12377,
+			StickySessionHit: sticky, ExpiryCandidateID: 12376, ExpiryReason: "soft_limit", ExpiryMode: "preferred",
+			ExpiryConcurrency: 13, ExpirySoftLimit: 40}
+		if sticky {
+			decision.Layer = "session_hash"
+			decision.ExpiryCandidateID = 0
+		}
+		event := incrementalAccessEvent(t, map[string]any{"openai_schedule_decision": decision, "session_hash": "DO_NOT_LOG_SESSION"})
+		expected := "new"
+		if sticky {
+			expected = "sticky"
+		}
+		require.Equal(t, expected, event.Fields["schedule_allocation"])
+		require.EqualValues(t, 12377, event.Fields["schedule_account_id"])
+		require.NotContains(t, event.Fields, "session_hash")
+		if sticky {
+			require.NotContains(t, event.Fields, "expiry_candidate_id")
+		} else {
+			require.EqualValues(t, 12376, event.Fields["expiry_candidate_id"])
+			require.Equal(t, "soft_limit", event.Fields["expiry_reason"])
+			require.EqualValues(t, 40, event.Fields["expiry_soft_limit"])
+			require.EqualValues(t, 13, event.Fields["expiry_snapshot_concurrency"], "snapshot load must not be presented as the atomic admission count")
+		}
+	}
+	event := incrementalAccessEvent(t, nil)
+	require.NotContains(t, event.Fields, "schedule_allocation", "unrelated requests must not imply a scheduling decision")
 }

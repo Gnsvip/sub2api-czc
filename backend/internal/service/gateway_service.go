@@ -690,6 +690,7 @@ type AccountWaitPlan struct {
 }
 
 type AccountSelectionResult struct {
+	expiryMode  string
 	Account     *Account
 	Acquired    bool
 	ReleaseFunc func()

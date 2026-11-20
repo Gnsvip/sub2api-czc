@@ -1359,6 +1359,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	for i := range accounts {
 		acc := &accounts[i]
 		if isExcluded(acc.ID) {
+			observeOpenAIExpiry(ctx, acc, "excluded", nil)
 			filterStats.exclude("excluded")
 			continue
 		}
@@ -1366,25 +1367,31 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
 		if reason := openAICompatibleAccountEligibilityFailureReason(ctx, acc, platform, requestedModel, false, requiredCapability); reason != "" {
+			observeOpenAIExpiry(ctx, acc, reason, nil)
 			filterStats.exclude(reason)
 			continue
 		}
 		if s.isExcelBPSCoolingDown(acc, requestedModel) {
+			observeOpenAIExpiry(ctx, acc, excelBPSRateLimitedFilterReason, nil)
 			filterStats.exclude(excelBPSRateLimitedFilterReason)
 			continue
 		}
 		if s.isExcelBPSModelCoolingDown(acc, requestedModel) {
+			observeOpenAIExpiry(ctx, acc, excelBPSModelPermissionFilterReason, nil)
 			filterStats.exclude(excelBPSModelPermissionFilterReason)
 			continue
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel, requireCompact) {
+			observeOpenAIExpiry(ctx, acc, "runtime_blocked", nil)
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel, requireCompact) {
+			observeOpenAIExpiry(ctx, acc, "channel_upstream_restricted", nil)
 			filterStats.exclude("channel_upstream_restricted")
 			continue
 		}
+		observeOpenAIExpiry(ctx, acc, "", nil)
 		baseCandidateCount++
 		candidates = append(candidates, acc)
 	}
@@ -1410,7 +1417,17 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		for _, acc := range candidates {
 			loadInfo := loadMap[acc.ID]
 			if loadInfo == nil {
+				observeOpenAIExpiry(ctx, acc, "load_unknown", nil)
 				loadInfo = &AccountLoadInfo{AccountID: acc.ID}
+			} else {
+				reason := ""
+				if loadInfo.WaitingCount > 0 {
+					reason = "waiting"
+				}
+				if loadInfo.LoadRate >= 100 {
+					reason = "load_limit"
+				}
+				observeOpenAIExpiry(ctx, acc, reason, loadInfo)
 			}
 			if loadInfo.LoadRate < 100 {
 				available = append(available, accountWithLoad{
@@ -1444,9 +1461,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 		})
 		shuffleWithinSortGroups(available)
-		orderOpenAIExpiryCandidates(available, loadMap, OpenAIAccountScheduleRequest{
-			GroupID: groupID, SessionHash: sessionHash, RequestedModel: requestedModel,
-		}, time.Now())
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {
 				return rateOrder.compare(available[i].account, available[j].account) < 0
@@ -1472,7 +1486,24 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			selectionOrder = append(selectionOrder, available...)
 		}
 
-		for _, item := range selectionOrder {
+		// Reorder only inside the existing compact and explicit cost tiers.
+		// Priority partitions are retained by the shared expiry order builder.
+		expiryOrder := make([]openAIAccountCandidateScore, 0, len(selectionOrder)*2)
+		for start := 0; start < len(selectionOrder); {
+			end := start + 1
+			for end < len(selectionOrder) &&
+				(!requireCompact || openAICompactSupportTier(selectionOrder[start].account) == openAICompactSupportTier(selectionOrder[end].account)) &&
+				rateOrder.compare(selectionOrder[start].account, selectionOrder[end].account) == 0 {
+				end++
+			}
+			pool := make([]openAIAccountCandidateScore, 0, end-start)
+			for _, item := range selectionOrder[start:end] {
+				pool = append(pool, openAIAccountCandidateScore{account: item.account, loadInfo: item.loadInfo, loadKnown: loadMap[item.account.ID] != nil})
+			}
+			expiryOrder = append(expiryOrder, buildOpenAIExpirySelectionOrder(pool, time.Now())...)
+			start = end
+		}
+		for _, item := range expiryOrder {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
 				continue
@@ -1484,7 +1515,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency, &fresh)
+			if item.expiryMode == "preferred" && (!openAIAccountExpirySoon(fresh, time.Now()) || fresh.ExpiresAt == nil || !fresh.ExpiresAt.Equal(*item.account.ExpiresAt)) {
+				observeOpenAIExpiry(ctx, item.account, "expiry_changed", item.loadInfo)
+				continue
+			}
+			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, openAIExpiryAcquireLimit(item, fresh), &fresh)
 			if err == nil && result != nil && result.Acquired {
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 				if selectErr != nil {
@@ -1493,8 +1528,18 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) {
 					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
+				selection.expiryMode = item.expiryMode
+				observeOpenAIExpiry(ctx, fresh, "selected", item.loadInfo)
 				return selection, true, nil
 			}
+			reason := "hard_limit"
+			if item.expiryMode == "preferred" {
+				reason = "soft_limit"
+			}
+			if err != nil {
+				reason = "admission_error"
+			}
+			observeOpenAIExpiry(ctx, item.account, reason, item.loadInfo)
 		}
 		return nil, true, nil
 	}

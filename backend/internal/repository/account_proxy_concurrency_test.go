@@ -208,3 +208,69 @@ func TestProxyPoolHTTPRequestsUseReservedExits(t *testing.T) {
 	require.False(t, full.Acquired)
 	require.Zero(t, account.SelectedProxyID)
 }
+
+// The expiry scheduler passes a smaller limit to these same Redis operations.
+// Existing sticky reservations and concurrent instances must share that limit.
+func TestProxyPoolExpirySoftAdmissionSharesHardReservations(t *testing.T) {
+	for _, multi := range []bool{false, true} {
+		t.Run(strconv.FormatBool(multi), func(t *testing.T) {
+			server := miniredis.RunT(t)
+			clients := []*redis.Client{redis.NewClient(&redis.Options{Addr: server.Addr()}), redis.NewClient(&redis.Options{Addr: server.Addr()})}
+			caches := make([]*concurrencyCache, 0, 2)
+			for _, client := range clients {
+				t.Cleanup(func() { _ = client.Close() })
+				caches = append(caches, NewConcurrencyCache(client, 15, 900).(*concurrencyCache))
+			}
+			acquire := func(instance, limit int, request string) (bool, error) {
+				if multi {
+					proxy, err := caches[instance].AcquireAccountProxyPoolSlot(context.Background(), 12376, []int64{11, 22}, limit, request)
+					return proxy > 0, err
+				}
+				return caches[instance].AcquireAccountSlot(context.Background(), 12376, limit, request)
+			}
+			softTotal := 40
+			if multi {
+				softTotal = 80
+			}
+			for i := 0; i < softTotal-1; i++ {
+				ok, err := acquire(i%2, 50, fmt.Sprintf("sticky-%d", i))
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			var wg sync.WaitGroup
+			successes := make(chan bool, 20)
+			errors := make(chan error, 20)
+			for i := 0; i < 20; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					ok, err := acquire(i%2, 40, fmt.Sprintf("new-%d", i))
+					successes <- ok
+					errors <- err
+				}(i)
+			}
+			wg.Wait()
+			close(successes)
+			close(errors)
+			count := 0
+			for ok := range successes {
+				if ok {
+					count++
+				}
+			}
+			for err := range errors {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, count, "all groups/instances share the same 80 percent soft reservation ceiling")
+			ok, err := acquire(0, 50, "sticky-continued")
+			require.NoError(t, err)
+			require.True(t, ok, "existing sessions still use the original hard ceiling")
+			ok, err = acquire(1, 40, "new-after-sticky")
+			require.NoError(t, err)
+			require.False(t, ok)
+			actual, err := caches[0].GetAccountConcurrency(context.Background(), 12376)
+			require.NoError(t, err)
+			require.Equal(t, softTotal+1, actual)
+		})
+	}
+}

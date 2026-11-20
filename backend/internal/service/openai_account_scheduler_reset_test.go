@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,76 +11,193 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenAIAccountExpiryPreferencePreservesLoadAndDistribution(t *testing.T) {
-	now := time.Now()
-	soon, later := now.Add(time.Hour), now.Add(30*24*time.Hour)
-	accounts := []*Account{
-		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ExpiresAt: &soon},
-		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ExpiresAt: &later},
-		{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+// Reproduces the production complaint: least-load/random weights can select a
+// later expiry even though the earliest account has ample concurrency headroom.
+func TestOpenAIAccountExpiryPrioritizesNewAssignments(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		t.Run(strconv.FormatBool(advanced), func(t *testing.T) {
+			soon, later := time.Now().Add(time.Hour), time.Now().Add(4*time.Hour)
+			groupID := int64(42)
+			accounts := []Account{
+				{ID: 12376, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{groupID}, ExpiresAt: &soon, Extra: astraHealthyTestExtra(nil)},
+				{ID: 12377, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{groupID}, ExpiresAt: &later, Extra: astraHealthyTestExtra(nil)},
+			}
+			cfg := openAIResetTestScheduler(0).service.cfg
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			cfg.Gateway.OpenAIWS.LBTopK = 1
+			svc := &OpenAIGatewayService{
+				accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg,
+				rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced), "false"),
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{
+					12376: {AccountID: 12376, CurrentConcurrency: 13, LoadRate: 26},
+					12377: {AccountID: 12377},
+				}}),
+			}
+			selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-6.2-sol", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			t.Cleanup(selection.ReleaseFunc)
+			require.True(t, selection.Acquired)
+			require.Equal(t, int64(12376), selection.Account.ID, "new allocation must prefer the earliest expiry below its soft cap")
+		})
 	}
-	loads := map[int64]*AccountLoadInfo{1: {AccountID: 1}, 2: {AccountID: 2}, 3: {AccountID: 3}}
-	sched := openAIResetTestScheduler(0)
-	plan := sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, accounts, loads)
-	scores := openAIPlanScores(plan)
-	require.Greater(t, scores[1], scores[2])
-	require.Greater(t, scores[2], scores[3])
-	counts := map[int64]int{}
-	for i := range 4000 {
-		order := buildOpenAIWeightedSelectionOrder(plan.candidates, OpenAIAccountScheduleRequest{SessionHash: strconv.Itoa(i)})
-		counts[order[0].account.ID]++
-	}
-	require.Greater(t, counts[1], counts[2])
-	require.Greater(t, counts[1], counts[3])
-	require.Less(t, counts[1], 2800, "expiry preference must not concentrate all new sessions on one account")
-	for _, load := range []*AccountLoadInfo{{LoadRate: 100}, {WaitingCount: 1}, nil} {
-		require.Zero(t, openAIAccountExpiryBonus(accounts[0], load, 0, now))
-	}
-	require.Greater(t, openAIAccountExpiryBonus(accounts[0], loads[1], 0, now), openAIAccountExpiryBonus(accounts[0], &AccountLoadInfo{LoadRate: 50}, 0, now))
-	require.Zero(t, openAIAccountExpiryBonus(accounts[0], loads[1], 1, now))
-	loads[1].LoadRate = 60
-	stressed := openAIPlanScores(sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, accounts, loads))
-	require.Less(t, stressed[1], stressed[3], "an idle undated account outranks a busy expiring account")
-	for id, snapshot := range buildOpenAIAccountSchedulerScoreSnapshot(accounts, loads, sched.service.openAIWSSchedulerWeights(), false, nil) {
-		require.InDelta(t, stressed[id], snapshot.BaseScore, 0.001, "admin score must include the same expiry preference")
-	}
-	sched.service.cfg.Gateway.OpenAIWS.LBTopK = 1
-	loads[1].LoadRate = 0
-	plan = sched.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, accounts, loads)
-	require.Len(t, plan.selectionOrder, 3, "a full preferred account must retain other eligible slot candidates")
 }
 
-func TestOpenAIAccountExpiryLegacyKeepsPriorityLoadAndUndatedOrder(t *testing.T) {
+func TestOpenAIAccountExpiryWindowAndUndatedOrder(t *testing.T) {
 	now := time.Now()
+	for _, tc := range []struct {
+		name   string
+		offset time.Duration
+		want   bool
+	}{
+		{"one hour", time.Hour, true}, {"24 hours inclusive", 24 * time.Hour, true},
+		{"more than 24 hours", 24*time.Hour + time.Second, false}, {"already expired", -time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expires := now.Add(tc.offset)
+			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ExpiresAt: &expires}
+			require.Equal(t, tc.want, openAIAccountExpirySoon(a, now))
+		})
+	}
 	soon := now.Add(time.Hour)
-	loads := map[int64]*AccountLoadInfo{1: {AccountID: 1}, 2: {AccountID: 2}, 3: {AccountID: 3, LoadRate: 10}}
-	makePool := func() []accountWithLoad {
-		return []accountWithLoad{
-			{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 1, ExpiresAt: &soon}, loadInfo: loads[1]},
-			{account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 1}, loadInfo: loads[2]},
-			{account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 1, ExpiresAt: &soon}, loadInfo: loads[3]},
+	pool := []openAIAccountCandidateScore{
+		{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 50, Priority: 2, ExpiresAt: &soon}, loadInfo: &AccountLoadInfo{}, loadKnown: true},
+		{account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 50, Priority: 1}, loadInfo: &AccountLoadInfo{}, loadKnown: true},
+	}
+	order := buildOpenAIExpirySelectionOrder(pool, now)
+	require.Equal(t, int64(2), order[0].account.ID, "expiry cannot cross an explicit higher priority")
+	for _, scenario := range []string{"undated", "unknown load", "queued", "unlimited", "api key"} {
+		t.Run(scenario, func(t *testing.T) {
+			a := *pool[0].account
+			candidate := pool[0]
+			candidate.account = &a
+			switch scenario {
+			case "undated":
+				a.ExpiresAt = nil
+			case "unknown load":
+				candidate.loadKnown = false
+			case "queued":
+				candidate.loadInfo = &AccountLoadInfo{WaitingCount: 1}
+			case "unlimited":
+				a.Concurrency = 0
+			case "api key":
+				a.Type = AccountTypeAPIKey
+			}
+			original := []openAIAccountCandidateScore{candidate, pool[1]}
+			require.Equal(t, original, buildOpenAIExpirySelectionOrder(original, now), "unmanaged pools retain the exact original order")
+		})
+	}
+	for _, limit := range []int{1, 2, 5, 50} {
+		a := &Account{Concurrency: limit}
+		require.Equal(t, max(1, limit*4/5), openAIExpirySoftLimit(a))
+		a.ProxyIDs = []int64{11, 22, 33}
+		require.Equal(t, max(1, limit*4/5)*3, openAIExpiryTotalSoftLimit(a))
+	}
+}
+
+func TestOpenAIAccountExpirySoftCapAndCrossGroupAdmission(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		for _, scenario := range []string{"parallel stale loads", "soft cap spill", "hard cap fallback", "sticky above soft cap", "stale high load"} {
+			t.Run(strconv.FormatBool(advanced)+"/"+scenario, func(t *testing.T) {
+				soon, later := time.Now().Add(time.Hour), time.Now().Add(4*time.Hour)
+				accounts := []Account{
+					{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{42, 84}, ExpiresAt: &soon, Extra: astraHealthyTestExtra(nil)},
+					{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{42, 84}, ExpiresAt: &later, Extra: astraHealthyTestExtra(nil)},
+				}
+				counts := map[int64]int{1: 13, 2: 0}
+				if scenario != "parallel stale loads" {
+					counts[1] = 40
+				}
+				if scenario == "hard cap fallback" {
+					counts[2] = 50
+				}
+				if scenario == "sticky above soft cap" {
+					counts[2] = 49
+				}
+				if scenario == "stale high load" {
+					counts[1] = 39
+				}
+				var mu sync.Mutex
+				cache := schedulerTestConcurrencyCache{
+					// Every request sees the same stale load; the reservation
+					// limit must enforce 40 atomically across both groups.
+					loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 13, LoadRate: 26}, 2: {AccountID: 2}},
+					acquireHook: func(id int64, limit int) (bool, error) {
+						mu.Lock()
+						defer mu.Unlock()
+						if counts[id] >= limit {
+							return false, nil
+						}
+						counts[id]++
+						return true, nil
+					},
+				}
+				if scenario == "stale high load" {
+					cache.loadMap[1] = &AccountLoadInfo{AccountID: 1, CurrentConcurrency: 40, LoadRate: 80}
+				}
+				cfg := openAIResetTestScheduler(0).service.cfg
+				cfg.Gateway.Scheduling.LoadBatchEnabled = true
+				cfg.Gateway.OpenAIWS.LBTopK = 1
+				svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg,
+					rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced), "false"),
+					concurrencyService: NewConcurrencyService(cache)}
+				session := ""
+				if scenario == "sticky above soft cap" {
+					session = "existing"
+					svc.cache = &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:existing": 2}}
+				}
+				n := 1
+				if scenario == "parallel stale loads" {
+					n = 40
+				}
+				selections := make([]*AccountSelectionResult, n)
+				decisions := make([]OpenAIAccountScheduleDecision, n)
+				errs := make([]error, n)
+				var wg sync.WaitGroup
+				for i := 0; i < n; i++ {
+					wg.Add(1)
+					go func(i int) {
+						defer wg.Done()
+						group := int64(42)
+						if i%2 != 0 {
+							group = 84
+						}
+						selections[i], decisions[i], errs[i] = svc.SelectAccountWithScheduler(context.Background(), &group, "", session, "gpt-6.2-sol", nil, OpenAIUpstreamTransportAny, false)
+					}(i)
+				}
+				wg.Wait()
+				for i, selection := range selections {
+					require.NoError(t, errs[i])
+					require.NotNil(t, selection)
+					require.True(t, selection.Acquired)
+					require.Nil(t, selection.WaitPlan)
+					selection.ReleaseFunc()
+				}
+				switch scenario {
+				case "parallel stale loads":
+					require.Equal(t, 40, counts[1], "new traffic fills the earliest expiry to 80 percent")
+					require.Equal(t, 13, counts[2], "excess new traffic immediately spills to the other account")
+				case "soft cap spill":
+					require.Equal(t, int64(2), selections[0].Account.ID)
+					require.Equal(t, int64(1), decisions[0].ExpiryCandidateID)
+					require.Equal(t, "soft_limit", decisions[0].ExpiryReason)
+				case "stale high load":
+					require.Equal(t, int64(1), selections[0].Account.ID, "atomic reservation, not a stale 80-percent snapshot, decides spillover")
+					require.Equal(t, "preferred", decisions[0].ExpiryMode)
+					require.Equal(t, 40, counts[1])
+				case "sticky above soft cap":
+					require.Equal(t, int64(2), selections[0].Account.ID)
+					require.True(t, decisions[0].StickySessionHit)
+					require.Empty(t, decisions[0].ExpiryMode)
+					require.Equal(t, 50, counts[2], "sticky continuation retains its original hard cap")
+				case "hard cap fallback":
+					require.Equal(t, int64(1), selections[0].Account.ID)
+					require.Equal(t, "overflow", decisions[0].ExpiryMode)
+					require.Equal(t, 41, counts[1], "soft cap must not waste remaining hard capacity when alternatives are full")
+				}
+				require.Equal(t, 50, accounts[0].Concurrency, "admission must not mutate the shared hard limit")
+			})
 		}
-	}
-	count := map[int64]int{}
-	for i := range 2000 {
-		pool := makePool()
-		orderOpenAIExpiryCandidates(pool, loads, OpenAIAccountScheduleRequest{SessionHash: strconv.Itoa(i)}, now)
-		count[pool[0].account.ID]++
-		require.Equal(t, int64(3), pool[2].account.ID, "date must not override the existing least-load order")
-	}
-	require.Greater(t, count[1], count[2])
-	require.Greater(t, count[2], 500, "undated accounts must still receive traffic")
-	pool := makePool()
-	pool[0].account.ExpiresAt = nil
-	pool[2].account.ExpiresAt = nil
-	before := append([]accountWithLoad(nil), pool...)
-	orderOpenAIExpiryCandidates(pool, loads, OpenAIAccountScheduleRequest{SessionHash: "unchanged"}, now)
-	require.Equal(t, before, pool)
-	pool = makePool()
-	pool[0].account.Priority = 0
-	for i := range 30 {
-		orderOpenAIExpiryCandidates(pool, loads, OpenAIAccountScheduleRequest{SessionHash: strconv.Itoa(i)}, now)
-		require.Equal(t, int64(1), pool[0].account.ID)
 	}
 }
 

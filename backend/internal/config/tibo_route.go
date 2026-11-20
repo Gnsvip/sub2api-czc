@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// DefaultOpenAITiboProbeInterval is the regular Astra cadence when unset.
+const DefaultOpenAITiboProbeInterval = 5 * time.Minute
+
 // OpenAITiboRouteConfig tunes Tibo HTTP probing, vote-confirmed verdict
 // flips and scheduler tiering. Zero durations/counts fall back to the
 // built-in defaults; see OpenAIGatewayService.openAITiboRouteConfig.
@@ -12,7 +15,7 @@ type OpenAITiboRouteConfig struct {
 	// Enabled turns on Tibo route probing and tiered routing. The admin
 	// account list shows the astra health dots only while it is on, so the
 	// shipped default is true. Set false to stop the synthetic /responses
-	// probes (fixed prompt, ~every 10 min per account) the official Codex CLI
+	// probes (fixed prompt, 5 min ± 1 min by default) the official Codex CLI
 	// never sends; the dots then disappear. nil (struct built without viper,
 	// e.g. unit fixtures) is also enabled.
 	Enabled *bool `mapstructure:"enabled"`

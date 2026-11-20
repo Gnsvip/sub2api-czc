@@ -68,7 +68,7 @@ const props = withDefaults(defineProps<{
   probeEnabled: undefined,
   probeSaving: false,
   probeRunning: false,
-  probeIntervalMinutes: 10,
+  probeIntervalMinutes: 5,
 })
 
 const emit = defineEmits<{ 'toggle-probe': []; 'run-probe': []; 'set-interval': [minutes: number] }>()

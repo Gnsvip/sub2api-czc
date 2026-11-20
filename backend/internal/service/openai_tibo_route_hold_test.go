@@ -163,27 +163,41 @@ func TestTiboEnrollmentDropsUnlistedAccounts(t *testing.T) {
 }
 
 func TestTiboClientErrorBackoff(t *testing.T) {
-	cfg := tiboTestSettings()
-	now := time.Now()
-	var r openAITiboRouteState
-	step := func(status int) time.Duration {
-		r.observe(openAITiboProbeSample{verdict: openAITiboUnknown, status: status}, now, cfg)
-		r.scheduleNext(openAITiboRouteHTTP, now, cfg)
-		return r.nextProbeAt.Sub(now)
-	}
-	for i, want := range []time.Duration{10, 20, 40, 80, 120, 120} {
-		require.Equal(t, want*time.Minute, step(http.StatusBadRequest), "rejection %d", i+1)
-	}
-	require.Equal(t, 6, r.clientErrorStreak)
-	require.Equal(t, cfg.interval, step(http.StatusTooManyRequests), "429 is transient: back to cadence")
-	require.Equal(t, cfg.interval, step(http.StatusForbidden))
-	require.Equal(t, 2*cfg.interval, step(http.StatusForbidden))
-	require.Equal(t, cfg.interval, step(0), "network errors are transient")
+	for _, tc := range []struct {
+		name     string
+		interval time.Duration
+		minutes  []time.Duration
+	}{
+		{name: "default", minutes: []time.Duration{5, 10, 20, 40, 80, 120, 120}},
+		{name: "custom ten minutes", interval: 10 * time.Minute, minutes: []time.Duration{10, 20, 40, 80, 120, 120}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tiboTestSettings()
+			if tc.interval > 0 {
+				cfg.interval = tc.interval
+			}
+			now := time.Now()
+			var r openAITiboRouteState
+			step := func(status int) time.Duration {
+				r.observe(openAITiboProbeSample{verdict: openAITiboUnknown, status: status}, now, cfg)
+				r.scheduleNext(openAITiboRouteHTTP, now, cfg)
+				return r.nextProbeAt.Sub(now)
+			}
+			for i, want := range tc.minutes {
+				require.Equal(t, want*time.Minute, step(http.StatusBadRequest), "rejection %d", i+1)
+			}
+			require.Equal(t, len(tc.minutes), r.clientErrorStreak)
+			require.Equal(t, cfg.interval, step(http.StatusTooManyRequests), "429 is transient: back to cadence")
+			require.Equal(t, cfg.interval, step(http.StatusForbidden))
+			require.Equal(t, 2*cfg.interval, step(http.StatusForbidden))
+			require.Equal(t, cfg.interval, step(0), "network errors are transient")
 
-	r.observe(tiboSample(openAITiboHealthy), now, cfg)
-	r.scheduleNext(openAITiboRouteHTTP, now, cfg)
-	require.Zero(t, r.clientErrorStreak)
-	require.Equal(t, cfg.interval, r.nextProbeAt.Sub(now))
+			r.observe(tiboSample(openAITiboHealthy), now, cfg)
+			r.scheduleNext(openAITiboRouteHTTP, now, cfg)
+			require.Zero(t, r.clientErrorStreak)
+			require.Equal(t, cfg.interval, r.nextProbeAt.Sub(now))
+		})
+	}
 }
 
 func TestTiboProbeRetryAfterIsCapped(t *testing.T) {

@@ -243,6 +243,7 @@ describe('AccountUsageCell', () => {
     const updated = { ...account, extra: { ...account.extra, openai_astra_probe_interval_minutes: 30 } }
     setAstraProbeInterval.mockResolvedValue(updated)
     await wrapper.get('[data-testid="astra-probe-interval"]').trigger('click')
+    expect((wrapper.get('[data-testid="astra-probe-interval-input"]').element as HTMLInputElement).value).toBe('5')
     await wrapper.get('[data-testid="astra-probe-interval-input"]').setValue(30)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -250,6 +251,7 @@ describe('AccountUsageCell', () => {
     expect(setAstraProbeEnabled).not.toHaveBeenCalled()
     expect(wrapper.emitted('account-updated')?.[0]).toEqual([updated])
     await wrapper.setProps({ account: updated })
+    expect((wrapper.get('[data-testid="astra-probe-interval-input"]').element as HTMLInputElement).value).toBe('30')
     const at = '2026-11-13T01:02:03Z'
     const result: Account = { ...updated, codex_turn_tickets: [{ model: 'gpt-6-astra', tibo_routes: [{ route: 'http', verdict: 'healthy', probes_hour: 1, flips_hour: 0, last_sample_at: at, recent_samples: [{ verdict: 'healthy', at }] }] }] }
     runAstraProbe.mockResolvedValue(result)

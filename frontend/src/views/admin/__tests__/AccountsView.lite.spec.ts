@@ -312,6 +312,38 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('refreshes a recovery switch even when the account timestamp and health are unchanged', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, codex_auto_recovery_enabled: true }], total: 1, page: 1, page_size: 20, pages: 1 })
+    listWithEtag.mockResolvedValue({ notModified: false, etag: 'recovery-off', data: { items: [{ ...listRow, codex_auto_recovery_enabled: false }], total: 1, page: 1, page_size: 20, pages: 1 } })
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(wrapper.getComponent(DataTableStub).props('data')).toEqual([expect.objectContaining({ codex_auto_recovery_enabled: false })])
+    wrapper.unmount()
+  })
+
+  it('updates the saved recovery badge without replacing the open editor', async () => {
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, codex_auto_recovery_enabled: true }], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
+    await editButton!.trigger('click')
+    await flushPromises()
+    const editor = wrapper.getComponent(EditAccountModalStub)
+    const editingAccount = editor.props('account')
+    editor.vm.$emit('codex-auto-recovery-updated', 42, false)
+    await flushPromises()
+    expect(wrapper.getComponent(DataTableStub).props('data')).toEqual([expect.objectContaining({ codex_auto_recovery_enabled: false })])
+    expect(editor.props('account')).toBe(editingAccount)
+    expect(editor.props('show')).toBe(true)
+    expect(getById).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('loads the full account by id before opening edit, test, and stats actions', async () => {
     const wrapper = mountView()
     await flushPromises()

@@ -12,6 +12,22 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+func TestAccountListItemPreservesCodexRecoverySwitch(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		account := &Account{ID: 42, CodexAutoRecoveryEnabled: &enabled}
+		for _, value := range []any{account, AccountListItemFromAccount(account)} {
+			raw, err := json.Marshal(value)
+			require.NoError(t, err)
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			require.Equal(t, enabled, fields["codex_auto_recovery_enabled"], "false must not be omitted by the compact list")
+		}
+	}
+	raw, err := json.Marshal(AccountListItemFromAccount(&Account{ID: 42}))
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "codex_auto_recovery_enabled", "unknown must not become disabled")
+}
+
 func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	src := &service.Account{
 		ID:       42,

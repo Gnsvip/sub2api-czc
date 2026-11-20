@@ -1384,6 +1384,7 @@ export interface Account {
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
   codex_turn_tickets?: CodexTurnTicketStatus[]
+  codex_auto_recovery_enabled?: boolean
   openai_oauth_model_policy?: {
     verdict: 'healthy' | 'degraded' | 'unknown'
     scope: 'non_luna' | 'luna_and_images'

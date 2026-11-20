@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 var _ service.CodexLoginRepository = (*openAIExcelOAuthRepository)(nil)
@@ -28,6 +29,32 @@ const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',
 // Explicit manual authorization remains possible after the business deadline.
 // Old tasks without the marker are conservatively subject to the same deadline.
 const codexLoginTaskWithinExpirySQL = `(t.expected_account_state->'manual_authorization'='true'::jsonb OR a.expires_at IS NULL OR a.expires_at>NOW())`
+
+func (r *openAIExcelOAuthRepository) GetCodexAutoRecoveryStates(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	states := make(map[int64]bool)
+	if len(ids) == 0 {
+		return states, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,COALESCE(c.enabled,FALSE)
+ FROM accounts a LEFT JOIN openai_codex_login_configs c ON c.account_id=a.id
+ WHERE a.id=ANY($1) AND `+codexLoginAccountSQL, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var enabled bool
+		if err := rows.Scan(&id, &enabled); err != nil {
+			return nil, err
+		}
+		states[id] = enabled
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
 
 func (r *openAIExcelOAuthRepository) GetCodexLoginConfig(ctx context.Context, id int64) (*service.ExcelLoginConfig, error) {
 	c := &service.ExcelLoginConfig{AccountID: id}

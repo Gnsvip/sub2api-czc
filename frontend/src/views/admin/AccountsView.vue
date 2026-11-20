@@ -457,7 +457,7 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <CreateAccountModal v-if="mountedModals.showCreate" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal v-if="mountedModals.showEdit" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <EditAccountModal v-if="mountedModals.showEdit" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-auto-recovery-updated="handleCodexAutoRecoveryUpdated" />
     <ReAuthAccountModal v-if="mountedModals.showReAuth" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal v-if="mountedModals.showTest" :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal v-if="mountedModals.showStats" :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -1428,6 +1428,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
+    current.codex_auto_recovery_enabled !== next.codex_auto_recovery_enabled ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
@@ -2284,6 +2285,13 @@ const handleProbeUpstreamBilling = async (account: Account) => {
   } finally {
     probingUpstreamBilling.delete(account.id)
   }
+}
+const handleCodexAutoRecoveryUpdated = (accountID: number, enabled: boolean) => {
+  // Update the badge without replacing the open editor's unsaved form.
+  accounts.value = accounts.value.map(account => account.id === accountID
+    ? { ...account, codex_auto_recovery_enabled: enabled }
+    : account)
+  enterAutoRefreshSilentWindow()
 }
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)

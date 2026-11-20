@@ -216,6 +216,8 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	CodexAutoRecoveryEnabled *bool `json:"codex_auto_recovery_enabled,omitempty"`
+
 	OpenAIOAuthModelPolicy *service.OpenAIOAuthModelPolicy `json:"openai_oauth_model_policy,omitempty"`
 	ID                     int64                           `json:"id"`
 	Name                   string                          `json:"name"`
@@ -337,6 +339,8 @@ type Account struct {
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
 type AccountListItem struct {
+	CodexAutoRecoveryEnabled *bool `json:"codex_auto_recovery_enabled,omitempty"`
+
 	OpenAIOAuthModelPolicy *service.OpenAIOAuthModelPolicy `json:"openai_oauth_model_policy,omitempty"`
 	ID                     int64                           `json:"id"`
 	Name                   string                          `json:"name"`

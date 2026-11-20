@@ -102,6 +102,7 @@ func CodexLoginIsReauthorization(credentials map[string]any, message string) boo
 
 type CodexLoginRepository interface {
 	GetCodexLoginConfig(context.Context, int64) (*ExcelLoginConfig, error)
+	GetCodexAutoRecoveryStates(context.Context, []int64) (map[int64]bool, error)
 	SaveCodexLoginConfig(context.Context, *ExcelLoginConfig, int64, *int64) (bool, error)
 	GetCodexLoginTask(context.Context, int64) (*ExcelLoginTask, error)
 	GetLoginTaskByID(context.Context, int64) (*ExcelLoginTask, error)
@@ -190,6 +191,31 @@ func (s *OpenAIOAuthService) codexLoginRepo() (CodexLoginRepository, error) {
 }
 
 func (s *OpenAIOAuthService) CodexLoginReady() error { _, err := s.codexLoginRepo(); return err }
+
+// CodexAutoRecoveryStates reads saved switches for the admin list without
+// loading or decrypting login credentials. Missing configs are disabled;
+// unsupported accounts and unavailable repositories have no display value.
+func (s *OpenAIOAuthService) CodexAutoRecoveryStates(ctx context.Context, accounts []Account) (map[int64]bool, error) {
+	if s == nil || s.excelGrants == nil {
+		return nil, nil
+	}
+	r, ok := s.excelGrants.repo.(CodexLoginRepository)
+	if !ok {
+		return nil, nil
+	}
+	ids := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		a := &accounts[i]
+		if a.IsOpenAIOAuth() && !a.IsExcelOAuth() && !a.IsOpenAIPersonalAccessToken() && !a.IsOpenAIAgentIdentity() && (a.GetCredential("client_id") == "" || a.GetCredential("client_id") == openai.ClientID) {
+			ids = append(ids, a.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return r.GetCodexAutoRecoveryStates(ctx, ids)
+}
+
 func (s *OpenAIOAuthService) FindCodexLoginAccount(ctx context.Context, email string) (int64, error) {
 	r, err := s.codexLoginRepo()
 	if err != nil {

@@ -2709,11 +2709,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
 	viper.SetDefault("gateway.openai_codex_ticket.mode", "turn_state")
 	viper.SetDefault("gateway.openai_codex_ticket.cookie_ws_account_ids", []int64{})
-	// Tibo HTTP probing (openai_tibo_route.go): ~10m ± up to 5m per account.
+	// Tibo HTTP probing (openai_tibo_route.go): 5m ± 1m regular cadence by default.
 	// Default on: the admin astra health dots come from these probes.
 	viper.SetDefault("gateway.openai_tibo_route.enabled", true)
-	viper.SetDefault("gateway.openai_tibo_route.interval", 10*time.Minute)
-	viper.SetDefault("gateway.openai_tibo_route.spread", 5*time.Minute)
+	viper.SetDefault("gateway.openai_tibo_route.interval", DefaultOpenAITiboProbeInterval)
+	viper.SetDefault("gateway.openai_tibo_route.spread", time.Minute)
 	viper.SetDefault("gateway.openai_tibo_route.healthy_interval", 10*time.Minute)
 	viper.SetDefault("gateway.openai_tibo_route.degraded_interval", 5*time.Minute)
 	viper.SetDefault("gateway.openai_tibo_route.unknown_backoff", []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute})

@@ -141,6 +141,14 @@ func TestTiboScheduleCadenceBackoffAndRetryAfter(t *testing.T) {
 
 func TestTiboCadenceSpreadBounds(t *testing.T) {
 	cfg := tiboTestSettings()
+	require.Equal(t, 5*time.Minute, openAITiboCadenceDelay(cfg))
+	require.Equal(t, 5*time.Minute, openAITiboCadenceDelay(openAITiboSettings{}))
+	cfg.spread = time.Minute
+	for i := 0; i < 400; i++ {
+		got := openAITiboCadenceDelay(cfg)
+		require.GreaterOrEqual(t, got, 4*time.Minute)
+		require.LessOrEqual(t, got, 6*time.Minute)
+	}
 	cfg.interval = 10 * time.Minute
 	cfg.spread = 5 * time.Minute
 	for i := 0; i < 400; i++ {

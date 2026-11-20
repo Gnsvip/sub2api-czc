@@ -97,6 +97,11 @@ type OpenAIAccountScheduleRequest struct {
 }
 
 type OpenAIAccountScheduleDecision struct {
+	ExpiryMode          string
+	ExpiryCandidateID   int64
+	ExpiryReason        string
+	ExpiryConcurrency   int
+	ExpirySoftLimit     int
 	Layer               string
 	StickyPreviousHit   bool
 	StickySessionHit    bool
@@ -141,6 +146,7 @@ type openAIAccountSchedulerMetrics struct {
 }
 
 type openAIAccountLoadPlan struct {
+	preferExpiry              bool
 	allCandidates             []openAIAccountCandidateScore
 	candidates                []openAIAccountCandidateScore
 	staleSnapshotCompactRetry []openAIAccountCandidateScore
@@ -686,14 +692,15 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	account   *Account
-	loadInfo  *AccountLoadInfo
-	loadKnown bool
-	score     float64
-	priority  int
-	errorRate float64
-	ttft      float64
-	hasTTFT   bool
+	expiryMode string
+	account    *Account
+	loadInfo   *AccountLoadInfo
+	loadKnown  bool
+	score      float64
+	priority   int
+	errorRate  float64
+	ttft       float64
+	hasTTFT    bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -901,6 +908,13 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			loadInfo = &AccountLoadInfo{AccountID: account.ID}
 			loadKnown = false
 		}
+		reason := ""
+		if !loadKnown {
+			reason = "load_unknown"
+		} else if loadInfo.WaitingCount > 0 {
+			reason = "waiting"
+		}
+		observeOpenAIExpiry(ctx, account, reason, loadInfo)
 		errorRate, ttft, hasTTFT := 0.0, 0.0, false
 		if s.stats != nil {
 			errorRate, ttft, hasTTFT = s.stats.snapshot(account.ID)
@@ -978,7 +992,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 
 	weights := s.service.openAIWSSchedulerWeightsForRequest(ctx)
 	now := time.Now()
-	preferExpiry := true
+	preferExpiry := !(req.UseUpstreamTokenCost && weights.UpstreamCost > 0)
 	if req.StickyWeighted {
 		for _, candidate := range candidates {
 			if (req.StickyAccountID > 0 && candidate.account.ID == req.StickyAccountID) ||
@@ -1071,13 +1085,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor +
 			weights.UpstreamCost*(upstreamCostFactor-openAIUpstreamCostNeutralFactor)
-		if preferExpiry && item.loadKnown {
-			if bonus := openAIAccountExpiryBonus(item.account, item.loadInfo, item.errorRate, now); bonus > 0 {
-				item.score += bonus
-				// A busy dated top-K must not make the request wait while another
-				// eligible account has an available concurrency slot.
-				plan.includeOverflowFallback = true
-			}
+		if preferExpiry && openAIExpiryManaged(*item, now) {
+			// The earliest expiry may be outside score top-K. Preserve all
+			// alternatives so a soft-cap miss never introduces an extra wait.
+			plan.includeOverflowFallback = true
 		}
 		if req.StickyWeighted {
 			if req.PreviousResponseCanMove && req.StickyPreviousAccountID > 0 && item.account.ID == req.StickyPreviousAccountID {
@@ -1089,6 +1100,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 		}
 	}
 	plan.candidates = candidates
+	plan.preferExpiry = preferExpiry
 
 	plan.topK = s.service.openAIWSLBTopKForRequest(ctx)
 	if plan.topK > len(candidates) {
@@ -1136,8 +1148,14 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		if len(primary) == 0 {
 			primary = buildOpenAIWeightedSelectionOrder(ranked, req)
 		}
+		finish := func(order []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+			if plan.preferExpiry {
+				return buildOpenAIExpirySelectionOrder(order, time.Now())
+			}
+			return order
+		}
 		if !plan.includeOverflowFallback || groupTopK >= len(pool) {
-			return primary
+			return finish(primary)
 		}
 
 		selected := make(map[int64]struct{}, len(primary))
@@ -1153,7 +1171,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		sort.Slice(overflow, func(i, j int) bool {
 			return isOpenAIAccountCandidateBetter(overflow[i], overflow[j])
 		})
-		return append(primary, overflow...)
+		return finish(append(primary, overflow...))
 	}
 
 	// Tibo route tiers soft-order candidates (healthy > unknown > degraded)
@@ -1321,22 +1339,35 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		}
 		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
 			candidate.loadInfo.CurrentConcurrency >= candidate.account.TotalConcurrency() {
+			observeOpenAIExpiry(ctx, candidate.account, "hard_limit", candidate.loadInfo)
 			continue
 		}
 
-		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, candidate.account.Concurrency, budget, candidate.account)
+		if candidate.expiryMode == "preferred" && candidate.loadInfo.CurrentConcurrency >= openAIExpiryTotalSoftLimit(candidate.account) {
+			observeOpenAIExpiry(ctx, candidate.account, "soft_limit", candidate.loadInfo)
+			continue
+		}
+		limit := openAIExpiryAcquireLimit(candidate, candidate.account)
+		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, limit, budget, candidate.account)
 		if !attempted {
 			break
 		}
 		if acquireErr != nil {
+			observeOpenAIExpiry(ctx, candidate.account, "admission_error", candidate.loadInfo)
 			return nil, compactBlocked, acquireErr
 		}
 		if result == nil || !result.Acquired {
+			reason := "hard_limit"
+			if candidate.expiryMode == "preferred" {
+				reason = "soft_limit"
+			}
+			observeOpenAIExpiry(ctx, candidate.account, reason, candidate.loadInfo)
 			continue
 		}
 
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport, req.RequestedModel) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			observeOpenAIExpiry(ctx, candidate.account, "eligibility_changed", candidate.loadInfo)
 			release(result)
 			continue
 		}
@@ -1350,14 +1381,20 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+			observeOpenAIExpiry(ctx, candidate.account, "compact_unsupported", candidate.loadInfo)
 			compactBlocked = true
 			release(result)
 			continue
 		}
 
+		if candidate.expiryMode == "preferred" && (!openAIAccountExpirySoon(fresh, time.Now()) || fresh.ExpiresAt == nil || !fresh.ExpiresAt.Equal(*candidate.account.ExpiresAt)) {
+			observeOpenAIExpiry(ctx, candidate.account, "expiry_changed", candidate.loadInfo)
+			release(result)
+			continue
+		}
 		if fresh.Concurrency != candidate.account.Concurrency || !slices.Equal(fresh.ProxyIDs, candidate.account.ProxyIDs) {
 			release(result)
-			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, fresh.Concurrency, budget, fresh)
+			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, openAIExpiryAcquireLimit(candidate, fresh), budget, fresh)
 			if !attempted {
 				continue
 			}
@@ -1376,7 +1413,9 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
 			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
+		observeOpenAIExpiry(ctx, fresh, "selected", candidate.loadInfo)
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+			expiryMode:  candidate.expiryMode,
 			Account:     fresh,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
@@ -1587,27 +1626,33 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		account := &accounts[i]
 		if req.ExcludedIDs != nil {
 			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+				observeOpenAIExpiry(ctx, account, "excluded", nil)
 				filterStats.exclude("excluded")
 				continue
 			}
 		}
 		if !account.IsSchedulable() {
+			observeOpenAIExpiry(ctx, account, "not_schedulable", nil)
 			filterStats.exclude("not_schedulable")
 			continue
 		}
 		if account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() {
+			observeOpenAIExpiry(ctx, account, "platform_mismatch", nil)
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
 		if s.service.isExcelBPSCoolingDown(account, req.RequestedModel) {
+			observeOpenAIExpiry(ctx, account, excelBPSRateLimitedFilterReason, nil)
 			filterStats.exclude(excelBPSRateLimitedFilterReason)
 			continue
 		}
 		if s.service.isExcelBPSModelCoolingDown(account, req.RequestedModel) {
+			observeOpenAIExpiry(ctx, account, excelBPSModelPermissionFilterReason, nil)
 			filterStats.exclude(excelBPSModelPermissionFilterReason)
 			continue
 		}
 		if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+			observeOpenAIExpiry(ctx, account, "runtime_blocked", nil)
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
@@ -1616,17 +1661,21 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		// upstream privacy setting has not been confirmed.
 		// Select already resolved the group requirement into req.
 		if req.RequirePrivacySet && !account.IsPrivacySet() {
+			observeOpenAIExpiry(ctx, account, "privacy_not_set", nil)
 			filterStats.exclude("privacy_not_set")
 			continue
 		}
 		if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
+			observeOpenAIExpiry(ctx, account, reason, nil)
 			filterStats.exclude(reason)
 			continue
 		}
 		if !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) {
+			observeOpenAIExpiry(ctx, account, "transport_incompatible", nil)
 			filterStats.exclude("transport_incompatible")
 			continue
 		}
+		observeOpenAIExpiry(ctx, account, "", nil)
 		filtered = append(filtered, account)
 		loadReq = append(loadReq, AccountWithConcurrency{
 			ID:             account.ID,
@@ -2553,7 +2602,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (result *AccountSelectionResult, decision OpenAIAccountScheduleDecision, resultErr error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本
@@ -2566,7 +2615,15 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	decision := OpenAIAccountScheduleDecision{}
+	trace := &openAIExpiryTrace{}
+	ctx = context.WithValue(ctx, openAIExpiryTraceKey{}, trace)
+	defer func() {
+		decision.ExpiryCandidateID, decision.ExpiryReason = trace.accountID, trace.reason
+		decision.ExpiryConcurrency, decision.ExpirySoftLimit = trace.load, trace.softLimit
+		if result != nil {
+			decision.ExpiryMode = result.expiryMode
+		}
+	}()
 	preserveStickyBinding := preserveOpenAIGuardianParentBinding(ctx, sessionHash) || openAIImageSizeSpilloverPass(ctx)
 	guardianParentAccountID := int64(0)
 	if strings.TrimSpace(previousResponseID) == "" {
@@ -3129,9 +3186,8 @@ func buildOpenAIAccountSchedulerScoreSnapshot(
 			weights.Reset*resetFactor +
 			weights.QuotaHeadroom*quotaHeadroomFactor +
 			weights.UpstreamCost*(upstreamCostFactor-openAIUpstreamCostNeutralFactor)
-		expiryBonus := openAIAccountExpiryBonus(candidate.account, loadMap[candidate.account.ID], 0, now)
 		score := OpenAIAccountSchedulerScoreSnapshot{
-			BaseScore:             baseScore + expiryBonus,
+			BaseScore:             baseScore,
 			StickyWeightedEnabled: stickyWeightedEnabled,
 			StickyScoreInfinity:   !stickyWeightedEnabled,
 		}

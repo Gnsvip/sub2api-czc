@@ -99,7 +99,7 @@ jobs:
       - name: Account expiry and existing scheduling protections
         working-directory: backend
         run: |
-          go test -race -tags=unit ./internal/service -run '^(TestOpenAIAccountExpiry|TestOpenAISelectAccountWithLoadAwareness_|TestOpenAIGatewayService_SelectAccountWithScheduler_|TestBuildOpenAIAccountLoadPlan_|TestOpenAI429|TestOpenAIModelTempUnschedulable|TestOpenAIModelNotFound|TestHandleUpstreamError_OpenAI429|TestCalculateOpenAI429ResetTime)' -count=1 -json > "$RUNNER_TEMP/bps-expiry-tests.jsonl"
+          go test -race -tags=unit ./internal/service ./internal/server/middleware -run '^(TestLoggerOpenAIAccountSchedule|TestOpenAIAccountExpiry|TestOpenAISelectAccountWithLoadAwareness_|TestOpenAIGatewayService_SelectAccountWithScheduler_|TestBuildOpenAIAccountLoadPlan_|TestOpenAI429|TestOpenAIModelTempUnschedulable|TestOpenAIModelNotFound|TestHandleUpstreamError_OpenAI429|TestCalculateOpenAI429ResetTime)' -count=1 -json > "$RUNNER_TEMP/bps-expiry-tests.jsonl"
       - name: Admin API key state and authentication regressions
         working-directory: backend
         run: |

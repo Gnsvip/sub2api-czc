@@ -235,7 +235,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		account := selection.Account
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		_ = scheduleDecision
+		c.Set("openai_schedule_decision", scheduleDecision)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		slowTiming.MarkAccountWait()

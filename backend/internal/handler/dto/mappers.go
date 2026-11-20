@@ -501,6 +501,8 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		QuotaNotifyDailyThreshold: a.QuotaNotifyDailyThreshold, QuotaNotifyWeeklyEnabled: a.QuotaNotifyWeeklyEnabled,
 		QuotaNotifyWeeklyThreshold: a.QuotaNotifyWeeklyThreshold, QuotaNotifyTotalEnabled: a.QuotaNotifyTotalEnabled,
 		QuotaNotifyTotalThreshold: a.QuotaNotifyTotalThreshold, Proxy: a.Proxy, GroupIDs: a.GroupIDs,
+
+		CodexAutoRecoveryEnabled: a.CodexAutoRecoveryEnabled,
 	}
 }
 

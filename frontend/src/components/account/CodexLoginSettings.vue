@@ -30,7 +30,7 @@ import CodexAccountExpiryField from './CodexAccountExpiryField.vue'
 import { getCodexLoginStatus, saveCodexLogin, runCodexLogin, codexLoginError, codexLoginTaskLabel, type CodexLoginStatus } from '@/api/admin/codexLogin'
 const props = defineProps<{ accountId: number }>()
 const appStore = useAppStore()
-const emit = defineEmits<{ authorized: []; 'expiry-saved': [value: number | null] }>()
+const emit = defineEmits<{ authorized: []; saved: [enabled: boolean]; 'expiry-saved': [value: number | null] }>()
 const opened = ref(false)
 const loading = ref(false)
 const enabled = ref(false)
@@ -86,6 +86,7 @@ async function save(run: boolean) {
     state.value = saved; password.value = ''; totp.value = ''; clearTOTP.value = false
     expiresAt.value = saved.expires_at ?? null; expiryEdited.value = false
     if (savingExpiry) emit('expiry-saved', expiresAt.value)
+    emit('saved', saved.config.enabled)
     if (run) {
       const task = await runCodexLogin(accountId)
       if (current !== generation || !opened.value) return

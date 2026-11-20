@@ -231,6 +231,9 @@ export default {
       accountSchedulingThresholdOverrideDisabledHint:
         'Use 1-100. The account becomes temporarily unschedulable after reaching this usage percent; 100 disables it for this account.',
       status: {
+        codexAutoRecoveryEnabled: 'Auto recovery: On',
+        codexAutoRecoveryDisabled: 'Auto recovery: Off',
+        codexAutoRecoveryHint: 'Automatic recovery after authorization loss. Change it under Codex automatic authorization in the account editor.',
         codexReauthorizationCount: 'Reauthorized {count} times',
         codexReauthorizationCountHint: 'Successful Codex reauthorizations since this update; initial authorization and failed attempts are excluded.',
         active: 'Active',

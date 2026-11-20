@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center gap-2" :class="{ 'flex-wrap': codexReauthorizationCount > 0 }">
+  <div class="flex items-center gap-2" :class="{ 'flex-wrap': codexReauthorizationCount > 0 || showCodexAutoRecovery }">
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
@@ -156,6 +156,15 @@
       </div>
     </div>
     <span
+      v-if="showCodexAutoRecovery"
+      class="basis-full whitespace-nowrap text-[11px] leading-4"
+      :class="account.codex_auto_recovery_enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'"
+      :title="t('admin.accounts.status.codexAutoRecoveryHint')"
+      data-testid="codex-auto-recovery-status"
+    >
+      {{ t(account.codex_auto_recovery_enabled ? 'admin.accounts.status.codexAutoRecoveryEnabled' : 'admin.accounts.status.codexAutoRecoveryDisabled') }}
+    </span>
+    <span
       v-if="codexReauthorizationCount > 0"
       class="basis-full whitespace-nowrap text-[11px] leading-4 text-sky-600 dark:text-sky-400"
       :title="t('admin.accounts.status.codexReauthorizationCountHint')"
@@ -182,6 +191,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
+
+const showCodexAutoRecovery = computed(() =>
+  props.account.platform === 'openai' && props.account.type === 'oauth' &&
+  typeof props.account.codex_auto_recovery_enabled === 'boolean'
+)
 
 const codexReauthorizationCount = computed(() => {
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return 0

@@ -362,6 +362,26 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("Codex recovery display uses saved switches and excludes unsupported accounts", func(t *testing.T) {
+		_, e := db.Exec(`INSERT INTO accounts(id,credentials) VALUES
+ (6000,'{}'),(6001,'{}'),(6002,'{}'),(6003,'{"client_id":"app_fnr0pYvVwwFDocDumLG3H2Bp"}'),(6004,'{}')`)
+		require.NoError(t, e)
+		defer func() { _, _ = db.Exec(`DELETE FROM accounts WHERE id BETWEEN 6000 AND 6004`) }()
+		_, e = db.Exec(`INSERT INTO openai_codex_login_configs(account_id,enabled,login_email,password_ciphertext)
+ VALUES(6000,TRUE,'display@example.com','encrypted'),(6001,FALSE,'display@example.com','encrypted'),(6004,TRUE,'display@example.com','encrypted')`)
+		require.NoError(t, e)
+		_, e = db.Exec(`UPDATE accounts SET deleted_at=NOW() WHERE id=6004`)
+		require.NoError(t, e)
+		states, e := repo.GetCodexAutoRecoveryStates(ctx, []int64{6000, 6001, 6002, 6003, 6004, 6099})
+		require.NoError(t, e)
+		require.Equal(t, map[int64]bool{6000: true, 6001: false, 6002: false}, states)
+		_, e = db.Exec(`UPDATE openai_codex_login_configs SET enabled=FALSE WHERE account_id=6000`)
+		require.NoError(t, e)
+		states, e = repo.GetCodexAutoRecoveryStates(ctx, []int64{6000})
+		require.NoError(t, e)
+		require.Equal(t, map[int64]bool{6000: false}, states)
+	})
+
 	t.Run("Codex queue credential and administrator guards", func(t *testing.T) {
 		_, e := db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE status IN ('queued','running')`)
 		require.NoError(t, e)

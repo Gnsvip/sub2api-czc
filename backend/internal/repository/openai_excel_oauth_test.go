@@ -18,7 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/DATA-DOG/go-sqlmock"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -470,6 +473,26 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.Equal(t, "preserve-excel", grant)
 			})
 		}
+		t.Run("401 automatic pause resumes after fresh healthy authorization", func(t *testing.T) {
+			const id int64 = 1400
+			newAccount(id, true, false)
+			_, e := db.Exec(`UPDATE accounts SET status='active',error_message=NULL,schedulable=TRUE WHERE id=$1`, id)
+			require.NoError(t, e)
+			accounts := newAccountRepositoryWithSQL(dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db))), db, nil)
+			require.NoError(t, accounts.SetError(ctx, id, "Token revoked (401): token_invalidated"))
+			queued, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.NotNil(t, queued)
+			claimed, e := repo.ClaimCodexLogin(ctx, "automatic-pause-recovery")
+			require.NoError(t, e)
+			require.Equal(t, queued.ID, claimed.ID)
+			ok, e := repo.FinishCodexLogin(ctx, queued.ID, "automatic-pause-recovery", codexCandidate, healthyAstra())
+			require.NoError(t, e)
+			require.True(t, ok)
+			var schedulable bool
+			require.NoError(t, db.QueryRow(`SELECT schedulable FROM accounts WHERE id=$1`, id).Scan(&schedulable))
+			require.True(t, schedulable, "401 automatically paused a previously schedulable account; fresh healthy authorization must restore it")
+		})
 		t.Run("fresh Astra result gates recovery and retains successful authorization", func(t *testing.T) {
 			for i, tc := range []struct {
 				name, verdict   string

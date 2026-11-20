@@ -10,6 +10,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Reproduces the production complaint: least-load/random weights can select a
+// later expiry even though the earliest account has ample concurrency headroom.
+func TestOpenAIAccountExpiryPrioritizesNewAssignments(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		t.Run(strconv.FormatBool(advanced), func(t *testing.T) {
+			soon, later := time.Now().Add(time.Hour), time.Now().Add(4*time.Hour)
+			groupID := int64(42)
+			accounts := []Account{
+				{ID: 12376, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{groupID}, ExpiresAt: &soon, Extra: astraHealthyTestExtra(nil)},
+				{ID: 12377, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 50, Priority: 1, GroupIDs: []int64{groupID}, ExpiresAt: &later, Extra: astraHealthyTestExtra(nil)},
+			}
+			cfg := openAIResetTestScheduler(0).service.cfg
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			cfg.Gateway.OpenAIWS.LBTopK = 1
+			svc := &OpenAIGatewayService{
+				accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg,
+				rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced), "false"),
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{
+					12376: {AccountID: 12376, CurrentConcurrency: 13, LoadRate: 26},
+					12377: {AccountID: 12377},
+				}}),
+			}
+			selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-6.2-sol", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			t.Cleanup(selection.ReleaseFunc)
+			require.True(t, selection.Acquired)
+			require.Equal(t, int64(12376), selection.Account.ID, "new allocation must prefer the earliest expiry below its soft cap")
+		})
+	}
+}
+
 func TestOpenAIAccountExpiryPreferencePreservesLoadAndDistribution(t *testing.T) {
 	now := time.Now()
 	soon, later := now.Add(time.Hour), now.Add(30*24*time.Hour)

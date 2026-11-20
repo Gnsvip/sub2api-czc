@@ -51,6 +51,21 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows the saved recovery switch independently of health and reauthorization count', async () => {
+    const account = makeAccount({ platform: 'openai', schedulable: false, codex_auto_recovery_enabled: true, extra: { openai_codex_reauthorization_count: 1 } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.get('[data-testid="codex-auto-recovery-status"]').text()).toBe('admin.accounts.status.codexAutoRecoveryEnabled')
+    expect(wrapper.text()).toContain('admin.accounts.status.paused')
+    await wrapper.setProps({ account: { ...account, codex_auto_recovery_enabled: false } })
+    expect(wrapper.get('[data-testid="codex-auto-recovery-status"]').text()).toBe('admin.accounts.status.codexAutoRecoveryDisabled')
+    expect(wrapper.get('[data-testid="codex-reauthorization-count"]').text()).toBe('admin.accounts.status.codexReauthorizationCount: 1')
+    await wrapper.setProps({ account: { ...account, codex_auto_recovery_enabled: undefined } })
+    expect(wrapper.find('[data-testid="codex-auto-recovery-status"]').exists()).toBe(false)
+    await wrapper.setProps({ account: { ...account, platform: 'anthropic' } })
+    expect(wrapper.find('[data-testid="codex-auto-recovery-status"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows the persisted reauthorization count without replacing account status', async () => {
     const account = makeAccount({ platform: 'openai', schedulable: false, extra: { openai_codex_reauthorization_count: 1 } })
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })

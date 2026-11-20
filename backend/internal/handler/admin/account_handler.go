@@ -387,6 +387,16 @@ func (h *AccountHandler) isSimpleMode() bool {
 	return h != nil && h.cfg != nil && h.cfg.RunMode == config.RunModeSimple
 }
 
+func (h *AccountHandler) codexAutoRecoveryStates(ctx context.Context, accounts []service.Account) map[int64]bool {
+	states, err := h.openaiOAuthService.CodexAutoRecoveryStates(ctx, accounts)
+	if err != nil {
+		// Omit unknown states instead of misreporting a failed read as disabled.
+		slog.WarnContext(ctx, "read Codex auto recovery states failed", "error", err)
+		return nil
+	}
+	return states
+}
+
 func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) AccountWithConcurrency {
 	item := AccountWithConcurrency{
 		Account:            h.accountResponseFromService(account),
@@ -395,6 +405,9 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 	}
 	if account == nil {
 		return item
+	}
+	if enabled, ok := h.codexAutoRecoveryStates(ctx, []service.Account{*account})[account.ID]; ok {
+		item.CodexAutoRecoveryEnabled = &enabled
 	}
 
 	if h.concurrencyService != nil {
@@ -814,6 +827,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	// Build response with concurrency info
+	codexAutoRecoveryStates := h.codexAutoRecoveryStates(c.Request.Context(), accounts)
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
@@ -823,6 +837,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if h.isSimpleMode() {
 				accountResponse.GroupIDs = filterSimpleModeGroupIDs(accountResponse.GroupIDs, simpleModeCompositeServiceGroupIDs(acc))
 			}
+		}
+		if enabled, ok := codexAutoRecoveryStates[acc.ID]; ok {
+			accountResponse.CodexAutoRecoveryEnabled = &enabled
 		}
 		item := AccountWithConcurrency{
 			Account:            accountResponse,

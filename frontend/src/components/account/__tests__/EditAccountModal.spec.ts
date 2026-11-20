@@ -281,6 +281,20 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it('propagates a saved recovery switch without refreshing or closing the unsaved editor', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: {} }
+    getAccountMock.mockClear()
+    const wrapper = mountModal(account)
+    await flushPromises()
+    wrapper.getComponent(CodexLoginSettings).vm.$emit('saved', false)
+    await flushPromises()
+    expect(wrapper.emitted('codex-auto-recovery-updated')).toEqual([[account.id, false]])
+    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(getAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('refreshes the authorized account before updating the list and closing', async () => {
     const account = { ...buildAccount(), type: 'oauth', credentials: {} }
     const refreshed = { ...account, status: 'active', credentials: { email: 'fixture@example.com' } }

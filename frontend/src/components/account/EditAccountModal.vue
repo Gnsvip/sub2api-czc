@@ -2060,7 +2060,7 @@
 
       <BPSAuthorization v-if="account?.platform === 'openai' && account?.type === 'oauth' && account.credentials?.client_id !== 'app_fnr0pYvVwwFDocDumLG3H2Bp' && (bpsSettings.enabled || bpsSettings.autoPolicy?.enabled)" :account-id="account.id" />
       <BPSAccountSettings v-if="account?.platform === 'openai' && account?.type === 'oauth'" v-model="bpsSettings" :groups="groups" :recovery-pending="typeof account.extra?.openai_excel_bps_403_disabled_at === 'string'" />
-      <CodexLoginSettings v-if="show && account?.platform === 'openai' && account?.type === 'oauth' && (!account.credentials?.client_id || account.credentials.client_id === 'app_EMoamEEZ73f0CkXaXp7hrann') && ![account.credentials?.auth_mode, account.credentials?.openai_auth_mode].some(mode => ['personalaccesstoken', 'personal_access_token', 'agentidentity'].includes(String(mode || '').trim().toLowerCase()))" :key="account.id" :account-id="account.id" @authorized="handleCodexAuthorized" @expiry-saved="handleCodexExpirySaved" />
+      <CodexLoginSettings v-if="show && account?.platform === 'openai' && account?.type === 'oauth' && (!account.credentials?.client_id || account.credentials.client_id === 'app_EMoamEEZ73f0CkXaXp7hrann') && ![account.credentials?.auth_mode, account.credentials?.openai_auth_mode].some(mode => ['personalaccesstoken', 'personal_access_token', 'agentidentity'].includes(String(mode || '').trim().toLowerCase()))" :key="account.id" :account-id="account.id" @authorized="handleCodexAuthorized" @saved="handleCodexLoginSaved" @expiry-saved="handleCodexExpirySaved" />
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
@@ -3624,6 +3624,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
+  'codex-auto-recovery-updated': [accountId: number, enabled: boolean]
 }>()
 
 const { t } = useI18n()
@@ -5733,6 +5734,12 @@ const handleClose = () => {
 const handleCodexExpirySaved = (expiresAt: number | null) => {
   form.expires_at = expiresAt
   autoPauseOnExpired.value = false
+}
+
+const handleCodexLoginSaved = (enabled: boolean) => {
+  const accountID = props.account?.id
+  if (!props.show || !accountID) return
+  emit('codex-auto-recovery-updated', accountID, enabled)
 }
 
 const handleCodexAuthorized = async () => {

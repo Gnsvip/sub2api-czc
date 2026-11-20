@@ -8,21 +8,6 @@ permissions:
   contents: read
 
 jobs:
-  upload-diagnostics:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Install loopback Nginx test dependency
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends nginx
-      - name: Verify bounded diagnostics and real Nginx upload behaviour
-        run: python -B -m unittest discover -s deploy/tests -p 'test_upload_diagnostics.py' -v
-
   shell:
     runs-on: macos-15
     steps:

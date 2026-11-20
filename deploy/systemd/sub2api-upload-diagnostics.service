@@ -1,0 +1,28 @@
+[Unit]
+Description=Bounded Sub2API upload failure diagnostics
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=www-data
+ExecStart=/usr/bin/python3 /opt/sub2api-tools/upload_diagnostics.py
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=sub2api-upload-diagnostics
+RuntimeDirectoryMode=0750
+StateDirectory=sub2api-upload-diagnostics
+StateDirectoryMode=0700
+UMask=0007
+MemoryMax=32M
+CPUQuota=10%
+TasksMax=4
+LimitNOFILE=64
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

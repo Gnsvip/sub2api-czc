@@ -1190,6 +1190,34 @@ func (s *AccountRepoSuite) TestSetError() {
 	s.Require().Equal(1, outboxCount)
 }
 
+func (s *AccountRepoSuite) TestSetError_CodexPauseOwnership() {
+	account := &service.Account{
+		Name: "codex-pause-ownership", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "synthetic"},
+		Extra: map[string]any{service.CodexAuthAutoPauseExtraKey: true},
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotContains(got.Extra, service.CodexAuthAutoPauseExtraKey, "creation must not accept a forged resume marker")
+	s.Require().NoError(s.repo.SetError(s.ctx, account.ID, "Token revoked (401): invalidated"))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(true, got.Extra[service.CodexAuthAutoPauseExtraKey])
+	got.Name = "unrelated edit"
+	got.Extra[service.CodexAuthAutoPauseExtraKey] = false
+	s.Require().NoError(s.repo.Update(s.ctx, got))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(true, got.Extra[service.CodexAuthAutoPauseExtraKey], "unrelated edits preserve managed state")
+	s.Require().NoError(s.repo.SetSchedulable(s.ctx, account.ID, false))
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{service.CodexAuthAutoPauseExtraKey: true}))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotContains(got.Extra, service.CodexAuthAutoPauseExtraKey)
+	s.Require().False(got.Schedulable)
+}
+
 func (s *AccountRepoSuite) TestSetGrokOAuthErrorIfCredentialsUnchanged_AppliesAndSyncsSchedulerState() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "grok-conditional-error-applied",

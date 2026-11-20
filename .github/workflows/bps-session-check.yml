@@ -100,11 +100,11 @@ jobs:
         working-directory: backend
         run: |
           go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/server/middleware ./internal/pkg/adminaccess -run '^(TestAdminService_AdminEnableAPIKey|TestAdminService_AdminDisableAPIKey|TestAdminService_AdminUpdateAPIKeyGroupID|TestAdminAPIKeyHandler_|TestAPIKeyAuthEnabledKeyStillRequiresActiveUser|TestGoogleAuthPreservesAdmissionGates|TestAdminAuth|Test.*FullAccess)' -count=1 -json > "$RUNNER_TEMP/bps-key-enable-tests.jsonl"
-      - name: Account deletion clears login secrets through the repository
+      - name: Account deletion and scheduling ownership through the repository
         working-directory: backend
         env:
           CI: 'true'
-        run: go test -tags=integration ./internal/repository -run '^TestAccountRepoSuite$/^TestDelete' -count=1 -json > "$RUNNER_TEMP/bps-account-delete-tests.jsonl"
+        run: go test -tags=integration ./internal/repository -run '^TestAccountRepoSuite$/^Test(Delete|SetError|SetSchedulable|Update)' -count=1 -json > "$RUNNER_TEMP/bps-account-delete-tests.jsonl"
       - name: GPT model catalog, compatibility and billing regressions
         working-directory: backend
         run: |

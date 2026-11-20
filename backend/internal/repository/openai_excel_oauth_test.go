@@ -726,6 +726,80 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				})
 			}
 		})
+		t.Run("Free recovery stays paused independently of Astra and worker metadata", func(t *testing.T) {
+			for i, tc := range []struct {
+				name, plan, reportedPlan                          string
+				initial, paused, autoPaused, missingProbe, manual bool
+			}{
+				{"Free pauses a schedulable account", "free", "pro", false, false, false, false, false},
+				{"Free overrides automatic auth resume", "free", "pro", false, false, true, false, false},
+				{"Free preserves manual pause", "free", "", false, true, false, false, false},
+				{"Free without Astra", "free", "", false, false, true, true, false},
+				{"manual Free reauthorization pauses", "free", "pro", false, false, true, false, true},
+				{"paid token ignores reported Free", "plus", "free", false, false, true, false, false},
+				{"paid preserves manual pause", "pro", "free", false, true, false, false, false},
+				{"first Free authorization unchanged", "free", "free", true, false, false, false, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					id := int64(1600 + i)
+					newAccount(id, true, tc.initial)
+					_, e := db.Exec(`UPDATE accounts SET schedulable=$2,credentials=credentials||'{"plan_type":"pro"}'::jsonb,
+ extra=extra||jsonb_build_object('openai_codex_auth_auto_paused',$3::boolean,'codex_tibo_verdict:http',
+ jsonb_build_object('model','gpt-6-astra','recent_samples',jsonb_build_array(jsonb_build_object('verdict','healthy','at',$4::text))))
+ WHERE id=$1`, id, !tc.initial && !tc.paused && !tc.autoPaused, tc.autoPaused, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano))
+					require.NoError(t, e)
+					queued, e := repo.QueueCodexLogin(ctx, id, tc.manual)
+					require.NoError(t, e)
+					require.NotNil(t, queued)
+					claimed, e := repo.ClaimCodexLogin(ctx, "free-plan")
+					require.NoError(t, e)
+					require.NotNil(t, claimed)
+					require.Equal(t, queued.ID, claimed.ID)
+					claims := map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user", "chatgpt_plan_type": tc.plan}
+					candidate := map[string]any{"client_id": openai.ClientID, "refresh_token": "free-plan-refresh", "chatgpt_account_id": "workspace", "chatgpt_user_id": "user", "email": "user@example.com", "plan_type": tc.reportedPlan}
+					candidate["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": claims})
+					candidate["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": claims})
+					probe := healthyAstra()
+					if tc.missingProbe {
+						probe = nil
+					}
+					ok, e := repo.FinishCodexLogin(ctx, queued.ID, "free-plan", candidate, probe)
+					require.NoError(t, e)
+					require.True(t, ok)
+					ok, e = repo.FinishCodexLogin(ctx, queued.ID, "free-plan", candidate, probe)
+					require.NoError(t, e)
+					require.False(t, ok, "duplicate completion must not count or resume twice")
+					var status, plan, token, keep string
+					var schedulable, autoPaused bool
+					var count, points int
+					require.NoError(t, db.QueryRow(`SELECT status,schedulable,credentials->>'plan_type',credentials->>'access_token',extra->>'keep',
+ COALESCE((extra->>'openai_codex_reauthorization_count')::int,0),extra ? 'openai_codex_auth_auto_paused',
+ jsonb_array_length(extra->'codex_tibo_verdict:http'->'recent_samples') FROM accounts WHERE id=$1`, id).Scan(&status, &schedulable, &plan, &token, &keep, &count, &autoPaused, &points))
+					require.Equal(t, service.StatusActive, status)
+					require.Equal(t, tc.plan, plan, "persist the token plan, not stale or worker-reported metadata")
+					require.Equal(t, candidate["access_token"], token)
+					require.Equal(t, "custom", keep)
+					require.False(t, autoPaused, "a future quality result cannot reuse the old auth pause ownership")
+					freeRecovery := !tc.initial && tc.plan == "free"
+					require.Equal(t, !freeRecovery && !tc.paused, schedulable)
+					wantCount, wantPoints, wantStage := 1, 2, "succeeded"
+					if tc.initial {
+						wantCount, wantPoints = 0, 1
+					} else if freeRecovery {
+						wantPoints, wantStage = 1, "succeeded_free_plan"
+					}
+					require.Equal(t, wantCount, count)
+					require.Equal(t, wantPoints, points, "Free must not create a fake Astra verdict")
+					finished, e := repo.GetCodexLoginTask(ctx, id)
+					require.NoError(t, e)
+					require.Equal(t, "succeeded", finished.Status)
+					require.Equal(t, wantStage, finished.Stage)
+					ids, e := repo.ListCodexLoginCandidates(ctx)
+					require.NoError(t, e)
+					require.NotContains(t, ids, id, "successful Free login must not be retried as an auth failure")
+				})
+			}
+		})
 		t.Run("successful reauthorization counts once and survives task cleanup", func(t *testing.T) {
 			const id int64 = 1190
 			newAccount(id, true, false)
@@ -849,7 +923,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			finished, e := repo.GetCodexLoginTask(ctx, id)
 			require.NoError(t, e)
 			require.Equal(t, "succeeded", finished.Status)
-			require.Equal(t, "succeeded_personal_workspace_only", finished.Stage)
+			require.Equal(t, "succeeded_personal_workspace_only_free_plan", finished.Stage)
 		})
 		t.Run("initial attempt plus three retries after 60 seconds and success resets budget", func(t *testing.T) {
 			const id int64 = 1100

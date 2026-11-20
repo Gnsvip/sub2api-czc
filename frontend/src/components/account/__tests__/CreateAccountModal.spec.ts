@@ -260,6 +260,8 @@ describe('Codex automatic authorization and remembered settings', () => {
     ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
     ['succeeded_astra_degraded', '已授权 · 降智，未恢复调度'],
     ['succeeded_astra_unknown', '已授权 · 检测未完成，未恢复调度'],
+    ['succeeded_free_plan', '已授权 · Free 套餐，已停止调度'],
+    ['succeeded_personal_workspace_only_free_plan', '已授权 · Free 套餐，已停止调度'],
     ['succeeded_personal_workspace_only_astra_degraded', '已授权 · 仅个人工作区 · 降智，未恢复调度'],
     ['succeeded_personal_workspace_astra_unknown', '已授权 · 个人工作区 · 检测未完成，未恢复调度'],
   ])('shows the authorization and scheduling outcome for %s', (stage, label) => {
@@ -530,11 +532,14 @@ describe('Codex automatic authorization and remembered settings', () => {
     wrapper.unmount()
   })
 
-  it('shows the personal-workspace notice before closing the completed account editor', async () => {
+  it.each([
+    ['succeeded_personal_workspace_only', '已授权 · 仅个人工作区'],
+    ['succeeded_free_plan', '已授权 · Free 套餐，已停止调度'],
+  ])('shows the %s notice before closing the completed account editor', async (stage, label) => {
     vi.useFakeTimers()
     showWarningMock.mockClear()
     getCodexLoginStatusMock.mockResolvedValueOnce({ config, task: { id: 9, account_id: 42, status: 'running', stage: 'exchanging_token' }, runtime })
-      .mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage: 'succeeded_personal_workspace_only' }, runtime })
+      .mockResolvedValue({ config, task: { id: 9, account_id: 42, status: 'succeeded', stage }, runtime })
     const wrapper = mount(CodexLoginSettings, { props: { accountId: 42 } })
     const details = wrapper.get('details')
     ;(details.element as HTMLDetailsElement).open = true
@@ -542,7 +547,7 @@ describe('Codex automatic authorization and remembered settings', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
-    expect(showWarningMock).toHaveBeenCalledWith('已授权 · 仅个人工作区', 8000)
+    expect(showWarningMock).toHaveBeenCalledWith(label, 8000)
     expect(wrapper.emitted('authorized')).toHaveLength(1)
     wrapper.unmount()
   })

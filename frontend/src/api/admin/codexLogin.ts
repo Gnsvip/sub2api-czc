@@ -98,6 +98,7 @@ export function codexLoginError(code?: string): string {
 }
 export function codexLoginTaskLabel(task?: CodexLoginTask | null): string {
   if (task?.status === 'succeeded') {
+    if (task.stage.endsWith('_free_plan')) return '已授权 · Free 套餐，已停止调度'
     const workspace = task.stage.startsWith('succeeded_personal_workspace_only') ? ' · 仅个人工作区'
       : task.stage.startsWith('succeeded_personal_workspace') ? ' · 个人工作区' : ''
     if (task.stage.endsWith('_astra_degraded')) return `已授权${workspace} · 降智，未恢复调度`

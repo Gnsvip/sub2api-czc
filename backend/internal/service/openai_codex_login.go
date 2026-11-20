@@ -66,7 +66,7 @@ func codexPersonalPlan(plan string) bool {
 	}
 }
 
-func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult) string {
+func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult, freePlanRecovery bool) string {
 	stage := "succeeded"
 	only, _ := credentials[CodexPersonalWorkspaceOnly].(bool)
 	if only || excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
@@ -75,6 +75,9 @@ func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstr
 		} else {
 			stage = "succeeded_personal_workspace"
 		}
+	}
+	if freePlanRecovery {
+		return stage + "_free_plan"
 	}
 	if astra != nil && !astra.Healthy() {
 		if astra.Verdict == string(openAITiboDegraded) {
@@ -518,18 +521,25 @@ func codexLoginTokenInfo(c map[string]any) (*OpenAITokenInfo, error) {
 		return nil, invalid
 	}
 	userInfo := it.GetUserInfo()
+	plan := strings.ToLower(strings.TrimSpace(firstNonEmptyExcel(userInfo.PlanType, at.OpenAIAuth.ChatGPTPlanType)))
 	onlyPersonal, _ := c[CodexPersonalWorkspaceOnly].(bool)
 	if (onlyPersonal || excelMapString(c, CodexWorkspaceFallbackFrom) != "") && (!codexPersonalPlan(at.OpenAIAuth.ChatGPTPlanType) || !codexPersonalPlan(userInfo.PlanType)) {
 		return nil, invalid
 	}
-	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: userInfo.PlanType, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
+	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: plan, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
 }
-func ValidateCodexLoginIdentity(stored, candidate map[string]any) error {
+
+// Return token-derived metadata so the transaction never trusts the worker's
+// top-level plan_type when deciding whether scheduling may resume.
+func ValidateCodexLoginIdentity(stored, candidate map[string]any) (*OpenAITokenInfo, error) {
 	info, err := codexLoginTokenInfo(candidate)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return validateCodexLoginIdentity(stored, candidate, info)
+	if err := validateCodexLoginIdentity(stored, candidate, info); err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 func validateCodexLoginIdentity(stored, candidate map[string]any, info *OpenAITokenInfo) error {
@@ -612,7 +622,9 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_VERIFICATION_FAILED", "授权后的连通验证未通过，请稍后重试")
 	}
 	var astra *CodexLoginAstraResult
-	if CodexLoginIsReauthorization(a.Credentials, a.ErrorMessage) {
+	reauthorization := CodexLoginIsReauthorization(a.Credentials, a.ErrorMessage)
+	freePlanRecovery := reauthorization && info.PlanType == "free"
+	if reauthorization && !freePlanRecovery {
 		// A failed quality probe must not discard valid new tokens or cause a
 		// second browser login. Only a fresh healthy result may resume routing.
 		result := CodexLoginAstraResult{Verdict: string(openAITiboUnknown)}
@@ -641,5 +653,5 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if s.codexLoginCredentialsChanged != nil {
 		s.codexLoginCredentialsChanged(ctx, a)
 	}
-	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe, astra)}, nil
+	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe, astra, freePlanRecovery)}, nil
 }

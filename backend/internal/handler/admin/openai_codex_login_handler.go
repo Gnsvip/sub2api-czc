@@ -124,6 +124,14 @@ func (h *OpenAIOAuthHandler) CreateCodexLoginAccounts(c *gin.Context) {
 		response.BadRequest(c, "并发、优先级和倍率不能为负数")
 		return
 	}
+	if req.ExpiresAt != nil && (*req.ExpiresAt < 0 || *req.ExpiresAt > 253402300799) {
+		response.BadRequest(c, "请填写有效的过期时间")
+		return
+	}
+	if req.AutoPauseOnExpired == nil {
+		pause := false
+		req.AutoPauseOnExpired = &pause
+	}
 	req.PreferredWorkspaceID, err = service.NormalizeCodexPreferredWorkspaceID(req.PreferredWorkspaceID)
 	if err != nil {
 		response.ErrorFrom(c, err)

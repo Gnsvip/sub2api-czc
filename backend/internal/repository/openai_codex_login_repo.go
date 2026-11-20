@@ -25,6 +25,10 @@ const codexLoginRecoverableSQL = `a.status='error'
 const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',COALESCE(a.error_message,''),'schedulable',a.schedulable,'proxy_id',a.proxy_id)
  || CASE WHEN a.extra->'openai_codex_auth_auto_paused'='true'::jsonb THEN '{"auth_auto_paused":true}'::jsonb ELSE '{}'::jsonb END`
 
+// Explicit manual authorization remains possible after the business deadline.
+// Old tasks without the marker are conservatively subject to the same deadline.
+const codexLoginTaskWithinExpirySQL = `(t.expected_account_state->'manual_authorization'='true'::jsonb OR a.expires_at IS NULL OR a.expires_at>NOW())`
+
 func (r *openAIExcelOAuthRepository) GetCodexLoginConfig(ctx context.Context, id int64) (*service.ExcelLoginConfig, error) {
 	c := &service.ExcelLoginConfig{AccountID: id}
 	err := r.db.QueryRowContext(ctx, `SELECT enabled,login_email,password_ciphertext,totp_ciphertext,revision,preferred_workspace_id FROM openai_codex_login_configs WHERE account_id=$1`, id).Scan(&c.Enabled, &c.LoginEmail, &c.PasswordCiphertext, &c.TOTPCiphertext, &c.Revision, &c.PreferredWorkspaceID)
@@ -33,7 +37,7 @@ func (r *openAIExcelOAuthRepository) GetCodexLoginConfig(ctx context.Context, id
 	}
 	return c, err
 }
-func (r *openAIExcelOAuthRepository) SaveCodexLoginConfig(ctx context.Context, c *service.ExcelLoginConfig, expected int64) (bool, error) {
+func (r *openAIExcelOAuthRepository) SaveCodexLoginConfig(ctx context.Context, c *service.ExcelLoginConfig, expected int64, expiresAt *int64) (bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -60,6 +64,20 @@ func (r *openAIExcelOAuthRepository) SaveCodexLoginConfig(ctx context.Context, c
 	n, err := result.RowsAffected()
 	if err != nil || n == 0 {
 		return false, err
+	}
+	if expiresAt != nil {
+		var expiry *time.Time
+		if *expiresAt > 0 {
+			t := time.Unix(*expiresAt, 0)
+			expiry = &t
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE accounts SET expires_at=$2,auto_pause_on_expired=FALSE,updated_at=NOW() WHERE id=$1`, id, expiry)
+		if err != nil {
+			return false, err
+		}
+		if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+			return false, err
+		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='cancelled',stage='cancelled',error_code='config_changed',updated_at=NOW() WHERE account_id=$1 AND oauth_profile='codex' AND status IN ('queued','running')`, id)
 	if err != nil {
@@ -113,9 +131,9 @@ func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int
 		return nil, err
 	}
 	t, err := scanExcelLoginTask(tx.QueryRowContext(ctx, `INSERT INTO openai_excel_login_tasks(account_id,config_revision,expected_credentials_hash,expected_grant_hash,oauth_profile,expected_account_state)
- SELECT a.id,c.revision,MD5(a.credentials::text),'','codex',`+codexLoginAccountStateSQL+`
+ SELECT a.id,c.revision,MD5(a.credentials::text),'','codex',`+codexLoginAccountStateSQL+` || CASE WHEN $2 THEN '{"manual_authorization":true}'::jsonb ELSE '{}'::jsonb END
  FROM accounts a JOIN openai_codex_login_configs c ON c.account_id=a.id
- WHERE a.id=$1 AND c.password_ciphertext<>'' AND ($2 OR (c.enabled AND `+codexLoginRecoverableSQL+`)) AND `+codexLoginBudgetSQL+`
+ WHERE a.id=$1 AND c.password_ciphertext<>'' AND ($2 OR (c.enabled AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND `+codexLoginRecoverableSQL+`)) AND `+codexLoginBudgetSQL+`
  ON CONFLICT DO NOTHING RETURNING `+excelLoginTaskColumns, id, manual))
 	if err != nil {
 		return nil, err
@@ -128,7 +146,7 @@ func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int
 func (r *openAIExcelOAuthRepository) ListCodexLoginCandidates(ctx context.Context) ([]int64, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT a.id FROM accounts a JOIN openai_codex_login_configs c ON c.account_id=a.id
  WHERE `+codexLoginAccountSQL+` AND `+codexLoginRecoverableSQL+` AND c.enabled AND c.password_ciphertext<>''
- AND a.id>$1 AND `+codexLoginBudgetSQL+`
+ AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND a.id>$1 AND `+codexLoginBudgetSQL+`
  ORDER BY a.id LIMIT 50`, 0, false)
 	if err != nil {
 		return nil, err
@@ -145,11 +163,12 @@ func (r *openAIExcelOAuthRepository) ListCodexLoginCandidates(ctx context.Contex
 	return ids, rows.Err()
 }
 func (r *openAIExcelOAuthRepository) HasActiveCodexLogins(ctx context.Context) (bool, error) {
-	_, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks t SET status='cancelled',stage='cancelled',error_code='account_changed',updated_at=NOW()
+	_, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks t SET status='cancelled',stage='cancelled',error_code=CASE WHEN NOT COALESCE(`+codexLoginTaskWithinExpirySQL+`,FALSE) THEN 'account_expired' ELSE 'account_changed' END,updated_at=NOW()
  FROM accounts a LEFT JOIN openai_codex_login_configs c ON c.account_id=a.id
  WHERE t.account_id=a.id AND t.oauth_profile='codex' AND t.status IN ('queued','running')
  AND (a.deleted_at IS NOT NULL OR c.revision IS DISTINCT FROM t.config_revision OR MD5(a.credentials::text) IS DISTINCT FROM t.expected_credentials_hash
- OR `+codexLoginAccountStateSQL+` IS DISTINCT FROM t.expected_account_state)`)
+ OR NOT COALESCE(`+codexLoginTaskWithinExpirySQL+`,FALSE)
+ OR `+codexLoginAccountStateSQL+` IS DISTINCT FROM (t.expected_account_state-'manual_authorization'))`)
 	if err != nil {
 		return false, err
 	}
@@ -166,7 +185,8 @@ func (r *openAIExcelOAuthRepository) ClaimCodexLogin(ctx context.Context, worker
  SELECT t.id FROM openai_excel_login_tasks t JOIN accounts a ON a.id=t.account_id JOIN openai_codex_login_configs c ON c.account_id=a.id
  WHERE t.oauth_profile='codex' AND t.status='queued' AND t.created_at>NOW()-INTERVAL '30 minutes' AND a.deleted_at IS NULL AND a.status IN ('active','error') AND c.revision=t.config_revision
  AND MD5(a.credentials::text)=t.expected_credentials_hash
- AND `+codexLoginAccountStateSQL+`=t.expected_account_state
+ AND `+codexLoginTaskWithinExpirySQL+`
+ AND `+codexLoginAccountStateSQL+`=(t.expected_account_state-'manual_authorization')
  ORDER BY t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1)
  UPDATE openai_excel_login_tasks SET status='running',stage='starting',worker_id=$1,updated_at=NOW() WHERE id=(SELECT id FROM candidate) RETURNING `+excelLoginTaskColumns, worker))
 }
@@ -190,14 +210,16 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	if json.Unmarshal(primary, &stored) != nil {
 		return false, errors.New("invalid stored account identity")
 	}
-	if err = service.ValidateCodexLoginIdentity(stored, candidate); err != nil {
+	tokenInfo, err := service.ValidateCodexLoginIdentity(stored, candidate)
+	if err != nil {
 		return false, err
 	}
 	var active int64
 	err = tx.QueryRowContext(ctx, `SELECT t.id FROM openai_excel_login_tasks t JOIN openai_codex_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id
  WHERE t.id=$1 AND t.oauth_profile='codex' AND t.worker_id=$2 AND t.status='running' AND t.created_at>NOW()-INTERVAL '30 minutes' AND c.revision=t.config_revision
  AND MD5(a.credentials::text)=t.expected_credentials_hash
- AND `+codexLoginAccountStateSQL+`=t.expected_account_state
+ AND `+codexLoginTaskWithinExpirySQL+`
+ AND `+codexLoginAccountStateSQL+`=(t.expected_account_state-'manual_authorization')
  AND (COALESCE(a.credentials->>'chatgpt_account_id','')<>'' OR c.preferred_workspace_id='' OR c.preferred_workspace_id=$3) FOR UPDATE OF c,t`, id, worker, candidate["chatgpt_account_id"]).Scan(&active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -213,6 +235,7 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	}
 	delete(info, service.CodexWorkspaceFallbackFrom)
 	delete(info, service.CodexPersonalWorkspaceOnly)
+	info["plan_type"] = tokenInfo.PlanType
 	info["_token_version"] = time.Now().UnixMilli()
 	raw, err := json.Marshal(info)
 	if err != nil {
@@ -222,7 +245,8 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	// Count only successful browser reauthorization of an already bound account.
 	// The row/task locks and state checks above make repeated callbacks a no-op.
 	reauthorization := service.CodexLoginIsReauthorization(stored, message)
-	if !reauthorization {
+	freePlanRecovery := reauthorization && tokenInfo.PlanType == "free"
+	if !reauthorization || freePlanRecovery {
 		astra = nil
 	} else if astra == nil {
 		astra = &service.CodexLoginAstraResult{Verdict: "unknown"}
@@ -243,7 +267,8 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	}
 	// Do not expose the new token to routing until its fresh Astra result is
 	// known. Failed/unknown probes keep valid credentials but pause scheduling;
-	// healthy probes never undo an administrator's existing pause.
+	// healthy probes never undo an administrator's existing pause. A recovered
+	// Free plan stays paused even if a worker supplies a healthy Astra result.
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||$2::jsonb,
  status=CASE WHEN $3 THEN 'active' ELSE status END,
  error_message=CASE WHEN $3 THEN NULL ELSE error_message END,
@@ -255,14 +280,14 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	 WHEN jsonb_typeof(extra->'openai_codex_reauthorization_count')='number'
 	 AND (extra->>'openai_codex_reauthorization_count') ~ '^[0-9]{1,15}$'
 	 THEN (extra->>'openai_codex_reauthorization_count')::bigint ELSE 0 END + 1)
-		 ELSE '{}'::jsonb END || $7::jsonb,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization, astra != nil && !astra.Healthy(), string(probeJSON), recoverState && astra != nil && astra.Healthy())
+		 ELSE '{}'::jsonb END || $7::jsonb,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization, freePlanRecovery || (astra != nil && !astra.Healthy()), string(probeJSON), recoverState && astra != nil && astra.Healthy())
 	if err != nil {
 		return false, err
 	}
 	if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate, astra))
+	_, err = tx.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='succeeded',stage=$2,error_code='',updated_at=NOW() WHERE id=$1`, id, service.CodexLoginCompletionStage(candidate, astra, freePlanRecovery))
 	if err != nil {
 		return false, err
 	}

@@ -37,6 +37,7 @@ type CodexLoginInput struct {
 	ClearTOTP            bool    `json:"clear_totp"`
 	Revision             int64   `json:"revision"`
 	PreferredWorkspaceID *string `json:"preferred_workspace_id,omitempty"`
+	ExpiresAt            *int64  `json:"expires_at,omitempty"` // nil keeps the date; zero clears it.
 }
 
 // The ID is an optional first-login choice, not permission to change an existing identity.
@@ -65,7 +66,7 @@ func codexPersonalPlan(plan string) bool {
 	}
 }
 
-func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult) string {
+func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstraResult, freePlanRecovery bool) string {
 	stage := "succeeded"
 	only, _ := credentials[CodexPersonalWorkspaceOnly].(bool)
 	if only || excelMapString(credentials, CodexWorkspaceFallbackFrom) != "" {
@@ -74,6 +75,9 @@ func CodexLoginCompletionStage(credentials map[string]any, astra *CodexLoginAstr
 		} else {
 			stage = "succeeded_personal_workspace"
 		}
+	}
+	if freePlanRecovery {
+		return stage + "_free_plan"
 	}
 	if astra != nil && !astra.Healthy() {
 		if astra.Verdict == string(openAITiboDegraded) {
@@ -98,7 +102,7 @@ func CodexLoginIsReauthorization(credentials map[string]any, message string) boo
 
 type CodexLoginRepository interface {
 	GetCodexLoginConfig(context.Context, int64) (*ExcelLoginConfig, error)
-	SaveCodexLoginConfig(context.Context, *ExcelLoginConfig, int64) (bool, error)
+	SaveCodexLoginConfig(context.Context, *ExcelLoginConfig, int64, *int64) (bool, error)
 	GetCodexLoginTask(context.Context, int64) (*ExcelLoginTask, error)
 	GetLoginTaskByID(context.Context, int64) (*ExcelLoginTask, error)
 	FindCodexLoginAccount(context.Context, string) (int64, error)
@@ -241,9 +245,17 @@ func (s *OpenAIOAuthService) CodexLoginStatus(ctx context.Context, id int64) (*E
 	if err != nil {
 		return nil, err
 	}
-	return &ExcelLoginStatus{Config: c, Task: t, Runtime: s.ExcelLoginRuntimeStatus()}, nil
+	state := &ExcelLoginStatus{Config: c, Task: t, Runtime: s.ExcelLoginRuntimeStatus(), AutoPauseOnExpired: &a.AutoPauseOnExpired}
+	if a.ExpiresAt != nil {
+		expiresAt := a.ExpiresAt.Unix()
+		state.ExpiresAt = &expiresAt
+	}
+	return state, nil
 }
 func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input CodexLoginInput) (*ExcelLoginStatus, error) {
+	if input.ExpiresAt != nil && (*input.ExpiresAt < 0 || *input.ExpiresAt > 253402300799) {
+		return nil, infraerrors.BadRequest("CODEX_LOGIN_INPUT_INVALID", "请填写有效的过期时间")
+	}
 	a, err := s.codexLoginAccount(ctx, id)
 	if err != nil {
 		return nil, err
@@ -307,10 +319,11 @@ func (s *OpenAIOAuthService) SaveCodexLogin(ctx context.Context, id int64, input
 	if c.PasswordCiphertext == "" {
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_INPUT_INVALID", "请先保存登录密码")
 	}
-	if previous.Revision > 0 && previous.Enabled == c.Enabled && previous.LoginEmail == c.LoginEmail && previous.PasswordCiphertext == c.PasswordCiphertext && previous.TOTPCiphertext == c.TOTPCiphertext && previous.PreferredWorkspaceID == c.PreferredWorkspaceID {
+	expiryUnchanged := input.ExpiresAt == nil || (!a.AutoPauseOnExpired && ((a.ExpiresAt == nil && *input.ExpiresAt == 0) || (a.ExpiresAt != nil && a.ExpiresAt.Unix() == *input.ExpiresAt)))
+	if expiryUnchanged && previous.Revision > 0 && previous.Enabled == c.Enabled && previous.LoginEmail == c.LoginEmail && previous.PasswordCiphertext == c.PasswordCiphertext && previous.TOTPCiphertext == c.TOTPCiphertext && previous.PreferredWorkspaceID == c.PreferredWorkspaceID {
 		return s.CodexLoginStatus(ctx, id)
 	}
-	changed, err := r.SaveCodexLoginConfig(ctx, c, input.Revision)
+	changed, err := r.SaveCodexLoginConfig(ctx, c, input.Revision, input.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +358,7 @@ func (s *OpenAIOAuthService) QueueCodexLogin(ctx context.Context, id int64) (*Ex
 // Only persisted authentication failures trigger automatic re-login. Network,
 // quota, policy and account-deactivation errors never start a fresh session.
 func codexLoginRecoveryNeeded(a *Account) bool {
-	if a == nil || a.Status != StatusError {
+	if a == nil || a.Status != StatusError || (a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) {
 		return false
 	}
 	m := a.ErrorMessage
@@ -508,18 +521,25 @@ func codexLoginTokenInfo(c map[string]any) (*OpenAITokenInfo, error) {
 		return nil, invalid
 	}
 	userInfo := it.GetUserInfo()
+	plan := strings.ToLower(strings.TrimSpace(firstNonEmptyExcel(userInfo.PlanType, at.OpenAIAuth.ChatGPTPlanType)))
 	onlyPersonal, _ := c[CodexPersonalWorkspaceOnly].(bool)
 	if (onlyPersonal || excelMapString(c, CodexWorkspaceFallbackFrom) != "") && (!codexPersonalPlan(at.OpenAIAuth.ChatGPTPlanType) || !codexPersonalPlan(userInfo.PlanType)) {
 		return nil, invalid
 	}
-	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: userInfo.PlanType, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
+	return &OpenAITokenInfo{AccessToken: access, RefreshToken: excelMapString(c, "refresh_token"), IDToken: excelMapString(c, "id_token"), ClientID: openai.ClientID, ExpiresAt: at.Exp, Email: it.Email, ChatGPTAccountID: at.OpenAIAuth.ChatGPTAccountID, ChatGPTUserID: user, PlanType: plan, OrganizationID: userInfo.OrganizationID, SubscriptionExpiresAt: userInfo.SubscriptionExpiresAt}, nil
 }
-func ValidateCodexLoginIdentity(stored, candidate map[string]any) error {
+
+// Return token-derived metadata so the transaction never trusts the worker's
+// top-level plan_type when deciding whether scheduling may resume.
+func ValidateCodexLoginIdentity(stored, candidate map[string]any) (*OpenAITokenInfo, error) {
 	info, err := codexLoginTokenInfo(candidate)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return validateCodexLoginIdentity(stored, candidate, info)
+	if err := validateCodexLoginIdentity(stored, candidate, info); err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 func validateCodexLoginIdentity(stored, candidate map[string]any, info *OpenAITokenInfo) error {
@@ -602,7 +622,9 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		return nil, infraerrors.BadRequest("CODEX_LOGIN_VERIFICATION_FAILED", "授权后的连通验证未通过，请稍后重试")
 	}
 	var astra *CodexLoginAstraResult
-	if CodexLoginIsReauthorization(a.Credentials, a.ErrorMessage) {
+	reauthorization := CodexLoginIsReauthorization(a.Credentials, a.ErrorMessage)
+	freePlanRecovery := reauthorization && info.PlanType == "free"
+	if reauthorization && !freePlanRecovery {
 		// A failed quality probe must not discard valid new tokens or cause a
 		// second browser login. Only a fresh healthy result may resume routing.
 		result := CodexLoginAstraResult{Verdict: string(openAITiboUnknown)}
@@ -631,5 +653,5 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 	if s.codexLoginCredentialsChanged != nil {
 		s.codexLoginCredentialsChanged(ctx, a)
 	}
-	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe, astra)}, nil
+	return &ExcelLoginTask{ID: id, AccountID: a.ID, OAuthProfile: "codex", Status: "succeeded", Stage: CodexLoginCompletionStage(safe, astra, freePlanRecovery)}, nil
 }

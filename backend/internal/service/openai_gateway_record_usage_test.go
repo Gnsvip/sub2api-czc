@@ -3057,16 +3057,20 @@ func TestOpenAIGatewayServiceRecordUsage_CodexDefaultEchoKeepsFastBilling(t *tes
 
 func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		free bool
-		rate float64
+		name         string
+		free         bool
+		rate         float64
+		subscription bool
 	}{
-		{"free fast", true, 0.5}, {"ordinary fast", false, 0.5}, {"zero group rate", true, 0},
+		{"free fast", true, 0.5, false}, {"ordinary fast", false, 0.5, false}, {"zero group rate", true, 0, false},
+		{"free fast subscription", true, 0.25, true}, {"ordinary fast subscription", false, 0.25, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-			svc := newOpenAIRecordUsageServiceForTest(
+			billingRepo := &openAIRecordUsageBillingRepoStub{}
+			svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
 				usageRepo,
+				billingRepo,
 				&openAIRecordUsageUserRepoStub{},
 				&openAIRecordUsageSubRepoStub{},
 				nil,
@@ -3080,8 +3084,10 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 			cachePrice := 0.0002
 			fastMultiplier := 3.0
 			apiKey := &APIKey{
-				ID:      1020,
-				GroupID: &groupID,
+				ID:          1020,
+				GroupID:     &groupID,
+				Quota:       100,
+				RateLimit5h: 100,
 				Group: &Group{
 					ID: groupID, Platform: PlatformOpenAI, Status: StatusActive,
 					Hydrated: true, RateMultiplier: tc.rate, FreeOpenAIFast: tc.free,
@@ -3095,6 +3101,11 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 					}},
 				},
 			}
+			var subscription *UserSubscription
+			if tc.subscription {
+				apiKey.Group.SubscriptionType = SubscriptionTypeSubscription
+				subscription = &UserSubscription{ID: 88}
+			}
 
 			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{
@@ -3105,9 +3116,11 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 					Model:                       "gpt-5.6-sol",
 					Duration:                    time.Second,
 				},
-				APIKey:  apiKey,
-				User:    &User{ID: 2020},
-				Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+				APIKey:        apiKey,
+				User:          &User{ID: 2020},
+				Account:       &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+				Subscription:  subscription,
+				APIKeyService: &openAIRecordUsageAPIKeyQuotaStub{},
 			})
 
 			require.NoError(t, err)
@@ -3125,6 +3138,22 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 				require.InDelta(t, standardTotal*fastMultiplier*tc.rate, usageRepo.lastLog.ActualCost, 1e-10)
 				require.Nil(t, usageRepo.lastLog.FreeFastCost)
 			}
+			require.Equal(t, 1, billingRepo.calls)
+			require.NotNil(t, billingRepo.lastCmd)
+			charged := standardTotal * tc.rate
+			if !tc.free {
+				charged *= fastMultiplier
+			}
+			if tc.subscription {
+				require.InDelta(t, charged, billingRepo.lastCmd.SubscriptionCost, 1e-10)
+				require.Zero(t, billingRepo.lastCmd.BalanceCost)
+			} else {
+				require.InDelta(t, charged, billingRepo.lastCmd.BalanceCost, 1e-10)
+				require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
+			}
+			require.InDelta(t, charged, billingRepo.lastCmd.APIKeyQuotaCost, 1e-10)
+			require.InDelta(t, charged, billingRepo.lastCmd.APIKeyRateLimitCost, 1e-10)
+			require.Zero(t, billingRepo.lastCmd.AccountQuotaCost, "ordinary OAuth statistics are not an upstream quota debit")
 		})
 	}
 }

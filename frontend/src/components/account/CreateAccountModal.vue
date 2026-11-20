@@ -63,6 +63,7 @@
             <button type="button" class="shrink-0 text-sm text-primary-600 hover:underline dark:text-primary-400" :aria-expanded="automaticSettingsExpanded" aria-controls="account-creation-settings" data-testid="automatic-settings-toggle" @click="automaticSettingsExpanded = !automaticSettingsExpanded">{{ automaticSettingsExpanded ? '收起设置' : '调整设置' }}</button>
           </div>
         </div>
+        <CodexAccountExpiryField v-model="form.expires_at" :disabled="automaticAuthorizationRef?.submitting" />
         <CodexAutomaticAuthorization ref="automaticAuthorizationRef" :options="automaticAuthorizationOptions" hide-submit @created="notifyAccountCreated" />
       </template>
       <div v-show="!isAutomaticAuthorization || automaticSettingsExpanded" id="account-creation-settings" class="space-y-5">
@@ -3224,7 +3225,8 @@
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <CodexAccountExpiryField v-if="isOpenAIOAuth && !isAutomaticAuthorization" v-model="form.expires_at" :auto-pause-on-expired="autoPauseOnExpired" class="border-t border-gray-200 pt-4 dark:border-dark-600" />
+      <div v-if="!isOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <div class="mt-2 flex gap-2">
@@ -3699,7 +3701,7 @@
         <OpenAIImageSizeTiersField v-model="openAIImageSizeTiers" />
       </div>
 
-      <div>
+      <div v-if="!isAutomaticAuthorization">
         <div class="flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{
@@ -4163,6 +4165,7 @@
 <script setup lang="ts">
 import BPSAccountSettings from './BPSAccountSettings.vue'
 import CodexAutomaticAuthorization from './CodexAutomaticAuthorization.vue'
+import CodexAccountExpiryField from './CodexAccountExpiryField.vue'
 import { useAuthStore } from '@/stores/auth'
 import { readAccountCreationDefaults, writeAccountCreationDefaults } from './accountCreationDefaults'
 import { readBPSSettings, writeBPSSettings } from './bpsSettings'
@@ -4765,7 +4768,7 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
   applyHeaderOverride(credentials, headerOverrideEnabled.value, headerOverrideRows.value, 'create')
 }
 const interceptWarmupRequests = ref(false)
-const autoPauseOnExpired = ref(true)
+const autoPauseOnExpired = ref(false)
 const openaiPassthroughEnabled = ref(false)
 const openaiPassthroughModelFilterEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
@@ -5142,6 +5145,7 @@ const handleConcurrencyInput = () => {
 // Change untouched defaults when entering or leaving GPT OAuth, while keeping
 // an explicitly entered concurrency across account-type changes.
 watch(isOpenAIOAuth, (enabled) => {
+  autoPauseOnExpired.value = !enabled
   if (!concurrencyEdited.value) {
     form.concurrency = enabled ? 50 : form.platform === 'grok' ? 1 : 10
   }
@@ -5751,7 +5755,7 @@ const resetForm = () => {
   grokOAuthCustomBaseUrlEnabled.value = false
   grokOAuthBaseUrl.value = ''
   interceptWarmupRequests.value = false
-  autoPauseOnExpired.value = true
+  autoPauseOnExpired.value = false
   openaiPassthroughEnabled.value = false
   openaiPassthroughModelFilterEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
@@ -7568,7 +7572,7 @@ const handleCookieAuth = async (sessionKey: string) => {
 const automaticAuthorizationOptions = computed(() => ({
   name: form.name, notes: form.notes, group_ids: [...form.group_ids], proxy_ids: [...form.proxy_ids],
   concurrency: form.concurrency, priority: form.priority, rate_multiplier: form.rate_multiplier,
-  load_factor: form.load_factor, expires_at: form.expires_at, auto_pause_on_expired: autoPauseOnExpired.value,
+  load_factor: form.load_factor, expires_at: form.expires_at, auto_pause_on_expired: false,
   extra: withUpstreamRequestIdHeader(buildOpenAIExtra()), credential_extras: buildOpenAICodexImportCredentialExtras() || undefined
 }))
 const automaticSettingsSummary = computed(() => {

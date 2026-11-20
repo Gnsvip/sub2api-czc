@@ -117,7 +117,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	ctx := context.Background()
-	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',error_message TEXT,schedulable BOOLEAN DEFAULT TRUE,proxy_id BIGINT,credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
+	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',type TEXT DEFAULT 'oauth',status TEXT DEFAULT 'active',error_message TEXT,schedulable BOOLEAN DEFAULT TRUE,proxy_id BIGINT,expires_at TIMESTAMPTZ,auto_pause_on_expired BOOLEAN DEFAULT TRUE,credentials JSONB,extra JSONB,deleted_at TIMESTAMPTZ,updated_at TIMESTAMPTZ DEFAULT NOW()); CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT); CREATE UNIQUE INDEX dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
 	for _, migration := range []string{"276_excel_bps_independent_grant.sql", "277_excel_bps_authorization_queue.sql", "278_excel_bps_auto_policy.sql", "282_codex_automatic_authorization.sql", "283_codex_preferred_workspace.sql", "284_codex_browser_diagnostic.sql"} {
 		raw, e := os.ReadFile("../../migrations/" + migration)
@@ -381,7 +381,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			_, err := db.Exec(`INSERT INTO accounts(id,credentials,extra,status,error_message,schedulable,proxy_id) VALUES($1,$2::jsonb,jsonb_build_object('keep','custom','openai_codex_authorization_pending',$3::boolean),'error',$4,FALSE,5)`, id, string(primaryJSON), pending, message)
 			require.NoError(t, err)
 			config := &service.ExcelLoginConfig{AccountID: id, Enabled: enabled, LoginEmail: "user@example.com", PasswordCiphertext: "encrypted-password", PreferredWorkspaceID: "workspace"}
-			ok, err := repo.SaveCodexLoginConfig(ctx, config, 0)
+			ok, err := repo.SaveCodexLoginConfig(ctx, config, 0, nil)
 			require.NoError(t, err)
 			require.True(t, ok)
 			saved, err := repo.GetCodexLoginConfig(ctx, id)
@@ -389,6 +389,120 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			require.Equal(t, "workspace", saved.PreferredWorkspaceID)
 			return config
 		}
+		t.Run("business expiry gates automatic recovery but permits explicit authorization", func(t *testing.T) {
+			for i, expiry := range []string{"NULL", "NOW()+INTERVAL '1 day'", "NOW()", "NOW()-INTERVAL '1 day'"} {
+				id := int64(1500 + i)
+				newAccount(id, true, false)
+				_, e := db.Exec(`UPDATE accounts SET expires_at=`+expiry+`,auto_pause_on_expired=FALSE WHERE id=$1`, id)
+				require.NoError(t, e)
+				ids, e := repo.ListCodexLoginCandidates(ctx)
+				require.NoError(t, e)
+				if i < 2 {
+					require.Contains(t, ids, id)
+				} else {
+					require.NotContains(t, ids, id)
+				}
+				task, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				if i < 2 {
+					require.NotNil(t, task)
+				} else {
+					require.Nil(t, task, "expiry must block the atomic queue insert too")
+					task, e = repo.QueueCodexLogin(ctx, id, true)
+					require.NoError(t, e)
+					require.NotNil(t, task, "explicit manual authorization remains available")
+				}
+				claimed, e := repo.ClaimCodexLogin(ctx, "expiry-worker")
+				require.NoError(t, e)
+				require.NotNil(t, claimed)
+				require.Equal(t, task.ID, claimed.ID)
+				ok, e := repo.FinishCodexLogin(ctx, task.ID, "expiry-worker", codexCandidate, healthyAstra())
+				require.NoError(t, e)
+				require.True(t, ok)
+			}
+		})
+		t.Run("expiry after enqueue prevents claim and stale credential commit", func(t *testing.T) {
+			for i, claimFirst := range []bool{false, true} {
+				id := int64(1510 + i)
+				newAccount(id, true, false)
+				task, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				require.NotNil(t, task)
+				if claimFirst {
+					claimed, e := repo.ClaimCodexLogin(ctx, "expiry-race")
+					require.NoError(t, e)
+					require.NotNil(t, claimed)
+					require.Equal(t, task.ID, claimed.ID)
+				}
+				_, e = db.Exec(`UPDATE accounts SET expires_at=NOW() WHERE id=$1`, id)
+				require.NoError(t, e)
+				if claimFirst {
+					ok, e := repo.FinishCodexLogin(ctx, task.ID, "expiry-race", codexCandidate, healthyAstra())
+					require.NoError(t, e)
+					require.False(t, ok)
+				} else {
+					claimed, e := repo.ClaimCodexLogin(ctx, "expiry-race")
+					require.NoError(t, e)
+					require.Nil(t, claimed)
+				}
+				_, e = repo.HasActiveCodexLogins(ctx)
+				require.NoError(t, e)
+				task, e = repo.GetCodexLoginTask(ctx, id)
+				require.NoError(t, e)
+				require.Equal(t, "cancelled", task.Status)
+				require.Equal(t, "account_expired", task.ErrorCode)
+				var token string
+				require.NoError(t, db.QueryRow(`SELECT credentials->>'access_token' FROM accounts WHERE id=$1`, id).Scan(&token))
+				require.Equal(t, "native-primary", token)
+			}
+		})
+		t.Run("authorization deadline saves clears and extends without pausing", func(t *testing.T) {
+			const id int64 = 1520
+			config := newAccount(id, true, false)
+			expiry := time.Now().Add(-time.Hour).Unix()
+			ok, e := repo.SaveCodexLoginConfig(ctx, config, 1, &expiry)
+			require.NoError(t, e)
+			require.True(t, ok)
+			var got time.Time
+			var pause, schedulable bool
+			require.NoError(t, db.QueryRow(`SELECT expires_at,auto_pause_on_expired,schedulable FROM accounts WHERE id=$1`, id).Scan(&got, &pause, &schedulable))
+			require.Equal(t, expiry, got.Unix())
+			require.False(t, pause)
+			require.False(t, schedulable, "saving a deadline must not resume a paused account")
+			future := time.Now().Add(time.Hour).Unix()
+			ok, e = repo.SaveCodexLoginConfig(ctx, config, 1, &future)
+			require.NoError(t, e)
+			require.False(t, ok, "stale revisions cannot update the deadline")
+			ok, e = repo.SaveCodexLoginConfig(ctx, config, 2, &future)
+			require.NoError(t, e)
+			require.True(t, ok)
+			ids, e := repo.ListCodexLoginCandidates(ctx)
+			require.NoError(t, e)
+			require.Contains(t, ids, id, "extending the date restores recovery eligibility")
+			clear := int64(0)
+			ok, e = repo.SaveCodexLoginConfig(ctx, config, 3, &clear)
+			require.NoError(t, e)
+			require.True(t, ok)
+			var noExpiry bool
+			require.NoError(t, db.QueryRow(`SELECT expires_at IS NULL FROM accounts WHERE id=$1`, id).Scan(&noExpiry))
+			require.True(t, noExpiry)
+		})
+		t.Run("saving other login settings preserves the existing expiry policy", func(t *testing.T) {
+			const id int64 = 1521
+			config := newAccount(id, true, false)
+			expiry := time.Now().Add(24 * time.Hour).Truncate(time.Second)
+			_, e := db.Exec(`UPDATE accounts SET expires_at=$2,auto_pause_on_expired=TRUE WHERE id=$1`, id, expiry)
+			require.NoError(t, e)
+			config.Enabled = false
+			ok, e := repo.SaveCodexLoginConfig(ctx, config, 1, nil)
+			require.NoError(t, e)
+			require.True(t, ok)
+			var got time.Time
+			var pause bool
+			require.NoError(t, db.QueryRow(`SELECT expires_at,auto_pause_on_expired FROM accounts WHERE id=$1`, id).Scan(&got, &pause))
+			require.Equal(t, expiry.Unix(), got.Unix())
+			require.True(t, pause)
+		})
 		for i, scenario := range []string{"initial success", "paused recovery", "other worker", "new credentials", "new config", "new workspace preference", "wrong first workspace", "admin pause", "proxy change", "disabled", "expired task", "first authorization without pending flag"} {
 			t.Run(scenario, func(t *testing.T) {
 				id := int64(1000 + i)
@@ -427,11 +541,11 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 					_, e = db.Exec(`UPDATE accounts SET credentials=credentials||'{"access_token":"new-admin-token"}'::jsonb WHERE id=$1`, id)
 				case "new workspace preference":
 					config.PreferredWorkspaceID = "different-workspace"
-					_, e = repo.SaveCodexLoginConfig(ctx, config, 1)
+					_, e = repo.SaveCodexLoginConfig(ctx, config, 1, nil)
 				case "wrong first workspace":
 					_, e = db.Exec(`UPDATE openai_codex_login_configs SET preferred_workspace_id='different-workspace' WHERE account_id=$1`, id)
 				case "new config":
-					_, e = repo.SaveCodexLoginConfig(ctx, config, 1)
+					_, e = repo.SaveCodexLoginConfig(ctx, config, 1, nil)
 				case "admin pause":
 					_, e = db.Exec(`UPDATE accounts SET schedulable=FALSE WHERE id=$1`, id)
 				case "proxy change":
@@ -612,6 +726,80 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				})
 			}
 		})
+		t.Run("Free recovery stays paused independently of Astra and worker metadata", func(t *testing.T) {
+			for i, tc := range []struct {
+				name, plan, reportedPlan                          string
+				initial, paused, autoPaused, missingProbe, manual bool
+			}{
+				{"Free pauses a schedulable account", "free", "pro", false, false, false, false, false},
+				{"Free overrides automatic auth resume", "free", "pro", false, false, true, false, false},
+				{"Free preserves manual pause", "free", "", false, true, false, false, false},
+				{"Free without Astra", "free", "", false, false, true, true, false},
+				{"manual Free reauthorization pauses", "free", "pro", false, false, true, false, true},
+				{"paid token ignores reported Free", "plus", "free", false, false, true, false, false},
+				{"paid preserves manual pause", "pro", "free", false, true, false, false, false},
+				{"first Free authorization unchanged", "free", "free", true, false, false, false, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					id := int64(1600 + i)
+					newAccount(id, true, tc.initial)
+					_, e := db.Exec(`UPDATE accounts SET schedulable=$2,credentials=credentials||'{"plan_type":"pro"}'::jsonb,
+ extra=extra||jsonb_build_object('openai_codex_auth_auto_paused',$3::boolean,'codex_tibo_verdict:http',
+ jsonb_build_object('model','gpt-6-astra','recent_samples',jsonb_build_array(jsonb_build_object('verdict','healthy','at',$4::text))))
+ WHERE id=$1`, id, !tc.initial && !tc.paused && !tc.autoPaused, tc.autoPaused, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano))
+					require.NoError(t, e)
+					queued, e := repo.QueueCodexLogin(ctx, id, tc.manual)
+					require.NoError(t, e)
+					require.NotNil(t, queued)
+					claimed, e := repo.ClaimCodexLogin(ctx, "free-plan")
+					require.NoError(t, e)
+					require.NotNil(t, claimed)
+					require.Equal(t, queued.ID, claimed.ID)
+					claims := map[string]any{"chatgpt_account_id": "workspace", "chatgpt_user_id": "user", "chatgpt_plan_type": tc.plan}
+					candidate := map[string]any{"client_id": openai.ClientID, "refresh_token": "free-plan-refresh", "chatgpt_account_id": "workspace", "chatgpt_user_id": "user", "email": "user@example.com", "plan_type": tc.reportedPlan}
+					candidate["access_token"] = jwt(map[string]any{"client_id": openai.ClientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": claims})
+					candidate["id_token"] = jwt(map[string]any{"aud": []string{openai.ClientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": "user@example.com", "https://api.openai.com/auth": claims})
+					probe := healthyAstra()
+					if tc.missingProbe {
+						probe = nil
+					}
+					ok, e := repo.FinishCodexLogin(ctx, queued.ID, "free-plan", candidate, probe)
+					require.NoError(t, e)
+					require.True(t, ok)
+					ok, e = repo.FinishCodexLogin(ctx, queued.ID, "free-plan", candidate, probe)
+					require.NoError(t, e)
+					require.False(t, ok, "duplicate completion must not count or resume twice")
+					var status, plan, token, keep string
+					var schedulable, autoPaused bool
+					var count, points int
+					require.NoError(t, db.QueryRow(`SELECT status,schedulable,credentials->>'plan_type',credentials->>'access_token',extra->>'keep',
+ COALESCE((extra->>'openai_codex_reauthorization_count')::int,0),extra ? 'openai_codex_auth_auto_paused',
+ jsonb_array_length(extra->'codex_tibo_verdict:http'->'recent_samples') FROM accounts WHERE id=$1`, id).Scan(&status, &schedulable, &plan, &token, &keep, &count, &autoPaused, &points))
+					require.Equal(t, service.StatusActive, status)
+					require.Equal(t, tc.plan, plan, "persist the token plan, not stale or worker-reported metadata")
+					require.Equal(t, candidate["access_token"], token)
+					require.Equal(t, "custom", keep)
+					require.False(t, autoPaused, "a future quality result cannot reuse the old auth pause ownership")
+					freeRecovery := !tc.initial && tc.plan == "free"
+					require.Equal(t, !freeRecovery && !tc.paused, schedulable)
+					wantCount, wantPoints, wantStage := 1, 2, "succeeded"
+					if tc.initial {
+						wantCount, wantPoints = 0, 1
+					} else if freeRecovery {
+						wantPoints, wantStage = 1, "succeeded_free_plan"
+					}
+					require.Equal(t, wantCount, count)
+					require.Equal(t, wantPoints, points, "Free must not create a fake Astra verdict")
+					finished, e := repo.GetCodexLoginTask(ctx, id)
+					require.NoError(t, e)
+					require.Equal(t, "succeeded", finished.Status)
+					require.Equal(t, wantStage, finished.Stage)
+					ids, e := repo.ListCodexLoginCandidates(ctx)
+					require.NoError(t, e)
+					require.NotContains(t, ids, id, "successful Free login must not be retried as an auth failure")
+				})
+			}
+		})
 		t.Run("successful reauthorization counts once and survives task cleanup", func(t *testing.T) {
 			const id int64 = 1190
 			newAccount(id, true, false)
@@ -735,7 +923,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			finished, e := repo.GetCodexLoginTask(ctx, id)
 			require.NoError(t, e)
 			require.Equal(t, "succeeded", finished.Status)
-			require.Equal(t, "succeeded_personal_workspace_only", finished.Stage)
+			require.Equal(t, "succeeded_personal_workspace_only_free_plan", finished.Stage)
 		})
 		t.Run("initial attempt plus three retries after 60 seconds and success resets budget", func(t *testing.T) {
 			const id int64 = 1100
@@ -941,7 +1129,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			config, e := repo.GetCodexLoginConfig(ctx, 4003)
 			require.NoError(t, e)
 			require.Nil(t, config)
-			ok, e := repo.SaveCodexLoginConfig(ctx, &service.ExcelLoginConfig{AccountID: 4003, Enabled: true, LoginEmail: "user@example.com", PasswordCiphertext: "fresh-password"}, 0)
+			ok, e := repo.SaveCodexLoginConfig(ctx, &service.ExcelLoginConfig{AccountID: 4003, Enabled: true, LoginEmail: "user@example.com", PasswordCiphertext: "fresh-password"}, 0, nil)
 			require.NoError(t, e)
 			require.True(t, ok)
 			_, e = db.Exec(string(raw))

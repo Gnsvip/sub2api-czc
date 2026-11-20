@@ -22,7 +22,8 @@ const codexLoginRecoverableSQL = `a.status='error'
  AND (a.error_message='Codex authorization pending' OR a.error_message LIKE 'Token revoked (401):%' OR a.error_message LIKE 'Unauthorized (401):%' OR a.error_message LIKE 'Authentication failed (401):%'
  OR (a.error_message LIKE 'Token refresh failed (non-retryable):%' AND a.error_message ~ '(refresh_token_reused|refresh_token_invalidated|invalid_grant|invalid_refresh_token)'))`
 
-const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',COALESCE(a.error_message,''),'schedulable',a.schedulable,'proxy_id',a.proxy_id)`
+const codexLoginAccountStateSQL = `jsonb_build_object('status',a.status,'error',COALESCE(a.error_message,''),'schedulable',a.schedulable,'proxy_id',a.proxy_id)
+ || CASE WHEN a.extra->'openai_codex_auth_auto_paused'='true'::jsonb THEN '{"auth_auto_paused":true}'::jsonb ELSE '{}'::jsonb END`
 
 func (r *openAIExcelOAuthRepository) GetCodexLoginConfig(ctx context.Context, id int64) (*service.ExcelLoginConfig, error) {
 	c := &service.ExcelLoginConfig{AccountID: id}
@@ -246,13 +247,15 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||$2::jsonb,
  status=CASE WHEN $3 THEN 'active' ELSE status END,
  error_message=CASE WHEN $3 THEN NULL ELSE error_message END,
- schedulable=CASE WHEN $6 THEN FALSE WHEN error_message=$4 AND extra->'openai_codex_authorization_pending'='true'::jsonb THEN TRUE ELSE schedulable END,
-	 extra=(COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending') || CASE WHEN $5 THEN
+ schedulable=CASE WHEN $6 THEN FALSE
+ WHEN $8 AND extra->'openai_codex_auth_auto_paused'='true'::jsonb THEN TRUE
+ WHEN error_message=$4 AND extra->'openai_codex_authorization_pending'='true'::jsonb THEN TRUE ELSE schedulable END,
+	 extra=(COALESCE(extra,'{}'::jsonb)-'openai_codex_authorization_pending'-'openai_codex_auth_auto_paused') || CASE WHEN $5 THEN
 	 jsonb_build_object('openai_codex_reauthorization_count', CASE
 	 WHEN jsonb_typeof(extra->'openai_codex_reauthorization_count')='number'
 	 AND (extra->>'openai_codex_reauthorization_count') ~ '^[0-9]{1,15}$'
 	 THEN (extra->>'openai_codex_reauthorization_count')::bigint ELSE 0 END + 1)
-	 ELSE '{}'::jsonb END || $7::jsonb,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization, astra != nil && !astra.Healthy(), string(probeJSON))
+		 ELSE '{}'::jsonb END || $7::jsonb,updated_at=NOW() WHERE id=$1`, accountID, string(raw), recoverState, service.CodexAuthorizationPending, reauthorization, astra != nil && !astra.Healthy(), string(probeJSON), recoverState && astra != nil && astra.Healthy())
 	if err != nil {
 		return false, err
 	}

@@ -59,7 +59,7 @@ jobs:
           # suite in a fresh harness database so its exact counts stay isolated.
           go test -tags=integration ./internal/repository -run 'TestAccountPassthroughFilterBulk|TestContentModeration|TestTiboAutoGroup|TestMigrationsRunner_|TestChannelUltrafast|Test.*Billing|Test.*Subscription|Test.*AccountAutoReset|Test.*GroupModel|TestGeminiCachedContentRepository_|TestNativeReasoningReplayRedisIntegration|TestGroupUsageRollup|TestSchedulerSnapshot|TestSchedulerCache|TestAPIKeyRepo.*OpenAI' -skip '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/integration-tests.jsonl"
           go test -tags=integration ./internal/repository -run '^TestUserSubscriptionRepoSuite$' -count=1 -json > "$RUNNER_TEMP/subscription-tests.jsonl"
-          go test -tags=integration ./internal/repository -run '^TestAccountRepoSuite$/^TestDelete' -count=1 -json > "$RUNNER_TEMP/account-delete-tests.jsonl"
+          go test -tags=integration ./internal/repository -run '^TestAccountRepoSuite$/^Test(Delete|SetError|SetSchedulable|Update)' -count=1 -json > "$RUNNER_TEMP/account-delete-tests.jsonl"
       - name: Usage-log TTL and customized routing database round trip
         if: success() || failure()
         working-directory: backend

@@ -6,6 +6,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -78,6 +79,7 @@ func Logger() gin.HandlerFunc {
 			fields = append(fields, zap.String("model", model))
 		}
 
+		fields = appendOpenAIAccountScheduleAccessFields(fields, c)
 		fields = appendOpenAIWSIncrementalAccessFields(fields, c)
 
 		l := logger.FromContext(c.Request.Context()).With(fields...)
@@ -144,4 +146,35 @@ func openAIWSIncrementalAccessItemType(kind string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// One bounded decision, on the existing access log. No session hash, credentials,
+// input text, candidate lists or additional per-request log records are stored.
+func appendOpenAIAccountScheduleAccessFields(fields []zap.Field, c *gin.Context) []zap.Field {
+	raw, ok := c.Get("openai_schedule_decision")
+	if !ok {
+		return fields
+	}
+	decision, ok := raw.(service.OpenAIAccountScheduleDecision)
+	if !ok {
+		return fields
+	}
+	allocation := "new"
+	if decision.SelectedAccountID == 0 {
+		allocation = "unselected"
+	}
+	if decision.StickyPreviousHit || decision.StickySessionHit {
+		allocation = "sticky"
+	}
+	fields = append(fields, zap.String("schedule_allocation", allocation), zap.String("schedule_layer", decision.Layer), zap.Int64("schedule_account_id", decision.SelectedAccountID))
+	if decision.ExpiryCandidateID > 0 {
+		fields = append(fields,
+			zap.Int64("expiry_candidate_id", decision.ExpiryCandidateID),
+			zap.String("expiry_reason", decision.ExpiryReason),
+			zap.String("expiry_mode", decision.ExpiryMode),
+			zap.Int("expiry_snapshot_concurrency", decision.ExpiryConcurrency),
+			zap.Int("expiry_soft_limit", decision.ExpirySoftLimit),
+		)
+	}
+	return fields
 }

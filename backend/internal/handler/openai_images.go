@@ -222,6 +222,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			return
 		}
 
+		c.Set("openai_schedule_decision", scheduleDecision)
 		reqLog.Debug("openai.images.account_schedule_decision",
 			zap.String("layer", scheduleDecision.Layer),
 			zap.Bool("sticky_session_hit", scheduleDecision.StickySessionHit),

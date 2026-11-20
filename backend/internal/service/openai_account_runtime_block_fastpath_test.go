@@ -40,7 +40,8 @@ func TestOpenAI429FastPath_KeepsOAuthAccountSchedulableDuringRetryWindow(t *test
 	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil)
 	svc := &OpenAIGatewayService{rateLimitService: rateLimits}
 	rateLimits.SetAccountRuntimeBlocker(svc)
-	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	soon := time.Now().Add(time.Hour)
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ExpiresAt: &soon}
 	apiKeyAccount := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	setupTokenAccount := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
 	grokOAuthAccount := &Account{ID: 45, Platform: PlatformGrok, Type: AccountTypeOAuth}

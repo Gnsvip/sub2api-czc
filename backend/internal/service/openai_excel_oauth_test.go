@@ -649,6 +649,24 @@ func codexLoginTestCredentials(t *testing.T, clientID, workspace, user, email st
 		"access_token": jwt(map[string]any{"client_id": clientID, "exp": time.Now().Add(time.Hour).Unix(), "https://api.openai.com/auth": auth}),
 		"id_token":     jwt(map[string]any{"aud": []string{clientID}, "exp": time.Now().Add(time.Hour).Unix(), "email": email, "https://api.openai.com/auth": auth})}
 }
+func TestCodexLoginAccountExpiryKeepsUsageButStopsAutomaticRecovery(t *testing.T) {
+	now := time.Now()
+	for _, deadline := range []time.Time{now, now.Add(-time.Hour)} {
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, ExpiresAt: &deadline, AutoPauseOnExpired: false}
+		require.True(t, account.IsSchedulable(), "business expiry alone must not stop valid usage")
+		account.Status = StatusError
+		account.ErrorMessage = "Token revoked (401): token_invalidated"
+		require.False(t, codexLoginRecoveryNeeded(account))
+		account.ErrorMessage = "Token refresh failed (non-retryable): invalid_grant"
+		require.False(t, codexLoginRecoveryNeeded(account))
+		future := now.Add(time.Hour)
+		account.ExpiresAt = &future
+		require.True(t, codexLoginRecoveryNeeded(account))
+		account.ExpiresAt = nil
+		require.True(t, codexLoginRecoveryNeeded(account))
+	}
+}
+
 func TestCodexLoginRejectsExcelAndDifferentIdentity(t *testing.T) {
 	stored := map[string]any{"email": "one@example.com", "chatgpt_account_id": "workspace", "chatgpt_user_id": "user"}
 	valid := codexLoginTestCredentials(t, openai.ClientID, "workspace", "user", "one@example.com")
@@ -719,7 +737,7 @@ type codexLoginTestRepo struct {
 func (r *codexLoginTestRepo) GetCodexLoginConfig(ctx context.Context, id int64) (*ExcelLoginConfig, error) {
 	return r.GetExcelLoginConfig(ctx, id)
 }
-func (r *codexLoginTestRepo) SaveCodexLoginConfig(ctx context.Context, c *ExcelLoginConfig, revision int64) (bool, error) {
+func (r *codexLoginTestRepo) SaveCodexLoginConfig(ctx context.Context, c *ExcelLoginConfig, revision int64, _ *int64) (bool, error) {
 	return r.SaveExcelLoginConfig(ctx, c, revision)
 }
 func (r *codexLoginTestRepo) GetCodexLoginTask(context.Context, int64) (*ExcelLoginTask, error) {
@@ -759,8 +777,19 @@ func TestCodexLoginSecretsVerificationAndBPSIsolation(t *testing.T) {
 	disabled := false
 	preferred := "first-workspace"
 	input := CodexLoginInput{PreferredWorkspaceID: &preferred, Enabled: &disabled, Password: "synthetic private $ password", TOTPSecret: "JBSWY3DPEHPK3PXP"}
+	for _, invalid := range []int64{-1, 253402300800} {
+		_, err := oauth.SaveCodexLogin(ctx, 42, CodexLoginInput{ExpiresAt: &invalid})
+		require.ErrorContains(t, err, "请填写有效的过期时间")
+	}
+	deadline := time.Now().Add(24 * time.Hour)
+	reader.account.ExpiresAt = &deadline
+	reader.account.AutoPauseOnExpired = true
 	state, err := oauth.SaveCodexLogin(ctx, 42, input)
 	require.NoError(t, err)
+	require.NotNil(t, state.ExpiresAt)
+	require.Equal(t, deadline.Unix(), *state.ExpiresAt)
+	require.NotNil(t, state.AutoPauseOnExpired)
+	require.True(t, *state.AutoPauseOnExpired, "saving unrelated login settings preserves the old expiry policy")
 	require.False(t, state.Config.Enabled)
 	require.True(t, state.Config.PasswordConfigured)
 	raw, err := json.Marshal(state)

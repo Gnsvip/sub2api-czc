@@ -62,9 +62,11 @@ type ExcelLoginRepository interface {
 	FinishExcelLogin(context.Context, int64, string, map[string]any, string, ExcelBPSCredentialState) (bool, error)
 }
 type ExcelLoginStatus struct {
-	Config  *ExcelLoginConfig    `json:"config"`
-	Task    *ExcelLoginTask      `json:"task"`
-	Runtime reauthruntime.Status `json:"runtime"`
+	ExpiresAt          *int64               `json:"expires_at,omitempty"`
+	AutoPauseOnExpired *bool                `json:"auto_pause_on_expired,omitempty"`
+	Config             *ExcelLoginConfig    `json:"config"`
+	Task               *ExcelLoginTask      `json:"task"`
+	Runtime            reauthruntime.Status `json:"runtime"`
 }
 
 // Secret fields exist only on the authenticated internal worker response.

@@ -97,7 +97,7 @@ func TestOpenAIAccountExpiryWindowAndUndatedOrder(t *testing.T) {
 
 func TestOpenAIAccountExpirySoftCapAndCrossGroupAdmission(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
-		for _, scenario := range []string{"parallel stale loads", "soft cap spill", "hard cap fallback", "sticky above soft cap"} {
+		for _, scenario := range []string{"parallel stale loads", "soft cap spill", "hard cap fallback", "sticky above soft cap", "stale high load"} {
 			t.Run(strconv.FormatBool(advanced)+"/"+scenario, func(t *testing.T) {
 				soon, later := time.Now().Add(time.Hour), time.Now().Add(4*time.Hour)
 				accounts := []Account{
@@ -114,6 +114,9 @@ func TestOpenAIAccountExpirySoftCapAndCrossGroupAdmission(t *testing.T) {
 				if scenario == "sticky above soft cap" {
 					counts[2] = 49
 				}
+				if scenario == "stale high load" {
+					counts[1] = 39
+				}
 				var mu sync.Mutex
 				cache := schedulerTestConcurrencyCache{
 					// Every request sees the same stale load; the reservation
@@ -128,6 +131,9 @@ func TestOpenAIAccountExpirySoftCapAndCrossGroupAdmission(t *testing.T) {
 						counts[id]++
 						return true, nil
 					},
+				}
+				if scenario == "stale high load" {
+					cache.loadMap[1] = &AccountLoadInfo{AccountID: 1, CurrentConcurrency: 40, LoadRate: 80}
 				}
 				cfg := openAIResetTestScheduler(0).service.cfg
 				cfg.Gateway.Scheduling.LoadBatchEnabled = true
@@ -175,6 +181,10 @@ func TestOpenAIAccountExpirySoftCapAndCrossGroupAdmission(t *testing.T) {
 					require.Equal(t, int64(2), selections[0].Account.ID)
 					require.Equal(t, int64(1), decisions[0].ExpiryCandidateID)
 					require.Equal(t, "soft_limit", decisions[0].ExpiryReason)
+				case "stale high load":
+					require.Equal(t, int64(1), selections[0].Account.ID, "atomic reservation, not a stale 80-percent snapshot, decides spillover")
+					require.Equal(t, "preferred", decisions[0].ExpiryMode)
+					require.Equal(t, 40, counts[1])
 				case "sticky above soft cap":
 					require.Equal(t, int64(2), selections[0].Account.ID)
 					require.True(t, decisions[0].StickySessionHit)

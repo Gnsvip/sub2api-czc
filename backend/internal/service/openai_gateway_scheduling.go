@@ -1504,10 +1504,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			start = end
 		}
 		for _, item := range expiryOrder {
-			if item.expiryMode == "preferred" && item.loadInfo.CurrentConcurrency >= openAIExpiryTotalSoftLimit(item.account) {
-				observeOpenAIExpiry(ctx, item.account, "soft_limit", item.loadInfo)
-				continue
-			}
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
 				continue

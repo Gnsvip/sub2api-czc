@@ -1343,10 +1343,6 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			continue
 		}
 
-		if candidate.expiryMode == "preferred" && candidate.loadInfo.CurrentConcurrency >= openAIExpiryTotalSoftLimit(candidate.account) {
-			observeOpenAIExpiry(ctx, candidate.account, "soft_limit", candidate.loadInfo)
-			continue
-		}
 		limit := openAIExpiryAcquireLimit(candidate, candidate.account)
 		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, limit, budget, candidate.account)
 		if !attempted {

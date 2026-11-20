@@ -357,7 +357,7 @@ func TestTiboRouteVerdictIsCachedAndRefreshedWhenStale(t *testing.T) {
 	requireTiboProbe(t, tc.upstream.bodies[0])
 	state := tc.svc.loadOpenAITiboAccountState(tc.account.ID)
 	require.Equal(t, openAITiboHealthy, state.http.verdict)
-	require.WithinDuration(t, time.Now().Add(10*time.Minute), state.http.nextProbeAt, time.Minute, "healthy cadence")
+	require.WithinDuration(t, time.Now().Add(5*time.Minute), state.http.nextProbeAt, time.Minute, "healthy cadence")
 
 	safe := &tiboSafeUpstream{probeGate: make(chan struct{})}
 	tc.svc.httpUpstream = safe

@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'backend/internal/config/config.go'
+      - 'backend/internal/config/tibo_route*'
       - 'backend/internal/service/*astra*'
       - 'backend/internal/service/*tibo*'
       - 'backend/internal/service/intelligent_test*'
@@ -47,7 +49,7 @@ jobs:
           git diff --exit-code
       - name: Astra scheduling, manual probe, admin and persistence regressions
         working-directory: backend
-        run: go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run '^(TestTibo|TestOpenAITibo|TestOpenAIAstra|TestOpenAICodexAux|TestAdminService_SetOpenAIAstraProbe|TestAccountHandler_AstraProbe|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|Test.*SchedulerExtra)' -count=1 -json > "$RUNNER_TEMP/astra-tests.jsonl"
+        run: go test -race -tags=unit ./internal/config ./internal/service ./internal/repository ./internal/handler/admin -run '^(TestLoadOpenAITiboRoute|TestValidateOpenAITiboRoute|TestTibo|TestOpenAITibo|TestOpenAIAstra|TestOpenAICodexAux|TestAdminService_SetOpenAIAstraProbe|TestAccountHandler_AstraProbe|TestLockAndMergeAccountProbeExtraPreservesAstraSwitch|Test.*SchedulerExtra)' -count=1 -json > "$RUNNER_TEMP/astra-tests.jsonl"
       - name: Pelican saved models, subjects, midnight scheduling and slot safeguards
         working-directory: backend
         run: go test -race -tags=unit ./internal/service ./internal/repository -run '^(TestPickIntelligentTestAnimal|TestIntelligentTestAnimals|TestIntelligentAnimalHTMLPrompt|TestIntelligentTestEnqueue|TestResolveIntelligentTestModel|TestAdminPelican|TestVisualJudgeUsesRequestedAnimal|TestPelicanSlot|TestPelicanInBeijing|TestPelicanNext|TestPelicanLoop|TestRunScheduledPelican|TestScheduledPelican|TestUserPelicanTests)' -count=1 -json > "$RUNNER_TEMP/pelican-tests.jsonl"

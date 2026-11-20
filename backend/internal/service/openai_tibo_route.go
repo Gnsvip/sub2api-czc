@@ -89,7 +89,7 @@ func (s *OpenAIGatewayService) openAITiboRouteConfig() openAITiboSettings {
 		return fallback
 	}
 	cfg := openAITiboSettings{
-		interval:         pick(raw.Interval, 10*time.Minute),
+		interval:         pick(raw.Interval, config.DefaultOpenAITiboProbeInterval),
 		spread:           raw.Spread,
 		confirmSamples:   raw.ConfirmSamples,
 		confirmSpacing:   pick(raw.ConfirmSpacing, 20*time.Second),
@@ -432,7 +432,7 @@ func (r *openAITiboRouteState) scheduleNext(_ openAITiboRoute, now time.Time, cf
 func openAITiboCadenceDelay(cfg openAITiboSettings) time.Duration {
 	base := cfg.interval
 	if base <= 0 {
-		base = 10 * time.Minute
+		base = config.DefaultOpenAITiboProbeInterval
 	}
 	spread := cfg.spread
 	if spread < 0 {
@@ -451,7 +451,7 @@ func openAITiboCadenceDelay(cfg openAITiboSettings) time.Duration {
 func openAITiboStartupDelay(cfg openAITiboSettings) time.Duration {
 	base := cfg.interval
 	if base <= 0 {
-		base = 10 * time.Minute
+		base = config.DefaultOpenAITiboProbeInterval
 	}
 	secs := int64(base / time.Second)
 	return time.Duration(rand.Int64N(secs+1)) * time.Second

@@ -454,7 +454,7 @@ gateway:
       - gpt-5.6-sol
   # Tibo HTTP 探测（ChatGPT OAuth / setup-token）。
   # 每个可调度 ChatGPT OAuth 账号约每 interval 探一次，实际间隔在 ±spread 内均匀随机
-  # （默认 10m ± 5m）。确认翻结论时仍按 confirm_spacing 补探。unknown 样本不计票。
+  # （默认 5m ± 1m，即 4–6 分钟）。确认翻结论时仍按 confirm_spacing 补探。unknown 样本不计票。
   # 超过 max_stale 没有新的确定样本，有效状态才变为 unknown。
   # 线路按 healthy > unknown > degraded 分层；HTTP 是唯一跳，全部降智时仍走普通 HTTP，
   # 仅在使用记录中标记 route_degraded（不向客户端返回任何线路响应头）。
@@ -462,8 +462,8 @@ gateway:
     # 默认开启：后台账号列表 GPT 账号的 astra 健康度圆点依赖此探测。
     # 设为 false 可停止合成探针（官方 Codex CLI 不会发送），圆点随之消失。
     enabled: true
-    interval: 10m
-    spread: 5m
+    interval: 5m
+    spread: 1m
     confirm_samples: 3
     confirm_spacing: 20s
     # degraded 切回 healthy 至少间隔多久；负数表示不限制。

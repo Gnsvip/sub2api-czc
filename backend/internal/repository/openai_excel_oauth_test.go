@@ -725,6 +725,9 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
  FROM accounts WHERE id=$1`, id).Scan(&status, &schedulable, &token, &count, &points))
 					require.Equal(t, service.StatusActive, status, "valid authorization is retained independently of quality")
 					require.Equal(t, tc.verdict == "healthy" && !tc.paused, schedulable)
+					var grant bool
+					require.NoError(t, db.QueryRow(`SELECT (extra->>$2) IS NOT NULL FROM accounts WHERE id=$1`, id, service.CodexRecoveryGrantKey).Scan(&grant))
+					require.Equal(t, schedulable, grant)
 					require.Equal(t, codexCandidate["access_token"], token)
 					require.Equal(t, 1, count)
 					if tc.verdict == "unknown" {

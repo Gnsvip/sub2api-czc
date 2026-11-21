@@ -692,15 +692,16 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	expiryMode string
-	account    *Account
-	loadInfo   *AccountLoadInfo
-	loadKnown  bool
-	score      float64
-	priority   int
-	errorRate  float64
-	ttft       float64
-	hasTTFT    bool
+	recoveryGrant string
+	expiryMode    string
+	account       *Account
+	loadInfo      *AccountLoadInfo
+	loadKnown     bool
+	score         float64
+	priority      int
+	errorRate     float64
+	ttft          float64
+	hasTTFT       bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -1150,9 +1151,9 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		}
 		finish := func(order []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 			if plan.preferExpiry {
-				return buildOpenAIExpirySelectionOrder(order, time.Now())
+				order = buildOpenAIExpirySelectionOrder(order, time.Now())
 			}
-			return order
+			return preferCodexRecoverySessions(req, order, pool)
 		}
 		if !plan.includeOverflowFallback || groupTopK >= len(pool) {
 			return finish(primary)
@@ -1334,6 +1335,12 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 	}
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
+		if candidate.recoveryGrant != "" {
+			if selected := s.service.tryCodexRecoverySession(ctx, req, candidate); selected != nil {
+				return selected, compactBlocked, nil
+			}
+			continue
+		}
 		if candidate.account == nil {
 			continue
 		}
@@ -1929,6 +1936,9 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 		wantAttempted := pass == 1 || pass == 3
 		wantKnownFull := pass >= 2
 		for _, candidate := range attempt.selectionOrder {
+			if candidate.recoveryGrant != "" {
+				continue
+			}
 			if candidate.account == nil {
 				continue
 			}
@@ -2671,10 +2681,18 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		if preserveStickyBinding {
 			legacySessionHash = ""
 		}
+		legacyReq := OpenAIAccountScheduleRequest{
+			GroupID: groupID, Platform: platform, SessionHash: legacySessionHash,
+			PreviousResponseID: previousResponseID, GuardianParentAccountID: guardianParentAccountID,
+			PreserveStickyBinding: preserveStickyBinding, RequestedModel: requestedModel,
+			RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
+			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, UseUpstreamTokenCost: useUpstreamTokenCost,
+		}
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+				legacyReq.ExcludedIDs = effectiveExcludedIDs
+				selection, err := s.selectAccountWithLoadAwareness(ctx, legacyReq)
 				if err != nil {
 					return nil, decision, err
 				}
@@ -2700,7 +2718,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+			legacyReq.ExcludedIDs = effectiveExcludedIDs
+			selection, err := s.selectAccountWithLoadAwareness(ctx, legacyReq)
 			if err != nil {
 				return nil, decision, err
 			}

@@ -14,6 +14,94 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type schedulerRecoveryCache struct {
+	schedulerTestGatewayCache
+	left int
+}
+
+func (c *schedulerRecoveryCache) StartCodexRecovery(context.Context, int64, time.Time) error {
+	return nil
+}
+func (c *schedulerRecoveryCache) CodexRecoveryAvailable(context.Context, int64, string) (bool, error) {
+	return c.left > 0, nil
+}
+func (c *schedulerRecoveryCache) ClaimCodexRecoverySession(ctx context.Context, id int64, _ string, b CodexRecoveryBinding) (bool, error) {
+	if c.left == 0 {
+		return false, nil
+	}
+	c.left--
+	return true, c.SetSessionAccountID(ctx, b.GroupID, b.Primary, id, b.TTL)
+}
+
+func TestCodexRecoveryNewSessionsAndExistingBindings(t *testing.T) {
+	for _, mode := range []string{"simple", "legacy", "advanced"} {
+		t.Run(mode, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			group := int64(7000)
+			first := tiboSchedulerAccount(31, 1, group)
+			recovered := tiboSchedulerAccount(32, 1, group)
+			recovered.Extra[CodexRecoveryGrantKey] = time.Now().UTC().Format(time.RFC3339Nano)
+			cache := &schedulerRecoveryCache{left: 2}
+			svc := newTiboSchedulerService([]Account{first, recovered}, &cache.schedulerTestGatewayCache, false)
+			svc.cache = cache
+			svc.cfg.Gateway.Scheduling.LoadBatchEnabled = mode != "simple"
+			if mode != "advanced" {
+				svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("false")
+			}
+			ctx := context.Background()
+			require.NoError(t, svc.BindStickySession(ctx, &group, "bound", first.ID))
+			pick := func(session string) int64 {
+				t.Helper()
+				sel, _, err := svc.SelectAccountWithScheduler(ctx, &group, "", session, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, sel)
+				require.True(t, sel.Acquired)
+				if sel.ReleaseFunc != nil {
+					sel.ReleaseFunc()
+				}
+				return sel.Account.ID
+			}
+			require.Equal(t, first.ID, pick("bound"))
+			require.Equal(t, 2, cache.left)
+			require.Equal(t, recovered.ID, pick("new-1"))
+			require.Equal(t, recovered.ID, pick("new-1"))
+			require.Equal(t, 1, cache.left)
+			require.Equal(t, recovered.ID, pick("new-2"))
+			require.Zero(t, cache.left)
+		})
+	}
+}
+
+func TestCodexRecoveryPreferenceGates(t *testing.T) {
+	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, SessionHash: "fresh"}
+	first := tiboSchedulerAccount(1, 1, 7)
+	a := tiboSchedulerAccount(2, 1, 7)
+	a.Extra[CodexRecoveryGrantKey] = time.Now().UTC().Format(time.RFC3339Nano)
+	order := []openAIAccountCandidateScore{{account: &first}}
+	pool := append([]openAIAccountCandidateScore{{account: &a}}, order...)
+	require.NotEmpty(t, preferCodexRecoverySessions(req, order, pool)[0].recoveryGrant)
+	for _, change := range []func(*OpenAIAccountScheduleRequest){
+		func(r *OpenAIAccountScheduleRequest) { r.PreviousResponseID = "resp_1" },
+		func(r *OpenAIAccountScheduleRequest) { r.PreserveStickyBinding = true },
+		func(r *OpenAIAccountScheduleRequest) { r.ExcludedIDs = map[int64]struct{}{3: {}} },
+		func(r *OpenAIAccountScheduleRequest) { r.SessionHash = "" },
+	} {
+		other := req
+		change(&other)
+		require.Equal(t, order, preferCodexRecoverySessions(other, order, pool))
+	}
+	a.Priority++
+	require.Equal(t, order, preferCodexRecoverySessions(req, order, pool))
+	a.Priority--
+	reset := time.Now().Add(time.Minute)
+	a.RateLimitResetAt = &reset
+	require.Equal(t, order, preferCodexRecoverySessions(req, order, pool))
+	a.RateLimitResetAt = nil
+	delete(a.Extra, CodexRecoveryGrantKey)
+	require.Equal(t, order, preferCodexRecoverySessions(req, order, pool))
+}
+
 type openAISnapshotCacheStub struct {
 	SchedulerCache
 	snapshotAccounts []*Account

@@ -225,8 +225,9 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 	defer func() { _ = tx.Rollback() }()
 	var accountID int64
 	var primary, extraJSON []byte
+	var schedulable bool
 	var status, message string
-	err = tx.QueryRowContext(ctx, `SELECT a.id,a.credentials,a.status,COALESCE(a.error_message,''),COALESCE(a.extra,'{}'::jsonb) FROM accounts a JOIN openai_excel_login_tasks t ON t.account_id=a.id WHERE t.id=$1 AND t.oauth_profile='codex' AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.status IN ('active','error') FOR UPDATE OF a`, id).Scan(&accountID, &primary, &status, &message, &extraJSON)
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.credentials,a.status,COALESCE(a.error_message,''),COALESCE(a.extra,'{}'::jsonb),a.schedulable FROM accounts a JOIN openai_excel_login_tasks t ON t.account_id=a.id WHERE t.id=$1 AND t.oauth_profile='codex' AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.status IN ('active','error') FOR UPDATE OF a`, id).Scan(&accountID, &primary, &status, &message, &extraJSON, &schedulable)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -279,6 +280,10 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 		astra = &service.CodexLoginAstraResult{Verdict: "unknown"}
 	}
 	probeExtra := map[string]any{}
+	if reauthorization {
+		// Each successful login replaces any unspent preference from the old grant.
+		probeExtra[service.CodexRecoveryGrantKey] = nil
+	}
 	if astra != nil {
 		var extra map[string]any
 		if err := json.Unmarshal(extraJSON, &extra); err != nil {
@@ -286,6 +291,9 @@ func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id in
 		}
 		if history := astra.History(extra[service.OpenAIAstraPolicyExtraKey]); history != nil {
 			probeExtra[service.OpenAIAstraPolicyExtraKey] = history
+			if astra.Healthy() && (schedulable || (recoverState && extra[service.CodexAuthAutoPauseExtraKey] == true)) {
+				probeExtra[service.CodexRecoveryGrantKey] = astra.SampledAt.UTC().Format(time.RFC3339Nano)
+			}
 		}
 	}
 	probeJSON, err := json.Marshal(probeExtra)

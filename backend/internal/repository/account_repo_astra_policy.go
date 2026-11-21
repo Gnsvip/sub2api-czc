@@ -38,10 +38,13 @@ func lockAstraPolicyExtraUpdate(ctx context.Context, client *dbent.Client, id in
 		}
 	}
 	_, previousAt := service.LatestOpenAIAstraSample(current)
-	_, incomingAt := service.LatestOpenAIAstraSample(updates[service.OpenAIAstraPolicyExtraKey])
+	verdict, incomingAt := service.LatestOpenAIAstraSample(updates[service.OpenAIAstraPolicyExtraKey])
 	if previousAt.After(incomingAt) {
 		updates = maps.Clone(updates)
 		delete(updates, service.OpenAIAstraPolicyExtraKey)
+	} else if verdict == "degraded" {
+		updates = maps.Clone(updates)
+		updates[service.CodexRecoveryGrantKey] = nil
 	}
 	return updates, nil
 }

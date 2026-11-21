@@ -26,10 +26,14 @@ func TestSparkRetirementWebSocketEveryTurn(t *testing.T) {
 			})
 		})
 		t.Run(mode+"/later", func(t *testing.T) {
+			reason := "not available for this group"
+			if mode == service.OpenAIWSIngressModeDedicated {
+				reason = "has been retired"
+			}
 			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
 				firstPayload:  `{"type":"response.create","model":"gpt-5.4","stream":false}`,
 				secondPayload: `{"type":"response.create","model":"gpt-5.3-codex-spark-openai-compact","stream":false}`,
-				group:         wsAllowlistGroup(false), ingressMode: mode, secondTurnCloseExpected: true,
+				group:         wsAllowlistGroup(false), ingressMode: mode, secondTurnCloseExpected: true, closeReason: reason,
 			})
 		})
 	}

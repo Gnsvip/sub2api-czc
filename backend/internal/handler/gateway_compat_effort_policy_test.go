@@ -46,6 +46,7 @@ func TestOpenAIResponsesUsageReportsConfigurationUpdateEffort(t *testing.T) {
 		nil, nil, service.NewBillingService(cfg, nil), nil, billing, upstream, &service.DeferredService{},
 		nil, nil, nil, nil, nil, nil, nil,
 	)
+	gateway.DisableOpenAITiboRouteForTest()
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
 		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	c, rec := newAstraProFailoverContext(t, body)

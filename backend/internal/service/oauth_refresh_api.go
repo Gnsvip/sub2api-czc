@@ -297,7 +297,10 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		}
 		result := &OAuthRefreshResult{Refreshed: applied, Account: durableAccount}
 		if applied {
-			result.NewCredentials = newCredentials
+			result.NewCredentials = durableAccount.Credentials
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
+			defer cancel()
+			notifyOAuthCredentialsPersisted(cleanupCtx, executor, attemptedAccount)
 		}
 		return result, nil
 	}
@@ -415,11 +418,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 			return nil, fmt.Errorf("%w: %v", errOAuthRefreshCredentialPersist, updateErr)
 		}
 		if freshAccount.IsOpenAIOAuth() {
-			if publisher, ok := executor.(interface {
-				AuthCredentialsPersisted(context.Context, *Account)
-			}); ok {
-				publisher.AuthCredentialsPersisted(ctx, attemptedAccount)
-			}
+			notifyOAuthCredentialsPersisted(ctx, executor, attemptedAccount)
 		}
 	}
 
@@ -434,6 +433,14 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		NewCredentials: newCredentials,
 		Account:        freshAccount,
 	}, nil
+}
+
+func notifyOAuthCredentialsPersisted(ctx context.Context, executor OAuthRefreshExecutor, previous *Account) {
+	if publisher, ok := executor.(interface {
+		AuthCredentialsPersisted(context.Context, *Account)
+	}); ok {
+		publisher.AuthCredentialsPersisted(ctx, previous)
+	}
 }
 
 func hasOpenAIRefreshCredentials(account *Account, credentials map[string]any) bool {

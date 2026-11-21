@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -147,15 +148,31 @@ func (r *openAIExcelOAuthRepository) ProgressExcelLogin(ctx context.Context, id 
 }
 func (r *openAIExcelOAuthRepository) FailExcelLogin(ctx context.Context, id int64, worker, code string) (bool, error) {
 	diagnostic := ""
+	ray := ""
 	if parsed := service.ParseCodexBrowserDiagnostic(code); parsed != nil {
 		diagnostic, code = code, parsed.Reason
+		if parsed.Evidence != nil {
+			ray = parsed.Evidence.CFRay
+		}
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code=$3,diagnostic=$4,updated_at=NOW() WHERE id=$1 AND worker_id=$2 AND status='running'`, id, worker, code, diagnostic)
+	var profile, trigger, snapshotError string
+	var accountID int64
+	err := r.db.QueryRowContext(ctx, `UPDATE openai_excel_login_tasks SET status='failed',stage='failed',error_code=$3,diagnostic=$4,updated_at=NOW()
+ WHERE id=$1 AND worker_id=$2 AND status='running' RETURNING oauth_profile,account_id,
+ CASE WHEN expected_account_state->>'manual_authorization'='true' THEN 'manual' ELSE 'auto' END,
+ COALESCE(expected_account_state->>'error','')`, id, worker, code, diagnostic).Scan(&profile, &accountID, &trigger, &snapshotError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	n, err := result.RowsAffected()
-	return n == 1, err
+	if profile == "codex" {
+		slog.WarnContext(ctx, "codex_login_failed", "task_id", id, "account_id", accountID,
+			"worker_id", codexWorkerLogID(worker), "trigger", trigger, "trigger_reason", codexLoginTriggerReason(snapshotError),
+			"error_code", code, "cf_ray", ray, "diagnostic", diagnostic)
+	}
+	return true, nil
 }
 func (r *openAIExcelOAuthRepository) FinishExcelLogin(ctx context.Context, id int64, worker string, candidate map[string]any, cipher string, state service.ExcelBPSCredentialState) (bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)

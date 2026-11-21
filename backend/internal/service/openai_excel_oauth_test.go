@@ -1003,6 +1003,17 @@ func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 	valid := "codex_browser_failed stage=protocol_connecting action=submit_email reason=timeout elapsed_ms=16130 action_ms=15001 http_status=200 response=document"
 	protocol := strings.Replace(valid, "codex_browser_failed", "codex_protocol_failed", 1)
 	require.NotNil(t, ParseCodexBrowserDiagnostic(protocol))
+	require.Nil(t, ParseCodexBrowserDiagnostic(protocol).Evidence)
+	base403 := "codex_protocol_failed stage=protocol_connecting action=read_page reason=security_check elapsed_ms=40 action_ms=38 http_status=403 response=document"
+	extended := base403 + " cf_mitigated=challenge challenge_signal=both body_marker=cf_chl server=cloudflare cf_ray=1234567890abcdef-SEA retry_after=60 content_type=html"
+	require.Greater(t, len(extended), 256)
+	observed := ParseCodexBrowserDiagnostic(extended)
+	require.NotNil(t, observed)
+	require.NotNil(t, observed.Evidence)
+	require.Equal(t, "both", observed.Evidence.ChallengeSignal)
+	require.Equal(t, "1234567890abcdef-SEA", observed.Evidence.CFRay)
+	require.Equal(t, 60, *observed.Evidence.RetryAfter)
+	require.Equal(t, "security_check", safeLoginFailureCode(extended))
 	require.Equal(t, "timeout", safeLoginFailureCode(protocol))
 	diagnostic := ParseCodexBrowserDiagnostic(valid)
 	require.NotNil(t, diagnostic)
@@ -1014,7 +1025,20 @@ func TestCodexLoginFailureDiagnosticsNeverPersistArbitraryOutput(t *testing.T) {
 	grant.repo = repo
 	require.NoError(t, grant.oauth.FailExcelLogin(context.Background(), 8, "worker", valid))
 	require.Equal(t, valid, repo.failures[0])
+	codexRepo := &codexLoginTestRepo{excelLoginTestRepo: repo}
+	grant.repo = codexRepo
+	repo.task = &ExcelLoginTask{ID: 8, AccountID: 42, Status: "running", WorkerID: "worker", OAuthProfile: "codex"}
+	rawEvidence := strings.TrimPrefix(extended, base403+" ")
+	require.NoError(t, grant.oauth.ObserveCodexLoginForbidden(context.Background(), 8, "worker", rawEvidence))
+	require.Error(t, grant.oauth.ObserveCodexLoginForbidden(context.Background(), 8, "worker", rawEvidence+" password=PRIVATE"))
+	require.Error(t, grant.oauth.ObserveCodexLoginForbidden(context.Background(), 8, "another-worker", rawEvidence))
+	require.Equal(t, "running", repo.task.Status)
+	require.Len(t, repo.failures, 1)
+	grant.repo = repo
 	for _, invalid := range []string{
+		extended + " secret",
+		strings.Replace(extended, "retry_after=60", "retry_after=86401", 1),
+		strings.Replace(extended, "1234567890abcdef-SEA", "private-credential", 1),
 		valid + " password=PRIVATE",
 		strings.Replace(valid, "submit_email", "private_email", 1),
 		strings.Replace(valid, "protocol_connecting", "private_stage", 1),

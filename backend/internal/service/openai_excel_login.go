@@ -7,6 +7,7 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/mail"
 	"regexp"
 	"strconv"
@@ -332,22 +333,63 @@ var codexLoginFailureDiagnostic = regexp.MustCompile(`^local_protocol_failed sta
 
 // A bounded snapshot, never browser exception text, URLs, page bodies or identity.
 type CodexBrowserDiagnostic struct {
-	Stage      string `json:"stage"`
-	Action     string `json:"action"`
-	Reason     string `json:"reason"`
-	ElapsedMS  int    `json:"elapsed_ms"`
-	ActionMS   int    `json:"action_ms"`
-	HTTPStatus int    `json:"http_status"`
-	Response   string `json:"response"`
+	Stage      string                     `json:"stage"`
+	Action     string                     `json:"action"`
+	Reason     string                     `json:"reason"`
+	ElapsedMS  int                        `json:"elapsed_ms"`
+	ActionMS   int                        `json:"action_ms"`
+	HTTPStatus int                        `json:"http_status"`
+	Response   string                     `json:"response"`
+	Evidence   *CodexHTTPResponseEvidence `json:"evidence,omitempty"`
+}
+
+// Absent on legacy tasks. Only bounded response metadata crosses the worker boundary.
+type CodexHTTPResponseEvidence struct {
+	CFMitigated     string `json:"cf_mitigated"`
+	ChallengeSignal string `json:"challenge_signal"`
+	BodyMarker      string `json:"body_marker"`
+	Server          string `json:"server"`
+	CFRay           string `json:"cf_ray"`
+	RetryAfter      *int   `json:"retry_after,omitempty"`
+	ContentType     string `json:"content_type"`
+}
+
+var codexEvidencePattern = regexp.MustCompile(`^cf_mitigated=(none|challenge|other) challenge_signal=(none|header|body|both) body_marker=(none|just_a_moment|cf_chl|challenge_platform) server=(none|cloudflare|other) cf_ray=(none|[0-9a-fA-F]{16}(?:-[A-Z]{3})?) retry_after=(none|[0-9]{1,5}) content_type=(none|html|json|other)$`)
+
+func parseCodexResponseEvidence(raw string) *CodexHTTPResponseEvidence {
+	if len(raw) > 256 {
+		return nil
+	}
+	m := codexEvidencePattern.FindStringSubmatch(raw)
+	if m == nil {
+		return nil
+	}
+	var retry *int
+	if m[6] != "none" {
+		n, _ := strconv.Atoi(m[6])
+		if n > 86400 {
+			return nil
+		}
+		retry = &n
+	}
+	return &CodexHTTPResponseEvidence{CFMitigated: m[1], ChallengeSignal: m[2], BodyMarker: m[3], Server: m[4], CFRay: m[5], RetryAfter: retry, ContentType: m[7]}
 }
 
 var codexBrowserDiagnosticPattern = regexp.MustCompile(`^codex_(?:browser|protocol)_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)$`)
 
 func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
-	if len(raw) > 256 {
+	if len(raw) > 512 {
 		return nil
 	}
-	m := codexBrowserDiagnosticPattern.FindStringSubmatch(raw)
+	base, suffix, hasEvidence := strings.Cut(raw, " cf_mitigated=")
+	var evidence *CodexHTTPResponseEvidence
+	if hasEvidence {
+		evidence = parseCodexResponseEvidence("cf_mitigated=" + suffix)
+		if evidence == nil || !strings.HasPrefix(base, "codex_protocol_failed ") {
+			return nil
+		}
+	}
+	m := codexBrowserDiagnosticPattern.FindStringSubmatch(base)
 	if m == nil {
 		return nil
 	}
@@ -372,7 +414,32 @@ func ParseCodexBrowserDiagnostic(raw string) *CodexBrowserDiagnostic {
 	if elapsed > 360000 || action > elapsed || (status != 0 && (status < 100 || status > 599)) || (m[7] == "none") != (status == 0) {
 		return nil
 	}
-	return &CodexBrowserDiagnostic{Stage: m[1], Action: m[2], Reason: m[3], ElapsedMS: elapsed, ActionMS: action, HTTPStatus: status, Response: m[7]}
+	if evidence != nil && status == 0 {
+		return nil
+	}
+	return &CodexBrowserDiagnostic{Stage: m[1], Action: m[2], Reason: m[3], ElapsedMS: elapsed, ActionMS: action, HTTPStatus: status, Response: m[7], Evidence: evidence}
+}
+
+// Report an intermediate 403 even if the OAuth client later succeeds.
+func (s *OpenAIOAuthService) ObserveCodexLoginForbidden(ctx context.Context, id int64, worker, raw string) error {
+	evidence := parseCodexResponseEvidence(raw)
+	if evidence == nil {
+		return infraerrors.BadRequest("CODEX_LOGIN_DIAGNOSTIC_INVALID", "Invalid response diagnostic")
+	}
+	r, err := s.codexLoginRepo()
+	if err != nil {
+		return err
+	}
+	t, err := r.GetLoginTaskByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if t == nil || t.OAuthProfile != "codex" || t.Status != "running" || t.WorkerID != worker {
+		return infraerrors.Conflict("CODEX_LOGIN_TASK_CHANGED", "授权任务已变更")
+	}
+	slog.InfoContext(ctx, "codex_login_http_403", "task_id", id, "account_id", t.AccountID, "http_status", 403,
+		"cf_ray", evidence.CFRay, "evidence", raw)
+	return nil
 }
 
 func safeLoginFailureCode(reason string) string {

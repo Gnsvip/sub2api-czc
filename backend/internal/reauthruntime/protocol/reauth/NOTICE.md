@@ -6,7 +6,7 @@ Pinned commit: `db8251817fd1baefc83c14c851135fb6078bc001` (MIT).
 
 Only the login library and local TOTP generator are embedded; no Web UI, redemption service, telemetry, registration service or automatic upload is included. The Sub2API adapter preserves identity/workspace validation and worker limits. `http_client.py` is adapted to require the existing pinned curl-cffi runtime and to constrain request destinations and redirects.
 
-Vendored Python trailing whitespace is normalized; the upstream logic is unchanged except for the HTTP adapter described above.
+Vendored Python trailing whitespace is normalized. In addition to the HTTP adapter, the OAuth client's challenge check exposes the matched marker for sanitized diagnostics; its rejection criteria are unchanged.
 
 Original upstream SHA256 values:
 

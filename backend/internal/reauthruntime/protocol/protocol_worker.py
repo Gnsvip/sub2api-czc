@@ -26,6 +26,14 @@ ACTIONS = frozenset({"initializing", "open_login", "read_page",
                      "security_check", "exchange_token", "validate_tokens", "protocol_process", "apply_credentials"})
 DIAGNOSTIC = re.compile(r"codex_protocol_failed stage=([a-z_]+) action=([a-z_]+) reason=([a-z_]+) "
                         r"elapsed_ms=([0-9]{1,6}) action_ms=([0-9]{1,6}) http_status=([0-9]{1,3}) response=(none|document|auth_request|token)")
+EVIDENCE = re.compile(r"cf_mitigated=(?:none|challenge|other) challenge_signal=(?:none|header|body|both) "
+                      r"body_marker=(?:none|just_a_moment|cf_chl|challenge_platform) server=(?:none|cloudflare|other) "
+                      r"cf_ray=(?:none|[0-9a-fA-F]{16}(?:-[A-Z]{3})?) retry_after=(none|[0-9]{1,5}) content_type=(?:none|html|json|other)")
+
+
+def valid_evidence(raw):
+    match = EVIDENCE.fullmatch(raw) if isinstance(raw, str) and len(raw) <= 256 else None
+    return match is not None and (match[1] == 'none' or int(match[1]) <= 86400)
 
 
 def safe_diagnostic(code, data):
@@ -41,17 +49,28 @@ def safe_diagnostic(code, data):
             or data.get("response") not in ("none", "document", "auth_request", "token")
             or (data["response"] == "none") != (status == 0)):
         return None
-    return (f"codex_protocol_failed stage={data['stage']} action={data['action']} reason={code} "
+    base = (f"codex_protocol_failed stage={data['stage']} action={data['action']} reason={code} "
             f"elapsed_ms={elapsed} action_ms={action} http_status={status} response={data['response']}")
+    if 'evidence' not in data:
+        return base
+    if valid_evidence(data['evidence']) and status:
+        return base + ' ' + data['evidence']
+    return None
 
 
 def parse_diagnostic(raw):
-    match = DIAGNOSTIC.fullmatch(raw) if isinstance(raw, str) and len(raw) <= 256 else None
+    if not isinstance(raw, str) or len(raw) > 512:
+        return None
+    base, separator, fields = raw.partition(' cf_mitigated=')
+    match = DIAGNOSTIC.fullmatch(base)
     if not match:
         return None
     stage, action, reason, elapsed, duration, status, response = match.groups()
-    return safe_diagnostic(reason, dict(stage=stage, action=action, elapsed_ms=int(elapsed),
-                                       action_ms=int(duration), http_status=int(status), response=response))
+    data = dict(stage=stage, action=action, elapsed_ms=int(elapsed),
+                action_ms=int(duration), http_status=int(status), response=response)
+    if separator:
+        data['evidence'] = 'cf_mitigated=' + fields
+    return safe_diagnostic(reason, data)
 
 
 class ProtocolFailure(Exception):
@@ -230,6 +249,16 @@ def run_protocol(api, claim, worker, root=None):
                 if event.get("type") == "stage" and event.get("stage") in STAGES:
                     last_stage = event["stage"]
                     worker._best_effort_progress(api, task_id, event["stage"])
+                elif event.get("type") == "forbidden":
+                    evidence = event.get("evidence")
+                    if valid_evidence(evidence):
+                        # An intermediate observation must never fail a login.
+                        try:
+                            client = worker.WorkerAPI(replace(api.config, request_timeout=1.0))
+                            client._post(f"/api/v1/internal/openai-reauth/{task_id}/observe",
+                                         {"worker_id": api.config.worker_id, "evidence": evidence})
+                        except (worker.WorkerError, OSError):
+                            pass
                 elif event.get("type") == "result" and credentials is None:
                     if failure is not None:
                         raise failure

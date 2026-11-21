@@ -68,6 +68,7 @@ type excelLoginWorkerInput struct {
 	WorkerID    string         `json:"worker_id"`
 	Stage       string         `json:"stage"`
 	Reason      string         `json:"reason"`
+	Evidence    string         `json:"evidence"`
 	Credentials map[string]any `json:"credentials"`
 }
 
@@ -119,6 +120,8 @@ func (h *OpenAIOAuthHandler) ExcelLoginWorkerUpdate(c *gin.Context) {
 		return
 	case "progress":
 		err = h.openaiOAuthService.ProgressExcelLogin(c.Request.Context(), id, input.WorkerID, input.Stage)
+	case "observe":
+		err = h.openaiOAuthService.ObserveCodexLoginForbidden(c.Request.Context(), id, input.WorkerID, input.Evidence)
 	case "fail":
 		err = h.openaiOAuthService.FailExcelLogin(c.Request.Context(), id, input.WorkerID, input.Reason)
 	default:

@@ -192,6 +192,79 @@ class CodexProtocolTest(unittest.TestCase):
                 progress.observe('POST', 'https://auth.openai.com/api/accounts/password/verify', response)
             self.assertNotIn('synthetic-secret', json.dumps(progress.diagnostic()))
 
+    def test_interstitial_solver_stays_disabled_without_explicit_configuration(self):
+        solver = self.protocol.interstitial_solver
+        claim = {'login_email': 'a@example.invalid', 'password': 'synthetic'}
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(solver.enabled())
+            self.assertIsNone(solver.configuration(claim))
+            self.assertIsNone(solver.solve(claim, 'synthetic-agent'))
+        with patch.dict(os.environ, {'SOLVERIFY_ENABLED': '1'}, clear=True):
+            self.assertIsNone(solver.configuration(claim), 'a key and a proxy are both required')
+        with patch.dict(os.environ, {'SOLVERIFY_ENABLED': '1', 'SOLVERIFY_API_KEY': 'k'}, clear=True):
+            self.assertIsNone(solver.configuration(claim), 'solving is unavailable without a proxy')
+
+    def test_interstitial_solver_forwards_only_plain_http_proxies(self):
+        solver = self.protocol.interstitial_solver
+        claim = {'proxy_url': 'socks5h://user:pass@127.0.0.1:1080'}
+        with patch.dict(os.environ, {'SOLVERIFY_ENABLED': '1', 'SOLVERIFY_API_KEY': 'k'}, clear=True):
+            self.assertIsNone(solver.configuration(claim), 'the solver rejects non-HTTP proxies')
+        self.assertIsNone(solver.proxy_from_url('http://127.0.0.1'))
+        self.assertIsNone(solver.proxy_from_url('http://127.0.0.1:3128/path'))
+        self.assertIsNone(solver.proxy_from_url('ftp://127.0.0.1:3128'))
+        self.assertEqual(solver.proxy_from_url('http://u:p@15.204.82.23:3128'),
+                         {'host': '15.204.82.23', 'port': '3128', 'login': 'u', 'password': 'p'})
+        env = {'SOLVERIFY_ENABLED': '1', 'SOLVERIFY_API_KEY': 'k', 'SOLVERIFY_PROXY_HOST': '15.204.82.23',
+               'SOLVERIFY_PROXY_PORT': '3128', 'SOLVERIFY_PROXY_LOGIN': 'u', 'SOLVERIFY_PROXY_PASSWORD': 'p',
+               'SOLVERIFY_ENDPOINT': 'http://solver.example.invalid'}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(solver.configuration(claim), 'a plaintext solver endpoint is refused')
+        env['SOLVERIFY_ENDPOINT'] = 'https://solver.solverify.net'
+        with patch.dict(os.environ, env, clear=True):
+            settings = solver.configuration({})
+            self.assertEqual(settings['proxy']['host'], '15.204.82.23')
+            self.assertEqual(settings['proxy']['login'], 'u')
+            self.assertEqual(settings['timeout'], 90)
+        for timeout in ('5', '900', 'soon'):
+            env['SOLVERIFY_TIMEOUT'] = timeout
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(solver.configuration({})['timeout'], 90, 'out-of-range timeouts fall back')
+        env['SOLVERIFY_TIMEOUT'] = '45'
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(solver.configuration({})['timeout'], 45)
+
+    def test_interstitial_solution_requires_clearance_and_pins_the_agent(self):
+        solver = self.protocol.interstitial_solver
+        self.assertIsNone(solver.normalize(None))
+        self.assertIsNone(solver.normalize({'cookies': [{'name': '__cf_bm', 'value': 'x'}], 'useragent': 'ua'}))
+        self.assertIsNone(solver.normalize({'cookies': {'cf_clearance': 'x'}}))
+        self.assertIsNone(solver.normalize({'cookies': {'cf_clearance': 'x'}, 'useragent': 'u' * 513}))
+        mapping = solver.normalize({'cookies': {'cf_clearance': 'x', '__cf_bm': 'y'}, 'useragent': 'agent'})
+        listing = solver.normalize({'cookies': [{'name': 'cf_clearance', 'value': 'x', 'domain': '.openai.com'}],
+                                    'useragent': 'agent'})
+        self.assertEqual(mapping['cookies'], [('cf_clearance', 'x'), ('__cf_bm', 'y')])
+        self.assertEqual(listing['cookies'], [('cf_clearance', 'x')])
+        session = MagicMock()
+        self.assertTrue(solver.apply(session, mapping))
+        self.assertEqual(session.headers.__setitem__.call_args[0], ('User-Agent', 'agent'))
+        self.assertEqual({call[0][0] for call in session.cookies.set.call_args_list}, {'cf_clearance', '__cf_bm'})
+        self.assertEqual({call[1]['domain'] for call in session.cookies.set.call_args_list},
+                         set(solver.DOMAINS))
+        self.assertFalse(solver.apply(session, {'useragent': 'agent'}))
+        self.assertFalse(solver.apply(MagicMock(cookies=SimpleNamespace(set=MagicMock(side_effect=RuntimeError))),
+                                      mapping))
+
+    def test_seed_clearance_is_silent_and_never_replaces_the_security_stop(self):
+        solver = self.protocol.interstitial_solver
+        chat = SimpleNamespace(ua='agent', session=MagicMock())
+        with patch.object(solver, 'solve', return_value=None):
+            self.assertFalse(self.protocol.seed_clearance({'login_email': 'a@example.invalid'}, chat))
+        with patch.object(solver, 'solve', side_effect=RuntimeError('synthetic-secret')):
+            self.assertFalse(self.protocol.seed_clearance({'login_email': 'a@example.invalid'}, chat))
+        with patch.object(solver, 'solve', return_value={'cookies': [('cf_clearance', 'x')], 'useragent': 'agent'}):
+            self.assertTrue(self.protocol.seed_clearance({'login_email': 'a@example.invalid'}, chat))
+            solver.solve.assert_called_once_with({'login_email': 'a@example.invalid'}, 'agent')
+
     def test_callback_state_and_totp_regression(self):
         from reauth.totp import totp_code
         p = self.protocol

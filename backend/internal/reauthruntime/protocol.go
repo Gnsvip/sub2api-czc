@@ -15,7 +15,7 @@ import (
 var protocolSource embed.FS
 
 var protocolFiles = []string{
-	"protocol_worker.py", "codex_protocol.py", "reauth/__init__.py",
+	"protocol_worker.py", "codex_protocol.py", "interstitial_solver.py", "reauth/__init__.py",
 	"reauth/chatgpt_client.py", "reauth/http_client.py", "reauth/oauth_client.py",
 	"reauth/sentinel_token.py", "reauth/totp.py", "reauth/utils.py",
 	"reauth/LICENSE", "reauth/NOTICE.md",

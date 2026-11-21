@@ -19,6 +19,8 @@ from reauth.chatgpt_client import ChatGPTClient
 from reauth.totp import TotpMfaClient
 from reauth.utils import generate_pkce
 
+import interstitial_solver
+
 AUTH = 'https://api.openai.com/auth'
 PERSONAL = frozenset({'free', 'go', 'plus', 'pro'})
 ORGANIZATION = frozenset({'team', 'business', 'self_serve_business_prolite',
@@ -235,6 +237,21 @@ class Progress:
         return data
 
 
+def seed_clearance(claim, chat):
+    """Seed a pre-solved Cloudflare clearance onto the shared login session.
+
+    Best effort only: solving is disabled by default, and a miss leaves the
+    existing security_check stop untouched. The solved user agent is pinned to
+    the session so the replayed cookies keep the address, agent and clearance
+    consistent with the browser that produced them.
+    """
+    try:
+        solution = interstitial_solver.solve(claim, chat.ua)
+    except Exception:
+        return False
+    return interstitial_solver.apply(chat.session, solution) if solution else False
+
+
 def authorize(claim, progress):
     if not isinstance(claim, dict) or not claim.get('login_email') or not claim.get('password'):
         raise AuthStop('worker_failed')
@@ -242,6 +259,7 @@ def authorize(claim, progress):
     try:
         chat = ChatGPTClient(proxy=claim.get('proxy_url', ''), verbose=False, impersonate='chrome133a')
         chat.current_email = claim['login_email']
+        seed_clearance(claim, chat)
         oauth = WorkspaceOAuthClient({'oauth_phone_strategy': 'sms', 'sub2api_oauth_max_hops': 20,
             'sub2api_oauth_impersonates': 'chrome133a', 'sub2api_redirect_uri': OAUTH_REDIRECT_URI},
             claim=claim, proxy=claim.get('proxy_url', ''), verbose=False)

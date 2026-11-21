@@ -86,7 +86,8 @@ func TestGPT62OfficialCatalogAndRouteCapabilities(t *testing.T) {
 		{"gpt-6.2-sol", 500000, openai.CodexGPT62SolMetadata},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
-			body, err := BuildCodexModelsManifest([]string{tc.model})
+			accounts := []Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}}
+			body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{tc.model}, accounts, &Group{ID: 1, Platform: PlatformOpenAI}, nil, true)
 			require.NoError(t, err)
 			models := decodeCodexManifestModels(t, body)
 			require.Len(t, models, 1)

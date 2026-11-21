@@ -677,6 +677,7 @@ export default {
     },
     table: {
       model: 'Model',
+      copyModelId: 'Copy model ID {model}',
       input: 'Input',
       output: 'Output',
       cache: 'Cache',

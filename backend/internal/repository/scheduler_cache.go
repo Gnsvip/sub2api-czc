@@ -1352,6 +1352,10 @@ func newSchedulerAccountMetaRevision() string {
 }
 
 func marshalSchedulerCacheAccount(account service.Account) ([]byte, []byte, error) {
+	// Hydration needs account configuration and group membership, not expanded
+	// group objects (also repeated in AccountGroups). Keep the caller's graph intact.
+	account.Groups = nil
+	account.AccountGroups = filterSchedulerAccountGroups(account.AccountGroups)
 	// A fixed-width UTC revision lets Redis reject an older bucket rebuild
 	// without decoding/re-encoding credentials or rounding JSON numbers.
 	version := ""

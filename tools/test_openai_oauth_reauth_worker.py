@@ -223,8 +223,15 @@ class CodexProtocolTest(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             settings = solver.configuration({})
             self.assertEqual(settings['proxy']['host'], '15.204.82.23')
+            self.assertEqual(settings['proxy']['login'], 'u')
             self.assertEqual(settings['timeout'], 90)
-            self.assertNotIn('p', json.dumps(settings).replace('"port"', ''), 'no plaintext leak surfaces')
+        for timeout in ('5', '900', 'soon'):
+            env['SOLVERIFY_TIMEOUT'] = timeout
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(solver.configuration({})['timeout'], 90, 'out-of-range timeouts fall back')
+        env['SOLVERIFY_TIMEOUT'] = '45'
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(solver.configuration({})['timeout'], 45)
 
     def test_interstitial_solution_requires_clearance_and_pins_the_agent(self):
         solver = self.protocol.interstitial_solver

@@ -207,6 +207,44 @@ class CodexProtocolTest(unittest.TestCase):
             client.session.close()
         self.assertEqual(totp_code('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', at_time=59, digits=8)[0], '94287082')
 
+    def test_forbidden_evidence_preserves_stop_and_redacts_untrusted_fields(self):
+        adapter = OpenAIOAuthReauthWorkerTest.protocol_adapter()
+        url = 'https://auth.openai.com/log-in?state=synthetic-secret'
+        for expected, header, body, marker in [
+            ('none', '', 'ordinary denial', 'none'), ('header', 'challenge', '', 'none'),
+            ('body', '', 'Just a moment cf-chl-', 'just_a_moment'),
+            ('both', 'challenge', '/cdn-cgi/challenge-platform/', 'challenge_platform'),
+        ]:
+            emit = MagicMock()
+            progress = self.protocol.Progress(emit)
+            response = SimpleNamespace(status_code=403, headers={
+                'cf-mitigated': header, 'cf-ray': '1234567890abcdef-SEA', 'server': 'cloudflare',
+                'retry-after': '30', 'content-type': 'text/html; charset=UTF-8',
+                'set-cookie': 'synthetic-secret'}, text=body + ' synthetic-secret', json=lambda: {})
+            progress.observe('GET', url)
+            with self.subTest(expected=expected):
+                if expected == 'none':
+                    progress.observe('GET', url, response)
+                    emit.assert_called_once_with('forbidden', evidence=progress.diagnostic()['evidence'])
+                else:
+                    with self.assertRaisesRegex(self.http.AuthStop, 'security_check'):
+                        progress.observe('GET', url, response)
+                data = progress.diagnostic()
+                self.assertIn(f'challenge_signal={expected} body_marker={marker}', data['evidence'])
+                self.assertIn('cf_ray=1234567890abcdef-SEA retry_after=30 content_type=html', data['evidence'])
+                raw = adapter.safe_diagnostic('verification_failed' if expected == 'none' else 'security_check', data)
+                self.assertGreater(len(raw), 256)
+                self.assertNotIn('synthetic-secret', raw)
+                self.assertEqual(adapter.parse_diagnostic(raw), raw)
+                self.assertIsNone(adapter.parse_diagnostic(raw + ' secret'))
+                self.assertIsNone(adapter.parse_diagnostic(raw.replace('retry_after=30', 'retry_after=86401')))
+                progress.observe('GET', url)
+                self.assertNotIn('evidence', progress.diagnostic())
+        normalized = self.protocol.response_evidence({'cf-ray': 'synthetic-secret', 'retry-after': 'password',
+            'cf-mitigated': 'untrusted', 'server': 'private server', 'content-type': 'text/private'}, None)
+        self.assertEqual(normalized, 'cf_mitigated=other challenge_signal=none body_marker=none '
+            'server=other cf_ray=none retry_after=none content_type=other')
+
 
 class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
     def test_codex_completion_allows_manifest_and_astra_without_changing_other_calls(self):
@@ -293,7 +331,14 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
             with patch.object(api, "_post") as post:
                 api.fail(7, worker.safe_worker_failure(browser.ProtocolFailure("timeout", data)))
                 self.assertEqual(post.call_args.args[1], {"worker_id": "probe", "reason": expected})
-                for raw in (expected + " secret", expected.replace("submit_email", "secret"),
+                observed = dict(data, http_status=403, evidence="cf_mitigated=challenge challenge_signal=header "
+                    "body_marker=none server=cloudflare cf_ray=1234567890abcdef-SEA retry_after=none content_type=html")
+                api.fail(7, worker.safe_worker_failure(browser.ProtocolFailure("security_check", observed)))
+                reported = post.call_args.args[1]["reason"]
+                self.assertIn("reason=security_check", reported)
+                self.assertTrue(reported.endswith(observed["evidence"]))
+                self.assertNotIn("synthetic-secret", reported)
+                for raw in (expected + " secret", reported + " secret", expected.replace("submit_email", "secret"),
                             expected.replace("16000", "999999"), expected.replace("http_status=200", "http_status=999"),
                             expected.replace("action_ms=15000", "action_ms=17000")):
                     api.fail(7, raw)

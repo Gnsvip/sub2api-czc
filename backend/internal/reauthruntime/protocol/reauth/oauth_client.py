@@ -959,27 +959,26 @@ class OAuthClient:
 
     @staticmethod
     def _is_cloudflare_challenge_response(response):
+        return OAuthClient._cloudflare_challenge_marker(response) is not None
+
+    @staticmethod
+    def _cloudflare_challenge_marker(response):
         try:
             status = int(getattr(response, "status_code", 0) or 0)
         except (TypeError, ValueError):
             status = 0
         if status != 403:
-            return False
+            return None
         headers = getattr(response, "headers", {}) or {}
         server = str(headers.get("server", "") or "").lower()
         cf_ray = str(headers.get("cf-ray", "") or "")
-        body = str(getattr(response, "text", "") or "").lower()
-        return (
-            server == "cloudflare"
-            or bool(cf_ray)
-        ) and any(
-            marker in body
-            for marker in (
-                "just a moment",
-                "cf-chl-",
-                "/cdn-cgi/challenge-platform/",
-            )
-        )
+        if server == "cloudflare" or cf_ray:
+            body = str(getattr(response, "text", "") or "").lower()
+            for marker, label in (("just a moment", "just_a_moment"), ("cf-chl-", "cf_chl"),
+                                  ("/cdn-cgi/challenge-platform/", "challenge_platform")):
+                if marker in body:
+                    return label
+        return None
 
     def _oauth_request(self, method, url, *, impersonate=None, **kwargs):
         candidates = []

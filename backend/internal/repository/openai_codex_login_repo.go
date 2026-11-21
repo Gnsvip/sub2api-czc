@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -207,8 +210,39 @@ func (r *openAIExcelOAuthRepository) HasActiveCodexLogins(ctx context.Context) (
 	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM openai_excel_login_tasks t JOIN openai_codex_login_configs c ON c.account_id=t.account_id JOIN accounts a ON a.id=t.account_id WHERE t.oauth_profile='codex' AND t.status IN ('queued','running') AND c.revision=t.config_revision AND a.deleted_at IS NULL AND a.status IN ('active','error'))`).Scan(&active)
 	return active, err
 }
+
+var managedCodexWorkerID = regexp.MustCompile(`^managed-[0-9]{1,10}-[0-9]{1,20}(-slot-[0-9]{1,2})?$`)
+
+func codexWorkerLogID(id string) string {
+	if managedCodexWorkerID.MatchString(id) {
+		return id
+	}
+	return "other"
+}
+
+// The snapshot may contain free-form upstream error text. Log only its class.
+func codexLoginTriggerReason(msg string) string {
+	switch {
+	case msg == service.CodexAuthorizationPending:
+		return "initial_pending"
+	case strings.HasPrefix(msg, "Token revoked (401):"):
+		return "revoked_401"
+	case strings.HasPrefix(msg, "Unauthorized (401):"), strings.HasPrefix(msg, "Authentication failed (401):"):
+		return "unauthorized_401"
+	case strings.HasPrefix(msg, "Token refresh failed (non-retryable):"):
+		for _, code := range []string{"refresh_token_reused", "refresh_token_invalidated", "invalid_refresh_token", "invalid_grant"} {
+			if strings.Contains(msg, code) {
+				return code
+			}
+		}
+		return "refresh_failed"
+	default:
+		return "other"
+	}
+}
+
 func (r *openAIExcelOAuthRepository) ClaimCodexLogin(ctx context.Context, worker string) (*service.ExcelLoginTask, error) {
-	return scanExcelLoginTask(r.db.QueryRowContext(ctx, `WITH candidate AS (
+	task, err := scanExcelLoginTask(r.db.QueryRowContext(ctx, `WITH candidate AS (
  SELECT t.id FROM openai_excel_login_tasks t JOIN accounts a ON a.id=t.account_id JOIN openai_codex_login_configs c ON c.account_id=a.id
  WHERE t.oauth_profile='codex' AND t.status='queued' AND t.created_at>NOW()-INTERVAL '30 minutes' AND a.deleted_at IS NULL AND a.status IN ('active','error') AND c.revision=t.config_revision
  AND MD5(a.credentials::text)=t.expected_credentials_hash
@@ -216,6 +250,11 @@ func (r *openAIExcelOAuthRepository) ClaimCodexLogin(ctx context.Context, worker
  AND `+codexLoginAccountStateSQL+`=(t.expected_account_state-'manual_authorization')
  ORDER BY t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1)
  UPDATE openai_excel_login_tasks SET status='running',stage='starting',worker_id=$1,updated_at=NOW() WHERE id=(SELECT id FROM candidate) RETURNING `+excelLoginTaskColumns, worker))
+	if err == nil && task != nil {
+		slog.InfoContext(ctx, "codex_login_claimed", "task_id", task.ID, "account_id", task.AccountID,
+			"worker_id", codexWorkerLogID(worker), "claimed_at", task.UpdatedAt)
+	}
+	return task, err
 }
 func (r *openAIExcelOAuthRepository) FinishCodexLogin(ctx context.Context, id int64, worker string, candidate map[string]any, astra *service.CodexLoginAstraResult) (bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)

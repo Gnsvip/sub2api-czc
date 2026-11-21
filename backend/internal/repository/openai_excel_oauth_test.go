@@ -1011,6 +1011,9 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				_, e = repo.ClaimCodexLogin(ctx, "worker")
 				require.NoError(t, e)
 				diagnostic := "codex_browser_failed stage=protocol_connecting action=security_check reason=" + reason + " elapsed_ms=20000 action_ms=15000 http_status=403 response=document"
+				if reason == "security_check" {
+					diagnostic = "codex_protocol_failed stage=protocol_connecting action=read_page reason=security_check elapsed_ms=40 action_ms=38 http_status=403 response=document cf_mitigated=challenge challenge_signal=header body_marker=none server=cloudflare cf_ray=1234567890abcdef-SEA retry_after=none content_type=html"
+				}
 				ok, e := repo.FailExcelLogin(ctx, queued.ID, "another-worker", diagnostic)
 				require.NoError(t, e)
 				require.False(t, ok, "diagnostics must respect worker ownership")
@@ -1021,7 +1024,14 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.Equal(t, reason, failed.ErrorCode)
 				require.NotNil(t, failed.Diagnostic)
 				require.Equal(t, 403, failed.Diagnostic.HTTPStatus)
-				require.Equal(t, "security_check", failed.Diagnostic.Action)
+				if reason == "security_check" {
+					require.Equal(t, "read_page", failed.Diagnostic.Action)
+					require.NotNil(t, failed.Diagnostic.Evidence)
+					require.Equal(t, "1234567890abcdef-SEA", failed.Diagnostic.Evidence.CFRay)
+				} else {
+					require.Equal(t, "security_check", failed.Diagnostic.Action)
+					require.Nil(t, failed.Diagnostic.Evidence)
+				}
 				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
 				again, e := repo.QueueCodexLogin(ctx, id, false)

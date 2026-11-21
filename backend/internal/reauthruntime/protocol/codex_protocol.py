@@ -5,10 +5,12 @@ import base64
 import json
 import logging
 import os
+import re
 import secrets
 import signal
 import sys
 import time
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode, urlsplit
 
 from reauth.http_client import AuthStop
@@ -140,11 +142,43 @@ def credentials_from_tokens(tokens, claim, selection=None):
     return credentials
 
 
+def retry_after_seconds(raw):
+    if not raw or len(raw) > 64:
+        return 'none'
+    if re.fullmatch(r'[0-9]+', raw):
+        return str(min(86400, int(raw)))
+    try:
+        date = parsedate_to_datetime(raw)
+        if date.tzinfo is not None:
+            return str(max(0, min(86400, int(date.timestamp() - time.time()))))
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+    return 'none'
+
+
+def response_evidence(headers, marker):
+    mitigated = headers.get('cf-mitigated', '')
+    header = mitigated == 'challenge'
+    signal = ('both' if marker else 'header') if header else ('body' if marker else 'none')
+    server = headers.get('server', '').lower()
+    ray = headers.get('cf-ray', '')
+    if not re.fullmatch(r'[0-9a-fA-F]{16}(?:-[A-Z]{3})?', ray):
+        ray = 'none'
+    mime = headers.get('content-type', '').partition(';')[0].strip().lower()
+    content = {'text/html': 'html', 'application/json': 'json'}.get(mime, 'other' if mime else 'none')
+    retry = retry_after_seconds(headers.get('retry-after', '').strip())
+    return (f"cf_mitigated={'challenge' if header else 'other' if mitigated else 'none'} "
+            f"challenge_signal={signal} body_marker={marker or 'none'} "
+            f"server={'cloudflare' if server == 'cloudflare' else 'other' if server else 'none'} "
+            f"cf_ray={ray} retry_after={retry} content_type={content}")
+
+
 class Progress:
     def __init__(self, emit):
         self.emit, self.started = emit, time.monotonic()
         self.stage, self.action = 'protocol_connecting', 'open_login'
         self.action_started, self.status, self.response = self.started, 0, 'none'
+        self.evidence = None
 
     def observe(self, method, url, response=None):
         path = urlsplit(str(url)).path
@@ -156,13 +190,21 @@ class Progress:
             '/oauth/token': ('exchanging_token', 'exchange_token')}
         stage, action = operations.get(path, (self.stage, 'read_page'))
         if response is None:
+            self.evidence = None
             self.action, self.action_started = action, time.monotonic()
             self.status, self.response = 0, 'none'
             return
         self.status = response.status_code
         self.response = 'token' if path == '/oauth/token' else 'auth_request' if path.startswith('/api/') else 'document'
-        if response.headers.get('cf-mitigated') == 'challenge' or OAuthClient._is_cloudflare_challenge_response(response):
+        header_challenge = response.headers.get('cf-mitigated') == 'challenge'
+        marker = OAuthClient._cloudflare_challenge_marker(response)
+        if self.status == 403 or header_challenge:
+            self.evidence = response_evidence(response.headers, marker)
+        if header_challenge or marker:
             raise AuthStop('security_check')
+        if self.status == 403:
+            # This response may be handled by the client before the task completes.
+            self.emit('forbidden', evidence=self.evidence)
         if self.status == 429:
             raise AuthStop('rate_limited')
         if self.status >= 500:
@@ -186,8 +228,11 @@ class Progress:
 
     def diagnostic(self):
         now = time.monotonic()
-        return dict(stage=self.stage, action=self.action, elapsed_ms=min(360000, int((now-self.started)*1000)),
+        data = dict(stage=self.stage, action=self.action, elapsed_ms=min(360000, int((now-self.started)*1000)),
             action_ms=min(360000, int((now-self.action_started)*1000)), http_status=self.status, response=self.response)
+        if self.evidence is not None:
+            data['evidence'] = self.evidence
+        return data
 
 
 def authorize(claim, progress):

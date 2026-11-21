@@ -22,6 +22,7 @@ import (
 )
 
 type Account struct {
+	ParentAccountID *int64 `json:",omitempty"`
 	// Request-local routing view; never persisted to account or scheduler caches.
 	excelBPSRoutingDisabled bool
 	ID                      int64
@@ -1463,6 +1464,10 @@ func (a *Account) IsOpenAIChatGPTSubscription() bool {
 	default:
 		return true
 	}
+}
+
+func (a *Account) IsCredentialShadow() bool {
+	return a != nil && a.ParentAccountID != nil
 }
 
 func (a *Account) IsOpenAIPersonalAccessToken() bool {

@@ -70,7 +70,6 @@ func TestGatewayRoutesRejectConflictingFieldsCoversGatewayRoutes(t *testing.T) {
 		{"/v1/embeddings", `{` + duplicate + `}`},
 		{"/v1/images/generations", `{` + duplicate + `}`},
 		{"/v1/videos/generations", `{` + duplicate + `}`},
-		{"/v1/systemone", `{` + duplicate + `}`},
 		{"/v1/contents/generations/tasks", `{` + duplicate + `}`},
 		{"/api/v3/contents/generations/tasks", `{` + duplicate + `}`},
 		{"/v1/live", `{"sdp":"v=0","session":{"model":"gpt-live-a","model":"gpt-live-b"}}`},
@@ -175,7 +174,7 @@ func TestGatewayRoutesTextBodyLimitAppliesBeforeGroupMiddleware(t *testing.T) {
 		&config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1 << 20, TextMaxBodySize: 256}},
 	)
 	body := `{"model":"a","input":"` + strings.Repeat("x", 1024) + `","model":"b"}`
-	for _, path := range []string{"/v1/embeddings", "/v1/alpha/search", "/v1/systemone", "/backend-api/codex/alpha/search", "/embeddings", "/alpha/search"} {
+	for _, path := range []string{"/v1/embeddings", "/v1/alpha/search", "/backend-api/codex/alpha/search", "/embeddings", "/alpha/search"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()

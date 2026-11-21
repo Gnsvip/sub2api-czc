@@ -1892,8 +1892,8 @@ const upstreamBillingAutoProbeOptions = computed(() => [
   { value: 'disabled', label: t('common.disabled') }
 ])
 const applyOAuthPassthroughFilter = computed(() =>
-  allOpenAIPassthroughCapable.value && enableOpenAIPassthrough.value &&
-  openaiPassthroughEnabled.value && openaiPassthroughModelFilterEnabled.value
+  allOpenAIPassthroughCapable.value && enableOpenAIPassthroughModelFilter.value &&
+  openaiPassthroughModelFilterEnabled.value && (!enableOpenAIPassthrough.value || openaiPassthroughEnabled.value)
 )
 const isOpenAIModelRestrictionDisabled = computed(
   () =>

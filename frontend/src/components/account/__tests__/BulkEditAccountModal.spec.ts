@@ -902,8 +902,7 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: {
-        openai_passthrough: true,
-        openai_passthrough_model_filter: false
+        openai_passthrough: true
       }
     })
     expect(wrapper.get('[data-testid="astra-policy-bulk"]').text()).toContain('admin.accounts.openai.astraPolicyBulk')
@@ -958,12 +957,12 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('can update a whitelist while preserving existing passthrough model filtering', async () => {
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+  it('can update an API key whitelist while preserving its passthrough model filtering', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
     await wrapper.get('#bulk-edit-openai-passthrough-enabled').setValue(true)
     await wrapper.get('#bulk-edit-openai-passthrough-toggle').trigger('click')
     await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
-    wrapper.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['qwen3.8-max'])
+    wrapper.findComponent({ name: 'ModelWhitelistSelector' }).vm.$emit('update:modelValue', ['qwen3.8-max'])
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 

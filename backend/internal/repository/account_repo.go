@@ -3961,6 +3961,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	rateMultiplier := m.RateMultiplier
 
 	return &service.Account{
+		ParentAccountID:         m.ParentAccountID,
 		ID:                      m.ID,
 		Name:                    m.Name,
 		Notes:                   m.Notes,

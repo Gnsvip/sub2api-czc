@@ -1001,7 +1001,7 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE id=$1`, again.ID)
 			require.NoError(t, e)
 		})
-		for index, reason := range []string{"password_rejected", "totp_rejected", "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "security_check", "additional_verification", "account_blocked"} {
+		for index, reason := range []string{"password_rejected", "totp_rejected", "identity_mismatch", "workspace_unavailable", "workspace_selection_required", "additional_verification", "account_blocked"} {
 			t.Run(reason+" needs manual intervention", func(t *testing.T) {
 				id := int64(1101 + index)
 				newAccount(id, true, false)
@@ -1011,9 +1011,6 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				_, e = repo.ClaimCodexLogin(ctx, "worker")
 				require.NoError(t, e)
 				diagnostic := "codex_browser_failed stage=protocol_connecting action=security_check reason=" + reason + " elapsed_ms=20000 action_ms=15000 http_status=403 response=document"
-				if reason == "security_check" {
-					diagnostic = "codex_protocol_failed stage=protocol_connecting action=read_page reason=security_check elapsed_ms=40 action_ms=38 http_status=403 response=document cf_mitigated=challenge challenge_signal=header body_marker=none server=cloudflare cf_ray=1234567890abcdef-SEA retry_after=none content_type=html"
-				}
 				ok, e := repo.FailExcelLogin(ctx, queued.ID, "another-worker", diagnostic)
 				require.NoError(t, e)
 				require.False(t, ok, "diagnostics must respect worker ownership")
@@ -1024,14 +1021,8 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.Equal(t, reason, failed.ErrorCode)
 				require.NotNil(t, failed.Diagnostic)
 				require.Equal(t, 403, failed.Diagnostic.HTTPStatus)
-				if reason == "security_check" {
-					require.Equal(t, "read_page", failed.Diagnostic.Action)
-					require.NotNil(t, failed.Diagnostic.Evidence)
-					require.Equal(t, "1234567890abcdef-SEA", failed.Diagnostic.Evidence.CFRay)
-				} else {
-					require.Equal(t, "security_check", failed.Diagnostic.Action)
-					require.Nil(t, failed.Diagnostic.Evidence)
-				}
+				require.Equal(t, "security_check", failed.Diagnostic.Action)
+				require.Nil(t, failed.Diagnostic.Evidence)
 				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
 				require.NoError(t, e)
 				again, e := repo.QueueCodexLogin(ctx, id, false)
@@ -1042,6 +1033,43 @@ func TestExcelLoginPostgresQueueAndGrantGuards(t *testing.T) {
 				require.NotContains(t, ids, id)
 			})
 		}
+		t.Run("security_check spends the shared retry budget before recovery stops", func(t *testing.T) {
+			id := int64(1110)
+			newAccount(id, true, false)
+			diagnostic := "codex_protocol_failed stage=protocol_connecting action=read_page reason=security_check elapsed_ms=40 action_ms=38 http_status=403 response=document cf_mitigated=challenge challenge_signal=header body_marker=none server=cloudflare cf_ray=1234567890abcdef-SEA retry_after=none content_type=html"
+			for attempt := 1; attempt <= 4; attempt++ {
+				queued, e := repo.QueueCodexLogin(ctx, id, false)
+				require.NoError(t, e)
+				require.NotNil(t, queued, "attempt %d must be admitted by the retry budget", attempt)
+				claimed, e := repo.ClaimCodexLogin(ctx, "security-worker")
+				require.NoError(t, e)
+				require.NotNil(t, claimed)
+				require.Equal(t, queued.ID, claimed.ID)
+				ok, e := repo.FailExcelLogin(ctx, queued.ID, "security-worker", diagnostic)
+				require.NoError(t, e)
+				require.True(t, ok)
+				failed, e := repo.GetCodexLoginTask(ctx, id)
+				require.NoError(t, e)
+				require.Equal(t, "security_check", failed.ErrorCode)
+				require.NotNil(t, failed.Diagnostic)
+				require.Equal(t, "read_page", failed.Diagnostic.Action)
+				require.NotNil(t, failed.Diagnostic.Evidence)
+				require.Equal(t, "1234567890abcdef-SEA", failed.Diagnostic.Evidence.CFRay)
+				_, e = db.Exec(`UPDATE openai_excel_login_tasks SET updated_at=NOW()-INTERVAL '61 seconds' WHERE id=$1`, queued.ID)
+				require.NoError(t, e)
+			}
+			exhausted, e := repo.QueueCodexLogin(ctx, id, false)
+			require.NoError(t, e)
+			require.Nil(t, exhausted, "the fourth attempt must end automatic recovery")
+			ids, e := repo.ListCodexLoginCandidates(ctx)
+			require.NoError(t, e)
+			require.NotContains(t, ids, id)
+			manual, e := repo.QueueCodexLogin(ctx, id, true)
+			require.NoError(t, e)
+			require.NotNil(t, manual, "a manual retry stays available after the budget is spent")
+			_, e = db.Exec(`UPDATE openai_excel_login_tasks SET status='cancelled' WHERE account_id=$1`, id)
+			require.NoError(t, e)
+		})
 		for index, scenario := range []string{"initial attempt", "retry after cooldown"} {
 			t.Run("concurrent queue only admits one task for "+scenario, func(t *testing.T) {
 				id := int64(1200 + index)

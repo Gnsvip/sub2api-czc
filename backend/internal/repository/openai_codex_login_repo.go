@@ -134,12 +134,18 @@ func (r *openAIExcelOAuthRepository) GetLoginTaskByID(ctx context.Context, id in
 // cooldown after each failure. Successful tasks reset the failure budget;
 // configuration edits create a new revision. Manual retries still observe the
 // cooldown and active task lock.
+//
+// A Cloudflare edge challenge (security_check) is retryable: it reports the
+// network path, not rejected credentials, and on 2026-11-21 it cleared on its
+// own within minutes. It therefore consumes the shared retry budget instead of
+// stopping recovery after the first attempt. Failures that prove the stored
+// credentials or identity are wrong still stop immediately.
 const codexLoginBudgetSQL = `NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND
  (t.status IN ('queued','running') OR (t.oauth_profile='codex' AND t.status='failed' AND t.config_revision=c.revision AND t.updated_at>NOW()-INTERVAL '60 seconds')))
  AND ($2 OR (SELECT COUNT(*) FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex'
  AND t.config_revision=c.revision AND t.status='failed' AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0))<4)
  AND ($2 OR NOT EXISTS(SELECT 1 FROM openai_excel_login_tasks t WHERE t.account_id=a.id AND t.oauth_profile='codex' AND t.config_revision=c.revision
- AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','workspace_selection_required','security_check','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
+ AND t.status='failed' AND t.error_code IN ('password_rejected','totp_rejected','identity_mismatch','workspace_unavailable','workspace_selection_required','additional_verification','account_blocked','credentials_unavailable','worker_failed','browser_unavailable','browser_start_failed','browser_dependency_failed')
  AND t.id>COALESCE((SELECT MAX(ok.id) FROM openai_excel_login_tasks ok WHERE ok.account_id=a.id AND ok.oauth_profile='codex' AND ok.status='succeeded'),0)))`
 
 func (r *openAIExcelOAuthRepository) QueueCodexLogin(ctx context.Context, id int64, manual bool) (*service.ExcelLoginTask, error) {

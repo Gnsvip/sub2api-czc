@@ -713,7 +713,7 @@ func (c *openAIRotationClientStub) RefreshTokenWithClientID(context.Context, str
 
 func TestRefreshIfNeeded_OpenAIEnrichmentTimeoutKeepsRotatedCredentials(t *testing.T) {
 	account := openAIRefreshTestAccount()
-	account.Credentials["expires_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	account.Credentials["access_token"] = codexTestJWTExpiry(time.Now().Add(-time.Minute).Unix())
 	repo := &refreshAPIAccountRepo{account: account, respectReadContext: true}
 	client := &openAIRotationClientStub{}
 	oauthService := NewOpenAIOAuthService(nil, client)

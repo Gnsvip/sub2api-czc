@@ -109,6 +109,7 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
+	clone.ParentAccountID = nil
 	clone.Proxies = nil
 	clone.ProxyPoolChanged = false
 	clone.SelectedProxyID = 0

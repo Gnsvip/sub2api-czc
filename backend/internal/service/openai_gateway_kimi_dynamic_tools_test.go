@@ -48,7 +48,8 @@ func TestKimiChatDynamicToolsAcrossProtocols(t *testing.T) {
 				require.JSONEq(t, `["Lookup","Calculator"]`, out.Get("tools.#.name").Raw)
 				require.JSONEq(t, schema, out.Get("tools.1.input_schema").Raw)
 				require.Equal(t, "any", out.Get("tool_choice.type").String())
-				require.Equal(t, "Answer briefly.", out.Get("system").String())
+				require.Equal(t, "Answer briefly.", out.Get("system.0.text").String())
+				require.Equal(t, "ephemeral", out.Get("system.0.cache_control.type").String())
 			}
 		})
 	}

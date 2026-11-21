@@ -106,13 +106,14 @@ func stripCodexManagedExtraFromUpdate(extra map[string]any) map[string]any {
 	}
 	_, seedExists := extra["codex_fingerprint_seed"]
 	_, countExists := extra[service.CodexReauthorizationCountExtraKey]
+	_, recoveryGrant := extra[service.CodexRecoveryGrantKey]
 	_, autoPauseExists := extra[service.CodexAuthAutoPauseExtraKey]
-	if !seedExists && !countExists && !autoPauseExists {
+	if !seedExists && !countExists && !autoPauseExists && !recoveryGrant {
 		return extra
 	}
 	stripped := make(map[string]any, len(extra)-1)
 	for key, value := range extra {
-		if key == "codex_fingerprint_seed" || key == service.CodexReauthorizationCountExtraKey || key == service.CodexAuthAutoPauseExtraKey {
+		if key == "codex_fingerprint_seed" || key == service.CodexReauthorizationCountExtraKey || key == service.CodexAuthAutoPauseExtraKey || key == service.CodexRecoveryGrantKey {
 			continue
 		}
 		stripped[key] = value
@@ -780,7 +781,7 @@ func lockAndMergeAccountProbeExtra(
 	extra = service.MergeExcelBPS403Marker(extra, currentExtra)
 	// Preserve independently managed state under the row lock. A stale edit
 	// must not erase reset reservations or undo the account's probe switch.
-	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey, service.CodexReauthorizationCountExtraKey, service.CodexAuthAutoPauseExtraKey} {
+	for _, key := range []string{service.OpenAIAutoResetCreditStateExtraKey, service.OpenAIAstraProbeEnabledExtraKey, service.OpenAIAstraProbeIntervalExtraKey, service.CodexReauthorizationCountExtraKey, service.CodexAuthAutoPauseExtraKey, service.CodexRecoveryGrantKey} {
 		delete(extra, key)
 		if state, ok := currentExtra[key]; ok {
 			if extra == nil {
@@ -788,6 +789,9 @@ func lockAndMergeAccountProbeExtra(
 			}
 			extra[key] = state
 		}
+	}
+	if !identityUnchanged || !account.Schedulable {
+		delete(extra, service.CodexRecoveryGrantKey)
 	}
 	if !identityUnchanged || account.Status != service.StatusError || account.Schedulable {
 		delete(extra, service.CodexAuthAutoPauseExtraKey)

@@ -18,6 +18,59 @@ const stickySessionPrefix = "sticky_session:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
 
+// Only the successful login callback creates a budget. A cache miss (including
+// eviction) falls through to regular scheduling and cannot re-arm a grant.
+func codexRecoveryKey(accountID int64, grant string) string {
+	return fmt.Sprintf("openai:recovery:%d:%s", accountID, grant)
+}
+
+func (c *gatewayCache) StartCodexRecovery(ctx context.Context, accountID int64, at time.Time) error {
+	key := codexRecoveryKey(accountID, at.UTC().Format(time.RFC3339Nano))
+	return c.rdb.SetNX(ctx, key, service.CodexRecoverySessionLimit, service.CodexRecoveryWindow).Err()
+}
+
+func (c *gatewayCache) CodexRecoveryAvailable(ctx context.Context, accountID int64, grant string) (bool, error) {
+	n, err := c.rdb.Get(ctx, codexRecoveryKey(accountID, grant)).Int()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	return n > 0, err
+}
+
+// Check both sticky-key formats and spend a credit in the same operation. The
+// short seen-set also deduplicates requests whose profit check defers binding.
+var claimCodexRecoverySession = redis.NewScript(`
+local id = ARGV[1]
+local seen = redis.call('SISMEMBER', KEYS[2], KEYS[3])
+for i = 3, #KEYS do
+  local owner = redis.call('GET', KEYS[i])
+  if owner and (owner ~= id or seen == 0) then return 0 end
+end
+if seen == 1 then return 1 end
+local remaining = tonumber(redis.call('GET', KEYS[1]) or '0')
+if remaining <= 0 then return 0 end
+redis.call('DECR', KEYS[1])
+redis.call('SADD', KEYS[2], KEYS[3])
+redis.call('PEXPIRE', KEYS[2], math.max(1, redis.call('PTTL', KEYS[1])))
+if ARGV[4] == '1' then
+  redis.call('SET', KEYS[3], id, 'PX', ARGV[2])
+  if #KEYS == 4 and ARGV[5] == '1' then
+    redis.call('SET', KEYS[4], id, 'PX', ARGV[3])
+  end
+end
+return 1
+`)
+
+func (c *gatewayCache) ClaimCodexRecoverySession(ctx context.Context, accountID int64, grant string, b service.CodexRecoveryBinding) (bool, error) {
+	key := codexRecoveryKey(accountID, grant)
+	keys := []string{key, key + ":sessions", buildSessionKey(b.GroupID, b.Primary)}
+	if b.Legacy != "" {
+		keys = append(keys, buildSessionKey(b.GroupID, b.Legacy))
+	}
+	n, err := claimCodexRecoverySession.Run(ctx, c.rdb, keys, accountID, b.TTL.Milliseconds(), b.LegacyTTL.Milliseconds(), b.BindNow, b.WriteLegacy).Int()
+	return n == 1, err
+}
+
 type gatewayCache struct {
 	rdb *redis.Client
 }

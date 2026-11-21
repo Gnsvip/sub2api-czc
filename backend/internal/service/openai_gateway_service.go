@@ -691,6 +691,7 @@ func NewOpenAIGatewayService(
 				return err
 			}
 			oauth.codexLoginAstraProbe = svc.probeCodexLoginAstra
+			oauth.codexRecoveryCache, _ = svc.cache.(CodexRecoverySessionCache)
 		}
 	}
 	svc.logOpenAIWSModeBootstrap()

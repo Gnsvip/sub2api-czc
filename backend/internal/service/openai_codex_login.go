@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/mail"
 	"strings"
@@ -676,6 +677,11 @@ func (s *OpenAIOAuthService) CompleteCodexLogin(ctx context.Context, id int64, w
 		return nil, infraerrors.Conflict("CODEX_LOGIN_TASK_CHANGED", "账号或登录资料已变更，未覆盖新设置")
 	}
 	s.AuthCredentialsPersisted(ctx, a)
+	if astra.Healthy() && s.codexRecoveryCache != nil {
+		if err := s.codexRecoveryCache.StartCodexRecovery(ctx, a.ID, astra.SampledAt); err != nil {
+			slog.Warn("codex recovery preference unavailable", "account_id", a.ID, "error", err)
+		}
+	}
 	if s.codexLoginCredentialsChanged != nil {
 		s.codexLoginCredentialsChanged(ctx, a)
 	}

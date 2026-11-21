@@ -1550,6 +1550,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_excel_bps_omit_unsupported_tools",
 		"openai_excel_bps_cache_creation_as_input",
 		service.OpenAIAstraPolicyExtraKey,
+		service.CodexRecoveryGrantKey,
 		service.OpenAIAstraProbeEnabledExtraKey,
 		service.OpenAIAstraProbeIntervalExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this

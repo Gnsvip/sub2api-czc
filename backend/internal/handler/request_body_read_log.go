@@ -40,7 +40,7 @@ func writeRequestBodyReadFailure(c *gin.Context, reqLog *zap.Logger, err error, 
 		return
 	}
 	if maxErr, ok := pkghttputil.ExtractMaxBytesError(err); ok {
-		write(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		write(c, http.StatusRequestEntityTooLarge, "invalid_request_error", pkghttputil.BodyTooLargeMessage(maxErr.Limit))
 		return
 	}
 	var req *http.Request
@@ -53,9 +53,8 @@ func writeRequestBodyReadFailure(c *gin.Context, reqLog *zap.Logger, err error, 
 
 func requestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error) (int, string) {
 	failure := pkghttputil.DescribeRequestBodyReadFailure(req, err)
-	if failure.Kind == pkghttputil.RequestBodyReadErrorMaxBytes {
-		return failure.Status, buildBodyTooLargeMessage(failure.MaxBytesLimit)
+	if failure.Kind != pkghttputil.RequestBodyReadErrorMaxBytes {
+		logRequestBodyReadFailure(reqLog, req, err)
 	}
-	logRequestBodyReadFailure(reqLog, req, err)
-	return failure.Status, failure.Message
+	return failure.Status, failure.ClientMessage()
 }

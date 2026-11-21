@@ -448,9 +448,8 @@ func createTestPayloadForAccount(modelID string, account *Account) (map[string]a
 		"metadata": map[string]string{
 			"user_id": sessionID,
 		},
-		"max_tokens":  1024,
-		"temperature": 1,
-		"stream":      true,
+		"max_tokens": 1024,
+		"stream":     true,
 	}
 	if !omitClaudeCodeIdentityInAccountTest(account) {
 		payload["system"] = []map[string]any{
@@ -462,6 +461,9 @@ func createTestPayloadForAccount(modelID string, account *Account) (map[string]a
 				},
 			},
 		}
+	}
+	if !claude.RejectsTemperature(modelID) {
+		payload["temperature"] = 1
 	}
 	return payload, nil
 }
@@ -840,6 +842,28 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	return s.processClaudeStream(c, resp.Body)
 }
 
+func buildBedrockTestPayload(modelID string) map[string]any {
+	payload := map[string]any{
+		"anthropic_version": "bedrock-2023-05-31",
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": "hi",
+					},
+				},
+			},
+		},
+		"max_tokens": 256,
+	}
+	if !claude.RejectsTemperature(modelID) {
+		payload["temperature"] = 1
+	}
+	return payload
+}
+
 // testBedrockAccountConnection tests a Bedrock (SigV4 or API Key) account using non-streaming invoke
 func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {
 	region := bedrockRuntimeRegion(account)
@@ -857,22 +881,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	c.Writer.Flush()
 
 	// Create a minimal Bedrock-compatible payload (no stream, no cache_control)
-	bedrockPayload := map[string]any{
-		"anthropic_version": "bedrock-2023-05-31",
-		"messages": []map[string]any{
-			{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"type": "text",
-						"text": "hi",
-					},
-				},
-			},
-		},
-		"max_tokens":  256,
-		"temperature": 1,
-	}
+	bedrockPayload := buildBedrockTestPayload(testModelID)
 	applyIntelligentPayloadPrompt(ctx, bedrockPayload)
 	bedrockBody, _ := json.Marshal(bedrockPayload)
 

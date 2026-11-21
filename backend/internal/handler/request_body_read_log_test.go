@@ -61,3 +61,11 @@ func TestWriteRequestBodyReadFailureClassifiesTruncatedBodyAs408(t *testing.T) {
 	require.EqualValues(t, 93, entries[0].ContextMap()["content_length_gap_bytes"])
 	require.EqualValues(t, 25000, entries[0].ContextMap()["read_ms"])
 }
+
+func TestRequestBodyReadFailureKeepsBodyLimitMessageWithoutLogging(t *testing.T) {
+	log, logs := newObservedLogger(t)
+	status, message := requestBodyReadFailure(log, nil, &http.MaxBytesError{Limit: 2 << 20})
+	require.Equal(t, http.StatusRequestEntityTooLarge, status)
+	require.Equal(t, pkghttputil.BodyTooLargeMessage(2<<20), message)
+	require.Empty(t, logs.All())
+}

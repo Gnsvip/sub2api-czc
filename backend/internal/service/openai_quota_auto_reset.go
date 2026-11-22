@@ -46,6 +46,7 @@ type OpenAIAutoResetCreditState struct {
 	AvailableCount    int    `json:"available_count"`
 	CheckedAt         string `json:"checked_at,omitempty"`
 	LastResultAt      string `json:"last_result_at,omitempty"`
+	LastConfirmedAt   string `json:"last_confirmed_at,omitempty"`
 	ErrorCode         string `json:"error_code,omitempty"`
 	AttemptCycleHash  string `json:"attempt_cycle_hash,omitempty"`
 	AttemptCreditHash string `json:"attempt_credit_hash,omitempty"`
@@ -295,6 +296,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
 	}
 	if !needsQuery {
+		s.considerPostResetCooldown(account, state, now)
 		if !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
 			state.TriggerWindow = ""
 			state.ErrorCode = ""
@@ -347,6 +349,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	assessment = s.assessUsage(usage, account, config, now)
 	available := usage.RateLimitResetCredits.AvailableCount
 	if !assessment.resetReached {
+		s.considerPostResetCooldown(account, state, time.Now())
 		status := OpenAIAutoResetStatusNoCredit
 		if available > 0 {
 			status = OpenAIAutoResetStatusAvailable
@@ -470,7 +473,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		s.recordAudit(accountID, assessment, available, "no_credit", 0, noCredit.ErrorCode)
 		return s.persistState(ctx, accountID, noCredit)
 	}
-	if !strings.EqualFold(strings.TrimSpace(consumeResult.Code), "ok") || consumeResult.WindowsReset <= 0 {
+	if !consumeResult.confirmed() {
 		return s.failState(ctx, accountID, resetting, "OPENAI_AUTO_RESET_UNCONFIRMED", nil)
 	}
 	return s.finishReset(ctx, accountID, assessment, resetting, consumeResult)
@@ -478,6 +481,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 
 func (s *OpenAIQuotaAutoResetService) finishReset(ctx context.Context, accountID int64, assessment openAIAutoResetAssessment, resetting *OpenAIAutoResetCreditState, consumeResult openAIAutoResetConsumeResult) error {
 	available := resetting.AvailableCount
+	confirmedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	postCtx, cancelPost := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
 	post := RunOpenAIQuotaResetPostProcess(postCtx, accountID, s.quota, s.recoverer, s.accountRepo.GetByID)
 	cancelPost()
@@ -497,6 +501,7 @@ func (s *OpenAIQuotaAutoResetService) finishReset(ctx context.Context, accountID
 		AvailableCount:    max(0, available-1),
 		CheckedAt:         successAt,
 		LastResultAt:      successAt,
+		LastConfirmedAt:   confirmedAt,
 		AttemptCycleHash:  resetting.AttemptCycleHash,
 		AttemptCreditHash: resetting.AttemptCreditHash,
 	}
@@ -543,7 +548,7 @@ func (s *OpenAIQuotaAutoResetService) recoverCompletedReset(ctx context.Context,
 		return true, err
 	}
 	result := decodeOpenAIAutoResetConsumeResult(data)
-	if !strings.EqualFold(strings.TrimSpace(result.Code), "ok") || result.WindowsReset <= 0 {
+	if !result.confirmed() {
 		return false, nil
 	}
 	state.CheckedAt = time.Now().UTC().Format(time.RFC3339)
@@ -555,6 +560,27 @@ type openAIAutoResetConsumeResult struct {
 	// internal result must survive storage so recovery can replay it safely.
 	Code         string `json:"result"`
 	WindowsReset int    `json:"windows_reset"`
+}
+
+func (r openAIAutoResetConsumeResult) confirmed() bool {
+	code := strings.TrimSpace(r.Code)
+	return r.WindowsReset > 0 && (strings.EqualFold(code, "ok") || strings.EqualFold(code, "reset"))
+}
+
+// In-flight responses can reinstall the pre-reset quota cooldown after a
+// successful redemption. Reuse the ordinary 429 probe so a genuine new
+// limit is lifted only after a successful upstream check.
+func (s *OpenAIQuotaAutoResetService) considerPostResetCooldown(account *Account, state *OpenAIAutoResetCreditState, now time.Time) {
+	if state == nil || state.LastConfirmedAt == "" || account.RateLimitedAt == nil || !openAIAccountEligibleFor429RecoveryProbe(account, now) {
+		return
+	}
+	resetAt, err := time.Parse(time.RFC3339, state.LastConfirmedAt)
+	if err != nil || account.RateLimitedAt.Before(resetAt) || account.RateLimitedAt.After(resetAt.Add(openAIAutoResetSnapshotTTL)) {
+		return
+	}
+	if scheduler, ok := s.recoverer.(openAI429RecoveryScheduler); ok {
+		scheduler.ConsiderOpenAI429Recovery(account)
+	}
 }
 
 // Quota cooldowns are eligible for recovery, but explicit administrative pauses
@@ -824,6 +850,7 @@ func copyOpenAIAutoResetAttempt(target, source *OpenAIAutoResetCreditState) {
 	}
 	target.AttemptCycleHash = source.AttemptCycleHash
 	target.AttemptCreditHash = source.AttemptCreditHash
+	target.LastConfirmedAt = source.LastConfirmedAt
 }
 
 func (s *OpenAIQuotaAutoResetService) persistState(ctx context.Context, accountID int64, state *OpenAIAutoResetCreditState) error {

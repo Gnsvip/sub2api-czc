@@ -521,7 +521,7 @@ func TestSelectOpenAIAutoResetCandidate_StableForEqualExpiries(t *testing.T) {
 }
 
 func TestOpenAIQuotaAutoResetService_UnconfirmedResetDoesNotRecover(t *testing.T) {
-	for _, result := range []*OpenAIQuotaResetResult{{Code: "pending"}, {Code: "ok", WindowsReset: 0}} {
+	for _, result := range []*OpenAIQuotaResetResult{{Code: "pending", WindowsReset: 1}, {Code: "ok", WindowsReset: 0}, {Code: "reset", WindowsReset: 0}} {
 		svc, repo, quota := newAutoResetEvaluationTest()
 		quota.resetResult = result
 		require.Error(t, svc.evaluateAccount(context.Background(), repo.account.ID))
@@ -645,6 +645,7 @@ func (r *retryAutoResetRecoverer) RecoverAccountState(context.Context, int64, Ac
 func TestOpenAIQuotaAutoResetService_RetriesRecoveryAfterConsumedCardDisappears(t *testing.T) {
 	svc, repo, quota := newAutoResetEvaluationTest()
 	defer svc.Stop()
+	quota.resetResult = &OpenAIQuotaResetResult{Code: "reset", WindowsReset: 1}
 	recoverer := &retryAutoResetRecoverer{}
 	svc.recoverer = recoverer
 	require.Error(t, svc.evaluateAccount(context.Background(), repo.account.ID))
@@ -659,6 +660,41 @@ func TestOpenAIQuotaAutoResetService_RetriesRecoveryAfterConsumedCardDisappears(
 	require.Equal(t, 2, recoverer.calls)
 	require.EqualValues(t, 1, quota.resetCalls.Load(), "recovery replay must never consume another card")
 	require.Equal(t, OpenAIAutoResetStatusSuccess, openAIAutoResetStateFromExtra(repo.account.Extra).Status)
+}
+
+type autoResetProbeRecorder struct {
+	autoResetTestRecoverer
+	considerCallRecorder
+}
+
+func TestOpenAIQuotaAutoResetService_ProbesLateQuotaCooldownWithoutRedeemingAgain(t *testing.T) {
+	svc, repo, quota := newAutoResetEvaluationTest()
+	defer svc.Stop()
+	probes := &autoResetProbeRecorder{}
+	svc.recoverer = probes
+	ctx := context.Background()
+	quota.resetResult = &OpenAIQuotaResetResult{Code: "reset", WindowsReset: 1}
+	require.NoError(t, svc.evaluateAccount(ctx, repo.account.ID))
+	state := openAIAutoResetStateFromExtra(repo.account.Extra)
+	require.Equal(t, OpenAIAutoResetStatusSuccess, state.Status)
+	require.NotEmpty(t, state.LastConfirmedAt)
+
+	now := time.Now()
+	until := now.Add(5 * 24 * time.Hour)
+	repo.account.RateLimitedAt, repo.account.RateLimitResetAt = &now, &until
+	quota.usage.RateLimit.PrimaryWindow.UsedPercent = 0
+	quota.usage.RateLimit.SecondaryWindow = &OpenAIRateLimitWindow{
+		UsedPercent: 0, LimitWindowSeconds: 7 * 24 * 60 * 60, ResetAt: now.Add(7 * 24 * time.Hour).Unix(),
+	}
+	require.NoError(t, svc.evaluateAccount(ctx, repo.account.ID))
+	require.Equal(t, []int64{repo.account.ID}, probes.accountIDs)
+	require.EqualValues(t, 1, quota.resetCalls.Load())
+	require.Equal(t, state.LastConfirmedAt, openAIAutoResetStateFromExtra(repo.account.Extra).LastConfirmedAt)
+
+	earlier := now.Add(-time.Hour)
+	repo.account.RateLimitedAt = &earlier
+	require.NoError(t, svc.evaluateAccount(ctx, repo.account.ID))
+	require.Len(t, probes.accountIDs, 1, "an unrelated cooldown must remain intact")
 }
 
 func TestOpenAIQuotaAutoResetService_RequiresStableUpstreamWindowBoundary(t *testing.T) {
